@@ -20,6 +20,13 @@ TEST(KnuthMorrisPrattFailureFunction, ShortestCommonSuperstring) {
     vault::algorithm::knuth_morris_pratt_failure_function("abcdabd"sv);
 
   EXPECT_EQ(observed_failure_function, expected_failure_function);
+
+  expected_failure_function = std::vector { 0, 0, 1, 2, 0, 1, 2, 3, 4 };
+
+  observed_failure_function =
+    vault::algorithm::knuth_morris_pratt_failure_function("ababcabab"sv);
+
+  EXPECT_EQ(observed_failure_function, expected_failure_function);  
 }
 
 TEST(KnuthMorrisPrattSearcher, ShortestCommonSuperstring) {
