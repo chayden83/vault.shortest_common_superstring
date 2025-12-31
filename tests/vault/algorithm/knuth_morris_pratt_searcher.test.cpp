@@ -44,4 +44,11 @@ TEST(KnuthMorrisPrattSearcher, ShortestCommonSuperstring) {
   EXPECT_EQ(bar_pos, (std::next(haystack.begin(), 3)));
 }
 
+TEST(KnuthMorrisPrattOverlap, ShortestCommonSuperstring) {
+  auto result = vault::algorithm::knuth_morris_pratt_overlap
+    ("foobar"sv, "barstool"sv);
+
+  EXPECT_EQ(result.score, 3);
+}
+
 // clang-format on

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+find_package(Boost COMPONENTS headers REQUIRED)
+
 vault_add_header_only_library(vault.shortest_common_superstring)
 
 target_sources(
@@ -11,6 +13,12 @@ target_sources(
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/knuth_morris_pratt_searcher.hpp
 )
 
+target_link_libraries(
+  vault.shortest_common_superstring
+  INTERFACE
+    Boost::headers
+)
+  
 vault_add_library(vault.shortest_common_superstring.internal)
 
 target_sources(

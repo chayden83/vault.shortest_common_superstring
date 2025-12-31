@@ -40,11 +40,98 @@ namespace vault::algorithm {
     }
   } const knuth_morris_pratt_failure_function { };
 
+  constexpr inline struct knuth_morris_pratt_overlap_fn {
+    template<std::forward_iterator ILHS, std::forward_iterator IRHS>
+    struct result {
+      std::iter_difference_t<IRHS> score;
+
+      ILHS lhs_first;
+      ILHS lhs_last;
+
+      IRHS rhs_first;
+      IRHS rhs_last;
+
+      std::vector<int> failure_table;
+    };
+
+    template<std::forward_iterator ILHS, std::sentinel_for<ILHS> SLHS,
+	     std::forward_iterator IRHS, std::sentinel_for<IRHS> SRHS>
+      requires std::equality_comparable_with
+	<std::iter_reference_t<ILHS>, std::iter_reference_t<IRHS>>
+    [[nodiscard]] static constexpr result<ILHS, IRHS> operator ()
+      (ILHS lhs_first, SLHS lhs_last, IRHS rhs_first, SRHS rhs_last, std::vector<int> failure_table)
+    {
+      auto rhs_index = std::iter_difference_t<IRHS> { 0 };
+
+      auto lhs_length = std::ranges::distance(lhs_first, lhs_last);
+      auto rhs_length = std::ranges::distance(rhs_first, rhs_last);
+
+      auto lhs_cursor = lhs_first;
+      
+      for(lhs_cursor; lhs_cursor != lhs_last; ++lhs_cursor) {
+        while (rhs_index > 0) {
+	  if(rhs_index != rhs_length && *lhs_cursor == rhs_first[rhs_index]) {
+	    break;
+	  }
+	  
+	  rhs_index = failure_table[rhs_index - 1];
+        }
+	
+        if (*lhs_cursor == rhs_first[rhs_index]) {
+	  rhs_index++;
+        }
+      }
+
+      return {
+	rhs_index,
+	std::next(lhs_first, lhs_length - rhs_index),
+	lhs_cursor,
+	rhs_first,
+	std::next(rhs_first, rhs_index),
+	std::move(failure_table)
+      };
+    }
+
+    template<std::forward_iterator ILHS, std::sentinel_for<ILHS> SLHS,
+	     std::forward_iterator IRHS, std::sentinel_for<IRHS> SRHS>
+      requires std::equality_comparable_with
+	<std::iter_reference_t<ILHS>, std::iter_reference_t<IRHS>>
+    [[nodiscard]] static constexpr result<ILHS, IRHS> operator ()
+      (ILHS lhs_first, SLHS lhs_last, IRHS rhs_first, SRHS rhs_last)
+    {
+      auto failure_table = knuth_morris_pratt_failure_function(rhs_first, rhs_last);
+
+      return operator ()
+	(lhs_first, lhs_last, rhs_first, rhs_last, std::move(failure_table));
+    }
+
+    template<std::ranges::forward_range LHS, std::ranges::forward_range RHS>
+      requires std::equality_comparable_with
+	<std::ranges::range_reference_t<LHS>, std::ranges::range_reference_t<RHS>>
+    [[nodiscard]] static constexpr auto operator ()(LHS &&lhs, RHS &&rhs, std::vector<int> failure_function) ->
+      result<std::ranges::iterator_t<LHS>, std::ranges::iterator_t<RHS>>
+    {
+      return operator ()(std::ranges::begin(lhs), std::ranges::end(lhs),
+			 std::ranges::begin(rhs), std::ranges::end(rhs),
+			 std::move(failure_function));
+    }    
+
+    template<std::ranges::forward_range LHS, std::ranges::forward_range RHS>
+      requires std::equality_comparable_with
+	<std::ranges::range_reference_t<LHS>, std::ranges::range_reference_t<RHS>>
+    [[nodiscard]] static constexpr auto operator ()(LHS &&lhs, RHS &&rhs) ->
+      result<std::ranges::iterator_t<LHS>, std::ranges::iterator_t<RHS>>
+    {
+      return operator ()(std::ranges::begin(lhs), std::ranges::end(lhs),
+			 std::ranges::begin(rhs), std::ranges::end(rhs));
+    }    
+  } const knuth_morris_pratt_overlap { };
+
   template <std::ranges::random_access_range Pattern>
     requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
   class knuth_morris_pratt_searcher {
     Pattern m_pattern;
-    std::vector<int> m_failure_function;
+    std::vector<int> m_failure_function; // TODO: Permit any contiguous range.
 
   public:
     [[nodiscard]] constexpr knuth_morris_pratt_searcher(Pattern pattern, std::vector<int> failure_function)
@@ -58,10 +145,8 @@ namespace vault::algorithm {
     { }
 
     template<std::forward_iterator I, std::sentinel_for<I> S>
-      requires std::equality_comparable_with<
-	std::iter_reference_t<I>,
-	std::ranges::range_reference_t<Pattern>
-      >
+      requires std::equality_comparable_with
+	<std::iter_reference_t<I>, std::ranges::range_reference_t<Pattern>>
     [[nodiscard]] constexpr std::pair<I, I> operator ()(I first, S last) const {
       if(std::ranges::empty(m_pattern)) {
 	return { first, first };
@@ -99,10 +184,8 @@ namespace vault::algorithm {
     }
 
     template<std::ranges::forward_range Data>
-      requires std::equality_comparable_with<
-	std::ranges::range_reference_t<Data>,
-	std::ranges::range_reference_t<Pattern>
-      >
+      requires std::equality_comparable_with
+	<std::ranges::range_reference_t<Data>, std::ranges::range_reference_t<Pattern>>
     [[nodiscard]] constexpr
       std::pair<std::ranges::iterator_t<Data>, std::ranges::iterator_t<Data>>
     operator ()(Data &&data) const {
