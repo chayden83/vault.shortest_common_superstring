@@ -9,46 +9,35 @@ FetchContent_Declare(googlebench
   EXCLUDE_FROM_ALL
 )
 
-FetchContent_Declare(tsl.robin-map
-  GIT_REPOSITORY https://github.com/Tessil/robin-map.git
-  GIT_TAG        v1.4.0 # Most recent release as of Sep. 2025
-  EXCLUDE_FROM_ALL
-)
-
 FetchContent_MakeAvailable(googlebench)
-FetchContent_MakeAvailable(tsl.robin-map)
 
 set(ALL_BENCHMARKS
-  baseline
-  std.unordered_map
-  tsl.robin_map
 )
 
 message(STATUS "${PROJECT_NAME}: Benchmarks to be built: ${ALL_BENCHMARKS}")
 
-add_custom_target(vault.histogram_algorithm.benchmarks)
+add_custom_target(vault.shortest_common_superstring.benchmarks)
 
 foreach(benchmark ${ALL_BENCHMARKS})
-  add_executable(vault.histogram_algorithm.benchmarks.${benchmark}.exe)
+  add_executable(vault.shortest_common_superstring.benchmarks.${benchmark}.exe)
   
-  target_sources(vault.histogram_algorithm.benchmarks.${benchmark}.exe PRIVATE
+  target_sources(vault.shortest_common_superstring.benchmarks.${benchmark}.exe PRIVATE
     benchmarks.${benchmark}.cpp
   )
 
-  target_link_libraries(vault.histogram_algorithm.benchmarks.${benchmark}.exe PRIVATE
-    tsl::robin_map
+  target_link_libraries(vault.shortest_common_superstring.benchmarks.${benchmark}.exe PRIVATE
     benchmark::benchmark
     benchmark::benchmark_main
-    vault::histogram_algorithm
-    vault::histogram_algorithm.internal
+    vault::shortest_common_superstring
+    vault::shortest_common_superstring.internal
   )
 
-  add_custom_target(vault.histogram_algorithm.benchmarks.${benchmark}
-    COMMAND vault.histogram_algorithm.benchmarks.${benchmark}.exe
+  add_custom_target(vault.shortest_common_superstring.benchmarks.${benchmark}
+    COMMAND vault.shortest_common_superstring.benchmarks.${benchmark}.exe
   )
 
-  add_dependencies(vault.histogram_algorithm.benchmarks
-    vault.histogram_algorithm.benchmarks.${benchmark}
+  add_dependencies(vault.shortest_common_superstring.benchmarks
+    vault.shortest_common_superstring.benchmarks.${benchmark}
   )
 endforeach()
 
@@ -61,6 +50,6 @@ if(PROJECT_IS_TOP_LEVEL)
     add_custom_target(benchmarks)
   endif()
 
-  add_dependencies(vault.benchmarks vault.histogram_algorithm.benchmarks)
-  add_dependencies(      benchmarks                     vault.benchmarks)
+  add_dependencies(vault.benchmarks vault.shortest_common_superstring.benchmarks)
+  add_dependencies(      benchmarks                             vault.benchmarks)
 endif()
