@@ -169,13 +169,11 @@ namespace vault::algorithm {
       
       auto pattern_index = 0;
 
-      auto const pattern_first = std::ranges::begin(m_pattern);
-      auto const pattern_last  = std::ranges::end  (m_pattern);
-
-      auto const pattern_length = std::ranges::distance
-	(pattern_first, pattern_last);
-
+      auto pattern_first  = std::ranges::begin(m_pattern);
       auto pattern_cursor = std::next(pattern_first, pattern_index);
+
+      auto pattern_length = std::ranges::distance
+	(pattern_first, std::ranges::end(m_pattern));
 
       for(auto current = first; current != last; ++current) {
 	// Backtrack until we find a match.
