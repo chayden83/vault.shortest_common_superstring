@@ -108,6 +108,7 @@ namespace vault::algorithm {
   };
 
   template<std::ranges::forward_range Pattern>
+    requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
   knuth_morris_pratt_searcher(Pattern &&pattern) ->
     knuth_morris_pratt_searcher<std::remove_cvref_t<Pattern>>;
 }
