@@ -82,14 +82,14 @@ namespace vault::algorithm {
       
       for(lhs_cursor; lhs_cursor != lhs_last; ++lhs_cursor) {
         while (rhs_index > 0) {
-	  if(rhs_index != rhs_length && *lhs_cursor == rhs_first[rhs_index]) {
+	  if(rhs_index != rhs_length && *lhs_cursor == *std::next(rhs_first, rhs_index)) {
 	    break;
 	  }
 	  
 	  rhs_index = failure_table[rhs_index - 1];
         }
 	
-        if (*lhs_cursor == rhs_first[rhs_index]) {
+        if (*lhs_cursor == *std::next(rhs_first, rhs_index)) {
 	  rhs_index++;
         }
       }
