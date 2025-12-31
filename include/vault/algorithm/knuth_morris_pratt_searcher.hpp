@@ -90,7 +90,7 @@ namespace vault::algorithm {
     }
   };
 
-  template<std::ranges::random_access_range Pattern>
+  template<std::ranges::forward_range Pattern>
   knuth_morris_pratt_searcher(Pattern &&pattern) ->
     knuth_morris_pratt_searcher<std::remove_cvref_t<Pattern>>;
 }
