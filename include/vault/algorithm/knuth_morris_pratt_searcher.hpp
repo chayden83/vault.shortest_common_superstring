@@ -3,9 +3,9 @@
 #ifndef VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 #define VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 
-#include <iterator>
 #include <ranges>
 #include <vector>
+#include <iterator>
 
 // clang-format off
 
