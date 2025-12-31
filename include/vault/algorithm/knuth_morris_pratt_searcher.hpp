@@ -58,7 +58,10 @@ namespace vault::algorithm {
     { }
 
     template<std::forward_iterator I, std::sentinel_for<I> S>
-      requires std::equality_comparable_with<std::iter_reference_t<I>, std::ranges::range_reference_t<Pattern>>
+      requires std::equality_comparable_with<
+	std::iter_reference_t<I>,
+	std::ranges::range_reference_t<Pattern>
+      >
     [[nodiscard]] constexpr std::pair<I, I> operator ()(I first, S last) const {
       if(std::ranges::empty(m_pattern)) {
 	return { first, first };
