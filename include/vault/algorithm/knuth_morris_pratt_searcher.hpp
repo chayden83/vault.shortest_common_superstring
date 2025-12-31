@@ -10,30 +10,32 @@
 // clang-format off
 
 namespace vault::algorithm {
-  template<std::forward_iterator I, std::sentinel_for<I> S>
-  [[nodiscard]] constexpr std::vector<int> knuth_morris_pratt_failure_function(I first, S last) {
-    auto length_of_pattern = std::ranges::distance(first, last);
-    auto length_of_previous_longest_prefix = 0;
-
-    auto failure_function = std::vector<int>(length_of_pattern, 0);
-
-    for(auto i = 1; i < length_of_pattern; ) {
-      if(*std::ranges::next(first, i) == *std::ranges::next(first, length_of_previous_longest_prefix)) {
-	failure_function[i++] = ++length_of_previous_longest_prefix;
-      } else if(length_of_previous_longest_prefix != 0) {
-	length_of_previous_longest_prefix = failure_function[length_of_previous_longest_prefix - 1];
-      } else {
-	failure_function[i++] = 0;
+  constexpr inline struct knuth_morris_pratt_failure_function_fn {
+    template<std::forward_iterator I, std::sentinel_for<I> S>
+    [[nodiscard]] static constexpr std::vector<int> operator ()(I first, S last) {
+      auto length_of_pattern = std::ranges::distance(first, last);
+      auto length_of_previous_longest_prefix = 0;
+      
+      auto failure_function = std::vector<int>(length_of_pattern, 0);
+      
+      for(auto i = 1; i < length_of_pattern; ) {
+	if(*std::ranges::next(first, i) == *std::ranges::next(first, length_of_previous_longest_prefix)) {
+	  failure_function[i++] = ++length_of_previous_longest_prefix;
+	} else if(length_of_previous_longest_prefix != 0) {
+	  length_of_previous_longest_prefix = failure_function[length_of_previous_longest_prefix - 1];
+	} else {
+	  failure_function[i++] = 0;
+	}
       }
+      
+      return failure_function;
     }
-
-    return failure_function;
-  }
-
-  template<std::ranges::forward_range Pattern>
-  [[nodiscard]] constexpr std::vector<int> knuth_morris_pratt_failure_function(Pattern &&pattern) {
-    return knuth_morris_pratt_failure_function(std::ranges::begin(pattern), std::ranges::end(pattern));
-  }
+    
+    template<std::ranges::forward_range Pattern>
+    [[nodiscard]] static constexpr std::vector<int> operator ()(Pattern &&pattern) {
+      return operator ()(std::ranges::begin(pattern), std::ranges::end(pattern));
+    }
+  } const knuth_morris_pratt_failure_function { };
 
   template <std::ranges::random_access_range Pattern>
     requires std::ranges::sized_range<Pattern>
