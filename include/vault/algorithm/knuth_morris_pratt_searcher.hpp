@@ -175,18 +175,23 @@ namespace vault::algorithm {
       auto const pattern_length = std::ranges::distance
 	(pattern_first, pattern_last);
 
+      auto pattern_cursor = std::next(pattern_first, pattern_index);
+
       for(auto current = first; current != last; ++current) {
 	// Backtrack until we find a match.
-	while (pattern_index > 0 && *current != *std::next(pattern_first, pattern_index)) {
-	  pattern_index = m_failure_table[pattern_index - 1];
+	while (pattern_index > 0 && *current != *pattern_cursor) {
+	  pattern_index  = m_failure_table[pattern_index - 1];
+	  pattern_cursor = std::next(pattern_first, pattern_index);
 	}
 	
-	// If match found, increment pattern index.
-	if(*current == *std::next(pattern_first, pattern_index)) {
-	  pattern_index++;
+	// If match found, move to the next "character" of the
+	// pattern.
+	if(*current == *pattern_cursor) {
+	  ++pattern_index;
+	  ++pattern_cursor;
 	}
 	
-	// Check if complete pattern has been matched.
+	// We are done if the complete pattern has been matched.
 	if(pattern_index == pattern_length) {
 	  auto match_first = std::ranges::next
 	    (first, std::ranges::distance(first, current) - pattern_length + 1);
