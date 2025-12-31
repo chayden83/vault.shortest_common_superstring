@@ -11,6 +11,7 @@ target_sources(
       BASE_DIRS ${PROJECT_SOURCE_DIR}/include
       FILES
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/knuth_morris_pratt_searcher.hpp
+        ${PROJECT_SOURCE_DIR}/include/vault/algorithm/knuth_morris_pratt_failure_function.hpp
 )
 
 target_link_libraries(

@@ -8,47 +8,11 @@
 #include <concepts>
 #include <iterator>
 
+#include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
+
 // clang-format off
 
 namespace vault::algorithm {
-  template<typename T>
-  concept knuth_morris_pratt_failure_table = true
-    && std::copy_constructible<T>
-    && std::ranges::random_access_range<T>
-    && std::integral<std::ranges::range_value_t<T>>;
-
-  /**
-   * @todo Add overloads that accept an output iterator and/or a sink.
-   */
-  constexpr inline struct knuth_morris_pratt_failure_function_fn {
-    template<std::forward_iterator I, std::sentinel_for<I> S>
-      requires std::equality_comparable<std::iter_reference_t<I>>
-    [[nodiscard]] static constexpr std::vector<int> operator ()(I first, S last) {
-      auto length_of_pattern = std::ranges::distance(first, last);
-      auto length_of_previous_longest_prefix = 0;
-      
-      auto failure_function = std::vector<int>(length_of_pattern, 0);
-      
-      for(auto i = 1; i < length_of_pattern; ) {
-	if(*std::ranges::next(first, i) == *std::ranges::next(first, length_of_previous_longest_prefix)) {
-	  failure_function[i++] = ++length_of_previous_longest_prefix;
-	} else if(length_of_previous_longest_prefix != 0) {
-	  length_of_previous_longest_prefix = failure_function[length_of_previous_longest_prefix - 1];
-	} else {
-	  failure_function[i++] = 0;
-	}
-      }
-      
-      return failure_function;
-    }
-    
-    template<std::ranges::forward_range Pattern>
-      requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
-    [[nodiscard]] static constexpr std::vector<int> operator ()(Pattern &&pattern) {
-      return operator ()(std::ranges::begin(pattern), std::ranges::end(pattern));
-    }
-  } const knuth_morris_pratt_failure_function { };
-
   constexpr inline struct knuth_morris_pratt_overlap_fn {
     template<std::forward_iterator ILHS,
 	     std::forward_iterator IRHS,
@@ -167,24 +131,23 @@ namespace vault::algorithm {
 	return { first, first };
       }
       
-      auto pattern_index = 0;
-
+      auto pattern_index  = 0;
       auto pattern_first  = std::ranges::begin(m_pattern);
       auto pattern_cursor = std::next(pattern_first, pattern_index);
 
       auto pattern_length = std::ranges::distance
 	(pattern_first, std::ranges::end(m_pattern));
 
-      for(auto current = first; current != last; ++current) {
+      for(auto cursor = first; cursor != last; ++cursor) {
 	// Backtrack until we find a match.
-	while (pattern_index > 0 && *current != *pattern_cursor) {
+	while (pattern_index > 0 && *cursor != *pattern_cursor) {
 	  pattern_index  = m_failure_table[pattern_index - 1];
 	  pattern_cursor = std::next(pattern_first, pattern_index);
 	}
 	
 	// If match found, move to the next "character" of the
 	// pattern.
-	if(*current == *pattern_cursor) {
+	if(*cursor == *pattern_cursor) {
 	  ++pattern_index;
 	  ++pattern_cursor;
 	}
@@ -192,9 +155,9 @@ namespace vault::algorithm {
 	// We are done if the complete pattern has been matched.
 	if(pattern_index == pattern_length) {
 	  auto match_first = std::ranges::next
-	    (first, std::ranges::distance(first, current) - pattern_length + 1);
+	    (first, std::ranges::distance(first, cursor) - pattern_length + 1);
 
-	  return { std::move(match_first), std::ranges::next(current) };
+	  return { std::move(match_first), std::ranges::next(cursor) };
 	}
       }
       
