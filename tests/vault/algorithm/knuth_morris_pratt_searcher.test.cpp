@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <string_view>
 
+#include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
 
 // clang-format off

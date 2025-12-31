@@ -8,7 +8,6 @@
 #include <concepts>
 #include <iterator>
 
-#include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
 
 // clang-format off
