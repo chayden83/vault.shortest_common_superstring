@@ -3,6 +3,7 @@
 #ifndef VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 #define VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 
+#include <concepts>
 #include <ranges>
 #include <vector>
 #include <iterator>
@@ -12,6 +13,7 @@
 namespace vault::algorithm {
   constexpr inline struct knuth_morris_pratt_failure_function_fn {
     template<std::forward_iterator I, std::sentinel_for<I> S>
+      requires std::equality_comparable<std::iter_reference_t<I>>
     [[nodiscard]] static constexpr std::vector<int> operator ()(I first, S last) {
       auto length_of_pattern = std::ranges::distance(first, last);
       auto length_of_previous_longest_prefix = 0;
@@ -32,6 +34,7 @@ namespace vault::algorithm {
     }
     
     template<std::ranges::forward_range Pattern>
+      requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
     [[nodiscard]] static constexpr std::vector<int> operator ()(Pattern &&pattern) {
       return operator ()(std::ranges::begin(pattern), std::ranges::end(pattern));
     }

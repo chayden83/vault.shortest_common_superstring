@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <gtest/gtest.h>
+
 #include <list>
 #include <iterator>
 #include <algorithm>
 #include <string_view>
-
-#include <gtest/gtest.h>
 
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
 
