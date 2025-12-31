@@ -67,18 +67,22 @@ namespace vault::algorithm {
 	(pattern_first, pattern_last);
 
       for(auto current = first; current != last; ++current) {
+	// Backtrack until we find a match.
 	while (pattern_index > 0 && *current != *std::next(pattern_first, pattern_index)) {
 	  pattern_index = m_failure_function[pattern_index - 1];
 	}
 	
-	// If match found, increment pattern index
+	// If match found, increment pattern index.
 	if (*current == *std::next(pattern_first, pattern_index)) {
 	  pattern_index++;
 	}
 	
-	// Check if complete pattern has been matched
+	// Check if complete pattern has been matched.
 	if (pattern_index == pattern_length) {
-	  return { std::ranges::prev(current, pattern_length - 1), std::ranges::next(current) };
+	  auto match_first = std::ranges::next
+	    (first, std::ranges::distance(first, current) - pattern_length + 1);
+
+	  return { std::move(match_first), std::ranges::next(current) };
 	}
       }
       

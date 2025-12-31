@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <print>
+#include <list>
 #include <iterator>
 #include <algorithm>
 #include <string_view>
@@ -35,7 +35,7 @@ TEST(KnuthMorrisPrattSearcher, ShortestCommonSuperstring) {
   auto const bar_searcher =
     vault::algorithm::knuth_morris_pratt_searcher("bar"sv);
 
-  static constinit auto haystack = "foobar"sv;
+  auto const haystack = std::list { 'f', 'o', 'o', 'b', 'a', 'r' };
 
   auto foo_pos = std::search(haystack.begin(), haystack.end(), foo_searcher);
   auto bar_pos = std::search(haystack.begin(), haystack.end(), bar_searcher);
