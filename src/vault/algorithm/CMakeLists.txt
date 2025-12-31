@@ -1,5 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+FetchContent_Declare(range-v3
+  GIT_REPOSITORY https://github.com/ericniebler/range-v3.git
+  GIT_TAG 0.12.0
+  EXCLUDE_FROM_ALL
+)
+
+FetchContent_MakeAvailable(range-v3)
+
 find_package(Boost COMPONENTS headers REQUIRED)
 
 vault_add_header_only_library(vault.shortest_common_superstring)
@@ -17,8 +25,9 @@ target_sources(
 
 target_link_libraries(
   vault.shortest_common_superstring
-  INTERFACE
-    Boost::headers
+    INTERFACE
+      Boost::headers
+      range-v3::range-v3
 )
   
 vault_add_library(vault.shortest_common_superstring.internal)
