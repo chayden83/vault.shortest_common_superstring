@@ -3,9 +3,9 @@
 #ifndef VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 #define VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 
-#include <concepts>
 #include <ranges>
 #include <vector>
+#include <concepts>
 #include <iterator>
 
 // clang-format off
@@ -41,7 +41,7 @@ namespace vault::algorithm {
   } const knuth_morris_pratt_failure_function { };
 
   template <std::ranges::random_access_range Pattern>
-    requires std::ranges::sized_range<Pattern>
+    requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
   class knuth_morris_pratt_searcher {
     Pattern m_pattern;
     std::vector<int> m_failure_function;
@@ -58,8 +58,9 @@ namespace vault::algorithm {
     { }
 
     template<std::forward_iterator I, std::sentinel_for<I> S>
+      requires std::equality_comparable_with<std::iter_reference_t<I>, std::ranges::range_reference_t<Pattern>>
     [[nodiscard]] constexpr std::pair<I, I> operator ()(I first, S last) const {
-      if (std::ranges::empty(m_pattern)) {
+      if(std::ranges::empty(m_pattern)) {
 	return { first, first };
       }
       
@@ -78,12 +79,12 @@ namespace vault::algorithm {
 	}
 	
 	// If match found, increment pattern index.
-	if (*current == *std::next(pattern_first, pattern_index)) {
+	if(*current == *std::next(pattern_first, pattern_index)) {
 	  pattern_index++;
 	}
 	
 	// Check if complete pattern has been matched.
-	if (pattern_index == pattern_length) {
+	if(pattern_index == pattern_length) {
 	  auto match_first = std::ranges::next
 	    (first, std::ranges::distance(first, current) - pattern_length + 1);
 
@@ -92,6 +93,17 @@ namespace vault::algorithm {
       }
       
       return { last, last };
+    }
+
+    template<std::ranges::forward_range Data>
+      requires std::equality_comparable_with<
+	std::ranges::range_reference_t<Data>,
+	std::ranges::range_reference_t<Pattern>
+      >
+    [[nodiscard]] constexpr
+      std::pair<std::ranges::iterator_t<Data>, std::ranges::iterator_t<Data>>
+    operator ()(Data &&data) const {
+      return operator ()(std::ranges::begin(data), std::ranges::end(data));
     }
   };
 
