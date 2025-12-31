@@ -54,7 +54,35 @@ namespace vault::algorithm {
 
     template<std::forward_iterator I, std::sentinel_for<I> S>
     [[nodiscard]] constexpr std::pair<I, I> operator ()(I first, S last) const {
-      return { }; // TODO
+      if (std::ranges::empty(m_pattern)) {
+	return { first, first };
+      }
+      
+      auto pattern_index = 0;
+
+      auto const pattern_first = std::ranges::begin(m_pattern);
+      auto const pattern_last  = std::ranges::end  (m_pattern);
+
+      auto const pattern_length = std::ranges::distance
+	(pattern_first, pattern_last);
+
+      for(auto current = first; current != last; ++current) {
+	while (pattern_index > 0 && *current != *std::next(pattern_first, pattern_index)) {
+	  pattern_index = m_failure_function[pattern_index - 1];
+	}
+	
+	// If match found, increment pattern index
+	if (*current == *std::next(pattern_first, pattern_index)) {
+	  pattern_index++;
+	}
+	
+	// Check if complete pattern has been matched
+	if (pattern_index == pattern_length) {
+	  return { std::ranges::prev(current, pattern_length - 1), std::ranges::next(current) };
+	}
+      }
+      
+      return { last, last };
     }
   };
 
