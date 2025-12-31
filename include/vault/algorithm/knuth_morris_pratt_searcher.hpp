@@ -11,6 +11,15 @@
 // clang-format off
 
 namespace vault::algorithm {
+  template<typename T>
+  concept knuth_morris_pratt_failure_table = true
+    && std::copy_constructible<T>
+    && std::ranges::random_access_range<T>
+    && std::integral<std::ranges::range_value_t<T>>;
+
+  /**
+   * @todo Add overloads that accept an output iterator and/or a sink.
+   */
   constexpr inline struct knuth_morris_pratt_failure_function_fn {
     template<std::forward_iterator I, std::sentinel_for<I> S>
       requires std::equality_comparable<std::iter_reference_t<I>>
@@ -41,7 +50,9 @@ namespace vault::algorithm {
   } const knuth_morris_pratt_failure_function { };
 
   constexpr inline struct knuth_morris_pratt_overlap_fn {
-    template<std::forward_iterator ILHS, std::forward_iterator IRHS>
+    template<std::forward_iterator ILHS,
+	     std::forward_iterator IRHS,
+	     knuth_morris_pratt_failure_table FailureTable = std::vector<int>>
     struct result {
       std::iter_difference_t<IRHS> score;
 
@@ -51,15 +62,16 @@ namespace vault::algorithm {
       IRHS rhs_first;
       IRHS rhs_last;
 
-      std::vector<int> failure_table;
+      FailureTable failure_table;
     };
 
     template<std::forward_iterator ILHS, std::sentinel_for<ILHS> SLHS,
-	     std::forward_iterator IRHS, std::sentinel_for<IRHS> SRHS>
+	     std::forward_iterator IRHS, std::sentinel_for<IRHS> SRHS,
+	     knuth_morris_pratt_failure_table FailureTable>
       requires std::equality_comparable_with
 	<std::iter_reference_t<ILHS>, std::iter_reference_t<IRHS>>
-    [[nodiscard]] static constexpr result<ILHS, IRHS> operator ()
-      (ILHS lhs_first, SLHS lhs_last, IRHS rhs_first, SRHS rhs_last, std::vector<int> failure_table)
+    [[nodiscard]] static constexpr result<ILHS, IRHS, FailureTable> operator ()
+      (ILHS lhs_first, SLHS lhs_last, IRHS rhs_first, SRHS rhs_last, FailureTable &&failure_table)
     {
       auto rhs_index = std::iter_difference_t<IRHS> { 0 };
 
@@ -105,15 +117,17 @@ namespace vault::algorithm {
 	(lhs_first, lhs_last, rhs_first, rhs_last, std::move(failure_table));
     }
 
-    template<std::ranges::forward_range LHS, std::ranges::forward_range RHS>
+    template<std::ranges::forward_range LHS,
+	     std::ranges::forward_range RHS,
+	     knuth_morris_pratt_failure_table FailureTable>
       requires std::equality_comparable_with
 	<std::ranges::range_reference_t<LHS>, std::ranges::range_reference_t<RHS>>
-    [[nodiscard]] static constexpr auto operator ()(LHS &&lhs, RHS &&rhs, std::vector<int> failure_function) ->
-      result<std::ranges::iterator_t<LHS>, std::ranges::iterator_t<RHS>>
+    [[nodiscard]] static constexpr auto operator ()(LHS &&lhs, RHS &&rhs, FailureTable &&failure_table) ->
+      result<std::ranges::iterator_t<LHS>, std::ranges::iterator_t<RHS>, FailureTable>
     {
       return operator ()(std::ranges::begin(lhs), std::ranges::end(lhs),
 			 std::ranges::begin(rhs), std::ranges::end(rhs),
-			 std::move(failure_function));
+			 std::forward<FailureTable>(failure_table));
     }    
 
     template<std::ranges::forward_range LHS, std::ranges::forward_range RHS>
@@ -127,21 +141,22 @@ namespace vault::algorithm {
     }    
   } const knuth_morris_pratt_overlap { };
 
-  template <std::ranges::random_access_range Pattern>
+  template <std::ranges::random_access_range Pattern,
+	    knuth_morris_pratt_failure_table FailureTable = std::vector<int>>
     requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
   class knuth_morris_pratt_searcher {
-    Pattern m_pattern;
-    std::vector<int> m_failure_function; // TODO: Permit any contiguous range.
+    Pattern      m_pattern;
+    FailureTable m_failure_table;
 
   public:
-    [[nodiscard]] constexpr knuth_morris_pratt_searcher(Pattern pattern, std::vector<int> failure_function)
+    [[nodiscard]] constexpr knuth_morris_pratt_searcher(Pattern pattern, FailureTable failure_table)
       : m_pattern { std::move(pattern) }
-      , m_failure_function { std::move(failure_function) }
+      , m_failure_table { std::move(failure_table) }
     { }
 
     [[nodiscard]] constexpr knuth_morris_pratt_searcher(Pattern pattern)
       : m_pattern { std::move(pattern) }
-      , m_failure_function { knuth_morris_pratt_failure_function(m_pattern) }
+      , m_failure_table { knuth_morris_pratt_failure_function(m_pattern) }
     { }
 
     template<std::forward_iterator I, std::sentinel_for<I> S>
@@ -163,7 +178,7 @@ namespace vault::algorithm {
       for(auto current = first; current != last; ++current) {
 	// Backtrack until we find a match.
 	while (pattern_index > 0 && *current != *std::next(pattern_first, pattern_index)) {
-	  pattern_index = m_failure_function[pattern_index - 1];
+	  pattern_index = m_failure_table[pattern_index - 1];
 	}
 	
 	// If match found, increment pattern index.
@@ -193,9 +208,15 @@ namespace vault::algorithm {
     }
   };
 
+  template<std::ranges::forward_range Pattern,
+	   knuth_morris_pratt_failure_table FailureTable>
+    requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
+  knuth_morris_pratt_searcher(Pattern &&, FailureTable &&) ->
+    knuth_morris_pratt_searcher<std::remove_cvref_t<Pattern>, std::remove_cvref_t<FailureTable>>;
+
   template<std::ranges::forward_range Pattern>
     requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
-  knuth_morris_pratt_searcher(Pattern &&pattern) ->
+  knuth_morris_pratt_searcher(Pattern &&) ->
     knuth_morris_pratt_searcher<std::remove_cvref_t<Pattern>>;
 }
 
