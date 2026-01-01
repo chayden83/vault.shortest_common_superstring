@@ -3,6 +3,7 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
+#include <span>
 #include <tuple>
 #include <string>
 #include <ranges>
@@ -24,6 +25,7 @@
 
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
+#include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
 
 // clang-format off
 
@@ -47,7 +49,9 @@ namespace vault::algorithm {
     static constexpr inline auto const filter_fn = []
       (auto const &parameters) -> bool
     {
-      auto const &[needle, haystack, searcher] = parameters;
+      auto const &[needle, haystack, failure_table] = parameters;
+
+      auto searcher = knuth_morris_pratt_searcher(needle, failure_table);
 
       return std::ranges::none_of(haystack, [&](auto const &haystrand) -> bool {
 	auto match_itr = std::search
@@ -105,14 +109,18 @@ namespace vault::algorithm {
     {
       std::ranges::sort(range, {}, std::ranges::size);
 
-      auto const make_searcher = [](auto pattern) {
-	return knuth_morris_pratt_searcher { std::move(pattern) };
+      auto const to_failure_table = [](auto pattern) {
+	return knuth_morris_pratt_failure_function(std::move(pattern));
       };
 
-      auto searchers = range
-	| ::ranges::views::transform(make_searcher);
+      auto failure_tables = range
+	| ::ranges::views::transform(to_failure_table)
+	| ::ranges::to<std::vector>();
 
-      auto filtered = ::ranges::views::zip(range, proper_suffixes(range), searchers)
+      auto failure_table_views = failure_tables
+	| ::ranges::views::transform([](auto const &table) { return std::span { table }; });
+
+      auto filtered = ::ranges::views::zip(range, proper_suffixes(range), failure_table_views)
         | ::ranges::views::filter(filter_fn)
         | ::ranges::views::transform([]<typename P>(P &&p) { return std::get<0>(std::forward<P>(p)); })
         | ::ranges::to<std::vector>();
