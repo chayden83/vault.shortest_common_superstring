@@ -15,7 +15,7 @@ include(GoogleTest)
 add_executable(vault.shortest_common_superstring.tests)
 
 target_sources(vault.shortest_common_superstring.tests PRIVATE
-  knuth_morris_pratt_searcher.test.cpp
+  shortest_common_superstring.test.cpp
 )
 
 target_link_libraries(vault.shortest_common_superstring.tests PRIVATE

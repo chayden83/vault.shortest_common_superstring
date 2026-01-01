@@ -3,15 +3,18 @@
 #include <gtest/gtest.h>
 
 #include <list>
+#include <string>
 #include <iterator>
 #include <algorithm>
 #include <string_view>
 
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
+#include <vault/algorithm/shortest_common_superstring.hpp>
 
 // clang-format off
 
+using namespace std::literals::string_literals;
 using namespace std::literals::string_view_literals;
 
 TEST(KnuthMorrisPrattFailureFunction, ShortestCommonSuperstring) {
@@ -50,6 +53,24 @@ TEST(KnuthMorrisPrattOverlap, ShortestCommonSuperstring) {
     ("foobar"sv, "barstool"sv);
 
   EXPECT_EQ(result.score, 3);
+}
+
+TEST(ShortestCommonSuperstring, ShortestCommonSuperstring) {
+  auto input = std::vector {
+    "bar"s, "foo"s, "door"s, "foobar"s, "bazfoo"s, "doorstop"s, "stoplight"s,
+  };
+  
+  auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
+  
+  auto [in, out, superstring] = vault::algorithm::shortest_common_superstring
+    (input, std::back_inserter(bounds));
+  
+  EXPECT_EQ(superstring, "bazfoobardoorstoplight");
+
+  auto reconstructed = bounds | ::ranges::views::transform
+    ([&](auto const &b) { return superstring.substr(b.first, b.second); });
+
+  EXPECT_EQ(reconstructed | ::ranges::to<std::vector>(), input);
 }
 
 // clang-format on

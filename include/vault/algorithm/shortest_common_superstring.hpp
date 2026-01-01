@@ -3,10 +3,170 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
+#include <tuple>
+#include <string>
+#include <ranges>
+#include <iterator>
+#include <algorithm>
+
+#include <boost/multi_index_container.hpp>
+
+#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+
+#include <range/v3/range/conversion.hpp>
+
+#include <range/v3/view/zip.hpp>
+#include <range/v3/view/filter.hpp>
+#include <range/v3/view/generate.hpp>
+#include <range/v3/view/transform.hpp>
+
+#include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
+#include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
+
 // clang-format off
 
 namespace vault::algorithm {
-  
+  constexpr inline struct proper_suffixes_fn {
+    template<std::forward_iterator I, std::sentinel_for<I> S>
+    [[nodiscard]] static constexpr auto operator ()(I first, S last) {
+      auto generator = [=]() mutable -> std::ranges::subrange<I, S> {
+        return std::ranges::subrange { first == last ? first : ++first, last };
+      };
+
+      return ::ranges::views::generate(std::move(generator));
+    }
+
+    [[nodiscard]] static constexpr auto operator ()(std::ranges::forward_range auto &&range) {
+      return operator ()(std::ranges::begin(range), std::ranges::end(range));
+    }
+  } const proper_suffixes { };
+
+  constexpr inline struct shortest_common_superstring_fn {
+    static constexpr inline auto const filter_fn = []
+      (auto const &parameters) -> bool
+    {
+      auto const &[needle, haystack, searcher] = parameters;
+
+      return std::ranges::none_of(haystack, [&](auto const &haystrand) -> bool {
+	auto match_itr = std::search
+	  (std::ranges::begin(haystrand), std::ranges::end(haystrand), searcher);
+
+	return match_itr != std::ranges::end(haystrand);
+      });
+    };
+
+    struct overlap_t {
+      std::string lhs = {};
+      std::string rhs = {};
+
+      int score = 0;
+    };
+
+    struct overlap_lhs_t { };
+    struct overlap_rhs_t { };
+    
+    struct overlap_score_t { };
+    
+    using overlap_index_t = boost::multi_index_container<
+      overlap_t, boost::multi_index::indexed_by<
+        boost::multi_index::ordered_non_unique<
+	  boost::multi_index::tag<overlap_score_t>,
+	  boost::multi_index::member<overlap_t, int, &overlap_t::score>,
+	  std::greater<>
+	>,
+        boost::multi_index::hashed_non_unique<
+	  boost::multi_index::tag<overlap_lhs_t>,
+	  boost::multi_index::member<overlap_t, std::string, &overlap_t::lhs>
+	>,
+        boost::multi_index::hashed_non_unique<
+	  boost::multi_index::tag<overlap_rhs_t>,
+	  boost::multi_index::member<overlap_t, std::string, &overlap_t::rhs>
+	>
+      >
+    >;
+
+    template<typename In, typename Out, typename SuperString>
+    struct result {
+      In  in;
+      Out out;
+      
+      SuperString superstring;
+    };
+    
+    template<std::ranges::range R>
+    using bounds_t = std::pair
+      <std::ranges::range_difference_t<R>, std::ranges::range_size_t<R>>;
+
+    template<std::ranges::forward_range R, std::output_iterator<bounds_t<R>> O>
+    static auto operator ()(R &&range, O out) ->
+      result<std::ranges::iterator_t<R>, O, std::ranges::range_value_t<R>>
+    {
+      std::ranges::sort(range, {}, std::ranges::size);
+
+      auto const make_searcher = [](auto pattern) {
+	return knuth_morris_pratt_searcher { std::move(pattern) };
+      };
+
+      auto searchers = range
+	| ::ranges::views::transform(make_searcher);
+
+      auto filtered = ::ranges::views::zip(range, proper_suffixes(range), searchers)
+        | ::ranges::views::filter(filter_fn)
+        | ::ranges::views::transform([]<typename P>(P &&p) { return std::get<0>(std::forward<P>(p)); })
+        | ::ranges::to<std::vector>();
+      
+      auto index = overlap_index_t { };
+      
+      for(auto i = 0uz; i < filtered.size(); ++i) {
+        for(auto j = 0uz; j < filtered.size(); ++j) {
+	  // TODO: Store the pre-computed failure functions separately and pass them in.
+	  // That way we can reuse the failure functions later when we search for each
+	  // input string in the superstring.
+	  if(i != j ) {
+	    index.emplace(filtered[i], filtered[j], knuth_morris_pratt_overlap(filtered[i], filtered[j]).score);
+	  }
+        }
+      }
+      
+      auto superstring = std::string { };
+      
+      while(index.size() != 0) {
+        auto node = index.get<overlap_score_t>().extract
+	  (index.get<overlap_score_t>().begin());
+	
+        auto &[lhs, rhs, overlap] = node.value();
+        superstring = lhs + rhs.substr(overlap);
+	
+        for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(lhs); first != last; ++first) {
+	  index.emplace(superstring, first -> rhs, knuth_morris_pratt_overlap(superstring, first -> rhs).score);
+        }
+	
+        for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(rhs); first != last; ++first) {
+	  index.emplace(first -> lhs, superstring, knuth_morris_pratt_overlap(first -> lhs, superstring).score);
+        }
+	
+        index.get<overlap_lhs_t>().erase(lhs);
+        index.get<overlap_lhs_t>().erase(rhs);
+        index.get<overlap_rhs_t>().erase(lhs);
+        index.get<overlap_rhs_t>().erase(rhs);
+      }
+      
+      for(auto &&substring : range) {
+        // TODO: Use the pre-computed KMP failure function to perform the search. We are already
+        // computing the KMP failure function to calculate the pairwise string overlaps, so we
+        // might as well save some work.
+        auto offset = std::ranges::distance
+	  (std::ranges::begin(superstring), std::ranges::begin(std::ranges::search(superstring, substring)));
+	
+        *out = bounds_t<R> { offset, substring.size() };
+      }
+      
+      return { std::ranges::end(range), out, std::move(superstring) };
+    }
+
+  } const shortest_common_superstring { };
 }
 
 // clang-format on
