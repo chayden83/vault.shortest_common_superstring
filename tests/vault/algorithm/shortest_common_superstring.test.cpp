@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <gtest/gtest.h>
+#include <gmock/gmock-matchers.h>
 
 #include <list>
 #include <string>
+#include <vector>
 #include <iterator>
 #include <algorithm>
 #include <string_view>
@@ -70,7 +72,7 @@ TEST(ShortestCommonSuperstring, ShortestCommonSuperstring) {
   auto reconstructed = bounds | ::ranges::views::transform
     ([&](auto const &b) { return superstring.substr(b.first, b.second); });
 
-  EXPECT_EQ(reconstructed | ::ranges::to<std::vector>(), input);
+  EXPECT_THAT(reconstructed | ::ranges::to<std::vector>(), ::testing::ContainerEq(input));
 }
 
 // clang-format on

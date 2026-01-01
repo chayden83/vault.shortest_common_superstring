@@ -20,6 +20,7 @@ target_sources(vault.shortest_common_superstring.tests PRIVATE
 
 target_link_libraries(vault.shortest_common_superstring.tests PRIVATE
   GTest::gtest
+  GTest::gmock
   GTest::gtest_main
   vault::shortest_common_superstring
 )
