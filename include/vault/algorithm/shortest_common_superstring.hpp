@@ -23,6 +23,7 @@
 #include <range/v3/view/generate.hpp>
 #include <range/v3/view/transform.hpp>
 
+#include <utility>
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
 #include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
@@ -109,32 +110,41 @@ namespace vault::algorithm {
     {
       std::ranges::sort(range, {}, std::ranges::size);
 
-      auto const to_failure_table = [](auto pattern) {
-	return knuth_morris_pratt_failure_function(std::move(pattern));
-      };
-
       auto failure_tables = range
-	| ::ranges::views::transform(to_failure_table)
+	| ::ranges::views::transform(knuth_morris_pratt_failure_function)
 	| ::ranges::to<std::vector>();
 
       auto failure_table_views = failure_tables
 	| ::ranges::views::transform([](auto const &table) { return std::span { table }; });
 
+      auto to_pattern_failure_table_pair = [](auto &&parameters) {
+	auto &&[pattern, _, failure_table] = parameters;
+
+	return std::pair {
+	  std::forward<decltype(pattern      )>(pattern      ),
+	  std::forward<decltype(failure_table)>(failure_table)
+	};
+      };
+
       auto filtered = ::ranges::views::zip(range, proper_suffixes(range), failure_table_views)
         | ::ranges::views::filter(filter_fn)
-        | ::ranges::views::transform([]<typename P>(P &&p) { return std::get<0>(std::forward<P>(p)); })
+        | ::ranges::views::transform(to_pattern_failure_table_pair)
         | ::ranges::to<std::vector>();
       
       auto index = overlap_index_t { };
-      
+
+      // TODO: Convert to a view that emits off-diagonal pairs.
       for(auto i = 0uz; i < filtered.size(); ++i) {
         for(auto j = 0uz; j < filtered.size(); ++j) {
-	  // TODO: Store the pre-computed failure functions separately and pass them in.
-	  // That way we can reuse the failure functions later when we search for each
-	  // input string in the superstring.
-	  if(i != j ) {
-	    index.emplace(filtered[i], filtered[j], knuth_morris_pratt_overlap(filtered[i], filtered[j]).score);
-	  }
+	  if(i == j) continue;
+
+	  auto const &[pattern_i, _              ] = filtered[i];
+	  auto const &[pattern_j, failure_table_j] = filtered[j];
+
+	  auto score = knuth_morris_pratt_overlap
+	    (pattern_i, pattern_j, failure_table_j).score;
+
+	  index.emplace(pattern_i, pattern_j, score);
         }
       }
       
