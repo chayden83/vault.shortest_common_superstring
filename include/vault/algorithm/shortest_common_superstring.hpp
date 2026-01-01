@@ -7,6 +7,7 @@
 #include <tuple>
 #include <string>
 #include <ranges>
+#include <utility>
 #include <iterator>
 #include <algorithm>
 
@@ -23,7 +24,6 @@
 #include <range/v3/view/generate.hpp>
 #include <range/v3/view/transform.hpp>
 
-#include <utility>
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
 #include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
