@@ -184,6 +184,18 @@ namespace vault::algorithm {
       auto cum_overlap = 0;
       auto superstring = std::string { };
 
+      // Repeatedly merge the two index entries with the largest
+      // overlap until we have a single entry. This involves the
+      // following bookkeeping.
+      //
+      // - Extract (and therefore erase) the entry containing the two
+      //   elements with the largest overlap.
+      // - Add the overlap of the entry to the cumulative overlap.
+      // - Calculate the superstring for the two elements in the
+      //   entry.
+      // - Create new entries for the superstring as necessary.
+      // - Erase every entry that refers to either of the strings in
+      //   the entry with the max overlap.
       while(index.size() != 0) {
         auto [lhs, rhs, overlap] = index.get<overlap_score_t>().extract
 	  (index.get<overlap_score_t>().begin()).value();
