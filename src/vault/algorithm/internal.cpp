@@ -1,33 +1,143 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <fstream>
-#include <ranges>
-#include <string>
-#include <vector>
-
 #include <vault/algorithm/internal.hpp>
 
 // clang-format off
 
-namespace vlt::internal {
-  std::vector<element_type> tokenize(std::istream &istream) {
-    return std::ranges::to<std::vector<element_type>>
-      (std::views::istream<std::string>(istream));
+namespace {
+  static constinit char const * const random_words_1k[1000] = {
+    "soup",           "collection",     "arthritis",      "trek",           "journey",        "portions",       "execute",        "derby",          
+    "headers",        "lo",             "procedures",     "cyber",          "previously",     "supervision",    "essential",      "rabbit",         
+    "pal",            "cia",            "karen",          "fat",            "anal",           "early",          "covering",       "classes",        
+    "mag",            "either",         "screen",         "conducted",      "mysql",          "erp",            "tracy",          "institution",    
+    "captain",        "moldova",        "vessels",        "attacked",       "occur",          "invited",        "weights",        "found",          
+    "develop",        "fa",             "governor",       "basename",       "fields",         "directly",       "hong",           "marked",         
+    "lines",          "navigator",      "were",           "hazard",         "developed",      "karen",          "reserved",       "connection",     
+    "refrigerator",   "ridge",          "standards",      "frontpage",      "hip",            "pillow",         "love",           "rings",          
+    "did",            "witness",        "disco",          "contacting",     "strange",        "angeles",        "highland",       "applied",        
+    "kinase",         "functional",     "canyon",         "pushing",        "understand",     "protection",     "civilization",   "partner",        
+    "malta",          "doom",           "cherry",         "mechanical",     "this",           "connect",        "caught",         "route",          
+    "expansion",      "assigned",       "workout",        "port",           "grocery",        "amateur",        "not",            "communities",    
+    "delegation",     "comparable",     "car",            "hs",             "municipality",   "coaching",       "down",           "retailers",      
+    "romantic",       "terrain",        "basketball",     "determines",     "fitness",        "prime",          "ftp",            "gain",           
+    "plays",          "provide",        "brand",          "strap",          "col",            "sink",           "fed",            "guaranteed",     
+    "beautifully",    "actress",        "idea",           "endless",        "six",            "directive",      "avg",            "record",         
+    "dad",            "bottom",         "rob",            "appointments",   "ram",            "tgp",            "harder",         "japanese",       
+    "mozilla",        "causes",         "cattle",         "pdt",            "lovers",         "die",            "smooth",         "brooks",         
+    "will",           "penguin",        "santa",          "treatments",     "formerly",       "elsewhere",      "dated",          "served",         
+    "cosmetic",       "like",           "host",           "advertise",      "follow",         "elite",          "font",           "error",          
+    "small",          "bb",             "aware",          "modern",         "bolivia",        "vancouver",      "characterization","known",          
+    "dead",           "traffic",        "herbal",         "browse",         "racial",         "tom",            "who",            "cups",           
+    "beautiful",      "client",         "announced",      "direction",      "theft",          "indian",         "group",          "ripe",           
+    "confidence",     "animals",        "magazine",       "prague",         "newly",          "palace",         "dump",           "worst",          
+    "purchases",      "allocation",     "traveller",      "known",          "extreme",        "causes",         "findings",       "andrew",         
+    "blow",           "pa",             "cinema",         "chief",          "indicators",     "strictly",       "mission",        "guess",          
+    "order",          "document",       "clouds",         "preparing",      "gold",           "secured",        "sheriff",        "wolf",           
+    "sees",           "politics",       "observations",   "davis",          "oo",             "friends",        "clear",          "reader",         
+    "bonds",          "heavy",          "raise",          "dice",           "lg",             "psp",            "selected",       "collective",     
+    "survival",       "penetration",    "evaluation",     "expensive",      "regardless",     "mud",            "export",         "cet",            
+    "cradle",         "neighbor",       "velvet",         "intro",          "damaged",        "bloom",          "terrorists",     "trigger",        
+    "pill",           "warranties",     "supplied",       "manuals",        "bookmarks",      "smilies",        "plates",         "officially",     
+    "dates",          "start",          "propose",        "metallic",       "explaining",     "makers",         "giant",          "bra",            
+    "begin",          "ones",           "globe",          "limitation",     "dream",          "atmosphere",     "loan",           "man",            
+    "ste",            "subcommittee",   "subscriptions",  "huntington",     "array",          "manufacturers",  "exceptional",    "sb",             
+    "cottage",        "suggest",        "nottingham",     "rules",          "chains",         "personals",      "validity",       "suggestion",     
+    "ef",             "search",         "exclusively",    "ram",            "messaging",      "expression",     "zone",           "katie",          
+    "kw",             "southwest",      "recommended",    "bye",            "equipped",       "imported",       "isbn",           "uv",             
+    "help",           "extent",         "flickr",         "delivery",       "layout",         "key",            "monkey",         "insulation",     
+    "tc",             "software",       "reduction",      "harmful",        "muze",           "outstanding",    "sacramento",     "medication",     
+    "configure",      "miles",          "troy",           "cleanup",        "parent",         "jamie",          "ellis",          "crafts",         
+    "tariff",         "equipment",      "post",           "contents",       "oh",             "adobe",          "please",         "ecuador",        
+    "holmes",         "power",          "man",            "recruitment",    "simulations",    "feeding",        "ccd",            "psychology",     
+    "on",             "lasting",        "safe",           "relocation",     "national",       "babies",         "del",            "table",          
+    "capture",        "machine",        "sentences",      "roster",         "cabinet",        "deliver",        "function",       "theology",       
+    "statewide",      "arrested",       "aka",            "his",            "sugar",          "not",            "shelter",        "arms",           
+    "definitely",     "which",          "mi",             "leo",            "sn",             "nickel",         "occurred",       "art",            
+    "sexo",           "keyword",        "gravity",        "except",         "light",          "onto",           "accordingly",    "by",             
+    "marker",         "v",              "skating",        "authors",        "showtimes",      "vc",             "examines",       "zum",            
+    "coated",         "statement",      "showers",        "speeds",         "assets",         "sim",            "pets",           "keywords",       
+    "binary",         "geneva",         "migration",      "strike",         "private",        "key",            "registered",     "ways",           
+    "nut",            "doe",            "testimonials",   "checks",         "tears",          "oil",            "amanda",         "cooling",        
+    "medieval",       "blowing",        "powerful",       "humans",         "innovations",    "modeling",       "wait",           "planets",        
+    "apps",           "includes",       "government",     "bush",           "loss",           "warranties",     "political",      "paying",         
+    "bridges",        "canal",          "restoration",    "schools",        "science",        "updated",        "coastal",        "float",          
+    "martha",         "easily",         "moreover",       "alone",          "miles",          "yet",            "survivors",      "sandwich",       
+    "pdt",            "hr",             "lung",           "debate",         "dicks",          "de",             "ford",           "loud",           
+    "previous",       "scale",          "novelty",        "intimate",       "legendary",      "impressive",     "jail",           "victor",         
+    "camp",           "expectations",   "q",              "se",             "provincial",     "practitioners",  "exemption",      "activity",       
+    "lookup",         "heated",         "involves",       "trans",          "rack",           "diseases",       "uri",            "stamps",         
+    "rat",            "people",         "size",           "tomato",         "fake",           "story",          "handle",         "election",       
+    "employment",     "ellis",          "subtle",         "graduate",       "joins",          "missouri",       "whose",          "operational",    
+    "saints",         "excess",         "pos",            "future",         "quantum",        "pockets",        "alive",          "emerald",        
+    "proposal",       "duties",         "computers",      "errors",         "choosing",       "literacy",       "teach",          "discs",          
+    "adelaide",       "providers",      "pi",             "merchant",       "watershed",      "ten",            "feeling",        "omaha",          
+    "forums",         "benjamin",       "school",         "minutes",        "utc",            "proven",         "carol",          "pct",            
+    "rosa",           "books",          "swimming",       "processors",     "singer",         "fiction",        "earlier",        "trustee",        
+    "keeping",        "accessories",    "re",             "chi",            "teams",          "yang",           "plc",            "establish",      
+    "friday",         "checking",       "provides",       "enquiry",        "channel",        "band",           "customer",       "billing",        
+    "several",        "refresh",        "lender",         "volt",           "wheat",          "voyeurweb",      "heart",          "goal",           
+    "luther",         "careers",        "period",         "nasty",          "enhancement",    "let",            "secured",        "books",          
+    "settled",        "contact",        "loading",        "funeral",        "ties",           "premier",        "conclusion",     "eggs",           
+    "league",         "court",          "precision",      "generate",       "coordinates",    "silver",         "astronomy",      "nominated",      
+    "rs",             "latvia",         "birthday",       "camcorder",      "colleagues",     "customer",       "assistant",      "implications",   
+    "nw",             "milfhunter",     "belgium",        "european",       "porcelain",      "maple",          "nutten",         "grades",         
+    "namely",         "great",          "pass",           "feet",           "fit",            "aerial",         "bobby",          "integrity",      
+    "jane",           "marc",           "course",         "pennsylvania",   "prostores",      "compilation",    "staff",          "desk",           
+    "feet",           "earthquake",     "realm",          "mozilla",        "bleeding",       "now",            "broadcasting",   "beam",           
+    "late",           "idaho",          "f",              "scotia",         "jeans",          "efficient",      "proceed",        "ali",            
+    "phpbb",          "immune",         "macro",          "coding",         "evolution",      "mixer",          "pittsburgh",     "assets",         
+    "used",           "genius",         "anchor",         "surgeons",       "find",           "alberta",        "recorder",       "queen",          
+    "painted",        "balanced",       "recall",         "cnn",            "diploma",        "proposed",       "bars",           "dairy",          
+    "delays",         "missed",         "flame",          "survey",         "fares",          "note",           "collaboration",  "encouraging",    
+    "lucky",          "abstract",       "naturally",      "eligible",       "miniature",      "tx",             "generations",    "pda",            
+    "dos",            "london",         "cz",             "episodes",       "specialty",      "bukkake",        "forth",          "support",        
+    "phrase",         "erik",           "states",         "fc",             "determined",     "glossary",       "de",             "cadillac",       
+    "respected",      "available",      "twenty",         "piece",          "currencies",     "en",             "attacked",       "tar",            
+    "districts",      "evanescence",    "sb",             "battlefield",    "admissions",     "deployment",     "runtime",        "assumes",        
+    "refresh",        "generating",     "rendering",      "scholarships",   "utils",          "multiple",       "printer",        "fax",            
+    "milfhunter",     "nasa",           "magical",        "mount",          "hotel",          "best",           "many",           "gym",            
+    "filter",         "artistic",       "spatial",        "addresses",      "action",         "knowledge",      "proceeding",     "mining",         
+    "trust",          "appraisal",      "euros",          "feb",            "cultural",       "rap",            "transparency",   "installations",  
+    "crude",          "patricia",       "rg",             "filling",        "system",         "distinct",       "phpbb",          "granted",        
+    "object",         "carefully",      "society",        "california",     "verizon",        "ncaa",           "scroll",         "sofa",           
+    "pages",          "loan",           "sciences",       "simulation",     "salvation",      "germany",        "statement",      "contract",       
+    "attorney",       "kinds",          "voyeur",         "oldest",         "startup",        "decent",         "fd",             "london",         
+    "chip",           "particle",       "prepare",        "altered",        "themselves",     "ssl",            "blind",          "recipients",     
+    "bennett",        "prague",         "mix",            "phil",           "dir",            "network",        "overcome",       "share",          
+    "international",  "legend",         "force",          "rc",             "vietnamese",     "m",              "surname",        "platinum",       
+    "fe",             "odd",            "terminal",       "echo",           "seeds",          "sight",          "invisible",      "type",           
+    "measurement",    "harder",         "k",              "fatty",          "discusses",      "disease",        "mining",         "might",          
+    "extreme",        "venue",          "stage",          "emails",         "upc",            "newark",         "body",           "ka",             
+    "inclusion",      "develop",        "brazil",         "bedroom",        "hp",             "courtesy",       "advanced",       "egypt",          
+    "and",            "laws",           "patrick",        "findings",       "decade",         "consultation",   "cd",             "drove",          
+    "vocal",          "southeast",      "labour",         "tonight",        "some",           "address",        "heavy",          "configured",     
+    "hotmail",        "confirm",        "measures",       "priority",       "comments",       "geological",     "navigation",     "grip",           
+    "knowledgestorm", "back",           "decisions",      "junction",       "query",          "dancing",        "grows",          "experiments",    
+    "medical",        "guy",            "yesterday",      "eat",            "photo",          "account",        "sequence",       "kitchen",        
+    "mens",           "prisoner",       "expansion",      "ted",            "theatre",        "appraisal",      "dark",           "ray",            
+    "deserve",        "transition",     "so",             "maritime",       "distributor",    "bible",          "blocking",       "grammar",        
+    "hd",             "areas",          "parameter",      "vote",           "scenarios",      "airline",        "driver",         "two",            
+    "el",             "turned",         "mature",         "immigrants",     "optimize",       "identifier",     "vietnam",        "pi",             
+    "previous",       "vat",            "structures",     "celebs",         "cunt",           "dates",          "entrepreneurs",  "brand",          
+    "contrary",       "acrylic",        "world",          "was",            "long",           "factors",        "saves",          "officers",       
+    "forums",         "seeks",          "webmaster",      "bird",           "kind",           "sexy",           "base",           "bobby",          
+    "par",            "steady",         "programme",      "role",           "flashers",       "state",          "attempted",      "sequence",       
+    "pulling",        "deployment",     "location",       "working",        "stamp",          "louis",          "singapore",      "guyana",         
+    "cholesterol",    "funded",         "philippines",    "columbus",       "tiles",          "quantum",        "contact",        "exciting",       
+    "representatives","exec",           "void",           "majority",       "chancellor",     "singh",          "concern",        "boards",         
+    "involved",       "briefly",        "carrying",       "roommates",      "reader",         "confused",       "leu",            "rug",            
+    "session",        "marine",         "insulin",        "pearl",          "role",           "pics",           "oman",           "newbie",         
+    "tex",            "concerning",     "lost",           "newman",         "logical",        "comments",       "detected",       "hired",          
+    "lost",           "taxation",       "interventions",  "euros",          "europe",         "locale",         "cindy",          "bus",            
+    "curious",        "msn",            "rome",           "inner",          "fighting",       "sales",          "occurs",         "snapshot",       
+    "reseller",       "and",            "respectively",   "scratch",        "exercise",       "doctor",         "sounds",         "jefferson",      
+  };
+}
+
+namespace vault::internal {
+  std::span<char const * const> random_words_1k() {
+    return ::random_words_1k;
   }
-
-  std::span<element_type const> democracy_in_america() {
-    static auto const storage = tokenize
-      (std::ifstream { PROJECT_DATA_DIR "/democracy_in_america.txt" });
-
-    return storage;
-  }    
-
-  std::span<element_type const> democracy_and_education() {
-    static auto const storage = tokenize
-      (std::ifstream{PROJECT_DATA_DIR "/democracy_and_education.txt"});
-
-    return storage;
-  }    
 }
 
 // clang-format on

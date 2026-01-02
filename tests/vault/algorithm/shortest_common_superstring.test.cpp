@@ -10,9 +10,12 @@
 #include <algorithm>
 #include <string_view>
 
+#include <vault/algorithm/internal.hpp>
+
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
 #include <vault/algorithm/shortest_common_superstring.hpp>
+
 
 // clang-format off
 
@@ -76,7 +79,7 @@ TEST(ShortestCommonSuperstringOfSingletonRange, ShortestCommonSuperstring) {
   EXPECT_EQ(superstring, "foobar"sv);
 }
 
-TEST(ShortestCommonSuperstring, ShortestCommonSuperstring) {
+TEST(ShortestCommonSuperstringBespoke, ShortestCommonSuperstring) {
   auto input = std::vector {
     "bar"s, "foo"s, "door"s, "foobar"s, "bazfoo"s, "doorstop"s, "stoplight"s,
   };
@@ -92,6 +95,21 @@ TEST(ShortestCommonSuperstring, ShortestCommonSuperstring) {
     ([&](auto const &b) { return superstring.substr(b.first, b.second); });
 
   EXPECT_THAT(reconstructed | ::ranges::to<std::vector>(), ::testing::ContainerEq(input));
+}
+
+TEST(ShortestCommonSuperstring1K, ShortestCommonSuperstring) {
+  auto words = vault::internal::random_words_1k()
+    | ::ranges::to<std::vector<std::string>>();
+
+  auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
+
+  auto [in, out, superstring] = val::shortest_common_superstring
+    (words, std::back_inserter(bounds));
+
+  auto reconstructed = bounds | ::ranges::views::transform
+    ([&](auto const &b) { return superstring.substr(b.first, b.second); });
+
+  EXPECT_THAT(reconstructed | ::ranges::to<std::vector>(), ::testing::ContainerEq(words));
 }
 
 // clang-format on

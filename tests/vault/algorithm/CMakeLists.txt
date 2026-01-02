@@ -23,6 +23,7 @@ target_link_libraries(vault.shortest_common_superstring.tests PRIVATE
   GTest::gmock
   GTest::gtest_main
   vault::shortest_common_superstring
+  vault::shortest_common_superstring.internal
 )
 
 gtest_add_tests(vault.shortest_common_superstring.tests "" AUTO)
