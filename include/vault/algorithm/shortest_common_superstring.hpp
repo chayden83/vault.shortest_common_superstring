@@ -154,6 +154,8 @@ namespace vault::algorithm {
 	index.emplace(filtered[0].first, filtered[0].first, filtered[0].first.size());
       }
 
+      // TODO: Include cumulative length of words that are proper
+      // sub-strings in cumulative overlap.
       auto cum_overlap = 0;
       auto superstring = std::string { };
 
