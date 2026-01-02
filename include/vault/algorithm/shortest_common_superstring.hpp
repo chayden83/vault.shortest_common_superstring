@@ -94,6 +94,8 @@ namespace vault::algorithm {
 
     template<typename In, typename Out, typename SuperString>
     struct result {
+      int overlap = 0;
+
       In  in;
       Out out;
 
@@ -152,14 +154,15 @@ namespace vault::algorithm {
 	index.emplace(filtered[0].first, filtered[0].first, filtered[0].first.size());
       }
 
+      auto cum_overlap = 0;
       auto superstring = std::string { };
 
       while(index.size() != 0) {
-        auto node = index.get<overlap_score_t>().extract
-	  (index.get<overlap_score_t>().begin());
+        auto [lhs, rhs, overlap] = index.get<overlap_score_t>().extract
+	  (index.get<overlap_score_t>().begin()).value();
 
-        auto &[lhs, rhs, overlap] = node.value();
-        superstring = lhs + rhs.substr(overlap);
+	cum_overlap += overlap;
+        superstring  = lhs + rhs.substr(overlap);
 
         for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(lhs); first != last; ++first) {
 	  index.emplace(superstring, first -> rhs, knuth_morris_pratt_overlap(superstring, first -> rhs).score);
@@ -186,7 +189,7 @@ namespace vault::algorithm {
         *out++ = bounds_t<R> { offset, substring.size() };
       }
 
-      return { std::ranges::end(range), out, std::move(superstring) };
+      return { cum_overlap, std::ranges::end(range), out, std::move(superstring) };
     }
 
   } const shortest_common_superstring { };

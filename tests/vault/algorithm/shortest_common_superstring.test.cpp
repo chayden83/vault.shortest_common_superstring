@@ -54,16 +54,13 @@ TEST(KnuthMorrisPrattSearcher, ShortestCommonSuperstring) {
 }
 
 TEST(KnuthMorrisPrattOverlap, ShortestCommonSuperstring) {
-  auto result = val::knuth_morris_pratt_overlap
-    ("foobar"sv, "barstool"sv);
-
-  EXPECT_EQ(result.score, 3);
+  EXPECT_EQ(val::knuth_morris_pratt_overlap("foobar"sv, "barstool"sv).score, 3);
 }
 
 TEST(ShortestCommonSuperstringOfEmptyRange, ShortestCommonSuperstring) {
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [in, out, superstring] = val::shortest_common_superstring
+  auto [overlap, in, out, superstring] = val::shortest_common_superstring
     (std::vector<std::string> { }, std::back_inserter(bounds));
 
   EXPECT_EQ(superstring, ""sv);
@@ -73,7 +70,7 @@ TEST(ShortestCommonSuperstringOfEmptyRange, ShortestCommonSuperstring) {
 TEST(ShortestCommonSuperstringOfSingletonRange, ShortestCommonSuperstring) {
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [in, out, superstring] = val::shortest_common_superstring
+  auto [overlap, in, out, superstring] = val::shortest_common_superstring
     (std::vector { "foobar"s }, std::back_inserter(bounds));
 
   EXPECT_EQ(superstring, "foobar"sv);
@@ -86,7 +83,7 @@ TEST(ShortestCommonSuperstringBespoke, ShortestCommonSuperstring) {
 
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [in, out, superstring] = val::shortest_common_superstring
+  auto [overlap, in, out, superstring] = val::shortest_common_superstring
     (input, std::back_inserter(bounds));
 
   EXPECT_EQ(superstring, "bazfoobardoorstoplight");
@@ -103,8 +100,10 @@ TEST(ShortestCommonSuperstring1K, ShortestCommonSuperstring) {
 
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [in, out, superstring] = val::shortest_common_superstring
+  auto [overlap, in, out, superstring] = val::shortest_common_superstring
     (words, std::back_inserter(bounds));
+
+  EXPECT_EQ(overlap, 896);
 
   auto reconstructed = bounds | ::ranges::views::transform
     ([&](auto const &b) { return superstring.substr(b.first, b.second); });
