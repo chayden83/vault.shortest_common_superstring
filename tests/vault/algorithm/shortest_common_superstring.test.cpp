@@ -60,7 +60,7 @@ TEST(KnuthMorrisPrattOverlap, ShortestCommonSuperstring) {
 TEST(ShortestCommonSuperstringOfEmptyRange, ShortestCommonSuperstring) {
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [overlap, in, out, superstring] = val::shortest_common_superstring
+  auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (std::vector<std::string> { }, std::back_inserter(bounds));
 
   EXPECT_EQ(superstring, ""sv);
@@ -70,7 +70,7 @@ TEST(ShortestCommonSuperstringOfEmptyRange, ShortestCommonSuperstring) {
 TEST(ShortestCommonSuperstringOfSingletonRange, ShortestCommonSuperstring) {
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [overlap, in, out, superstring] = val::shortest_common_superstring
+  auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (std::vector { "foobar"s }, std::back_inserter(bounds));
 
   EXPECT_EQ(superstring, "foobar"sv);
@@ -83,7 +83,7 @@ TEST(ShortestCommonSuperstringBespoke, ShortestCommonSuperstring) {
 
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [overlap, in, out, superstring] = val::shortest_common_superstring
+  auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (input, std::back_inserter(bounds));
 
   EXPECT_EQ(superstring, "bazfoobardoorstoplight");
@@ -100,7 +100,7 @@ TEST(ShortestCommonSuperstring1K, ShortestCommonSuperstring) {
 
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
 
-  auto [overlap, in, out, superstring] = val::shortest_common_superstring
+  auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (words, std::back_inserter(bounds));
 
   EXPECT_EQ(overlap             ,  896);

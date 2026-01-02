@@ -92,14 +92,13 @@ namespace vault::algorithm {
       >
     >;
 
-    template<typename In, typename Out, typename SuperString>
+    template<typename In, typename Out, typename SuperString, typename Overlap = int>
     struct result {
-      int overlap = 0;
-
       In  in;
       Out out;
 
       SuperString superstring;
+      Overlap     overlap;
     };
 
     template<std::ranges::range R>
@@ -191,7 +190,7 @@ namespace vault::algorithm {
         *out++ = bounds_t<R> { offset, substring.size() };
       }
 
-      return { cum_overlap, std::ranges::end(range), out, std::move(superstring) };
+      return { std::ranges::end(range), out, std::move(superstring), cum_overlap };
     }
 
   } const shortest_common_superstring { };
