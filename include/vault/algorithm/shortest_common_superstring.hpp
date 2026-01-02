@@ -3,7 +3,6 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
-#include <span>
 #include <tuple>
 #include <string>
 #include <ranges>
@@ -22,6 +21,7 @@
 #include <range/v3/view/zip.hpp>
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/generate.hpp>
+#include <range/v3/view/enumerate.hpp>
 #include <range/v3/view/transform.hpp>
 
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
@@ -109,14 +109,40 @@ namespace vault::algorithm {
     static auto operator ()(R &&range, O out) ->
       result<std::ranges::iterator_t<R>, O, std::ranges::range_value_t<R>>
     {
+      // Sort the input elements by length. This allows us to reduce
+      // the number of elements we need to check when filtering each
+      // element that is a substring of another element.
       std::ranges::sort(range, {}, std::ranges::size);
 
+      // A random access range to return a view for the nth input
+      // element. We use element views whenever possible in order to
+      // avid copies.
+      auto element_views = ::ranges::views::transform(range, ::ranges::views::all);
+
+      // Preconstruct the failure tables, cache them, and create a
+      // random access range that returns a view of the failure table
+      // for the nth input element on demand. We use views of the
+      // faulure tables whenever possible to avoid copies and
+      // recalculations.
       auto failure_tables = range
 	| ::ranges::views::transform(knuth_morris_pratt_failure_function)
 	| ::ranges::to<std::vector>();
 
-      auto failure_table_views = failure_tables
-	| ::ranges::views::transform([](auto const &table) { return std::span { table }; });
+      auto failure_table_views = ::ranges::views::transform
+	(failure_tables, ::ranges::views::all);
+
+      // A random access range to return a searcher for the nth input
+      // element. Constructon is cheap because we construct the
+      // searcher from element and failure table views, so we
+      // construct the searchers on demand instead of caching them.
+      auto searchers = ::ranges::views::zip_with
+	(make_knuth_morris_pratt_searcher, element_views, failure_table_views);
+
+
+
+
+
+
 
       auto to_pattern_failure_table_pair = [](auto &&parameters) {
 	auto &&[pattern, _, failure_table] = parameters;
@@ -179,13 +205,12 @@ namespace vault::algorithm {
 	index.get<overlap_rhs_t>().erase(rhs);
       }
 
-      for(auto &&substring : range) {
-        // TODO: Use the pre-computed KMP failure function to perform
-        // the search. We are already computing the KMP failure
-        // function to calculate the pairwise string overlaps, so we
-        // might as well save some work.
+      auto super_begin = std::ranges::begin(superstring);
+      auto super_end   = std::ranges::end  (superstring);
+
+      for(auto &&[i, substring] : ::ranges::views::enumerate(range)) {
         auto offset = std::ranges::distance
-	  (std::ranges::begin(superstring), std::ranges::begin(std::ranges::search(superstring, substring)));
+	  (super_begin, std::search(super_begin, super_end, searchers[i]));
 
         *out++ = bounds_t<R> { offset, substring.size() };
       }

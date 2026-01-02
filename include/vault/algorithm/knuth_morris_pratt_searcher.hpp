@@ -92,6 +92,14 @@ namespace vault::algorithm {
     requires std::equality_comparable<std::ranges::range_reference_t<Pattern>>
   knuth_morris_pratt_searcher(Pattern &&) ->
     knuth_morris_pratt_searcher<std::remove_cvref_t<Pattern>>;
+
+  constexpr inline struct make_knuth_morris_pratt_searcher_fn {
+    [[nodiscard]] static constexpr auto operator ()(auto&&... args) ->
+      decltype(knuth_morris_pratt_searcher { std::forward<decltype(args)>(args)... })
+    {
+      return knuth_morris_pratt_searcher { std::forward<decltype(args)>(args)... };
+    }
+  } const make_knuth_morris_pratt_searcher { };
 }
 
 // clang-format on
