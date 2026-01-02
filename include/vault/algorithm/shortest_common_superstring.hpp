@@ -71,9 +71,9 @@ namespace vault::algorithm {
 
     struct overlap_lhs_t { };
     struct overlap_rhs_t { };
-    
+
     struct overlap_score_t { };
-    
+
     using overlap_index_t = boost::multi_index_container<
       overlap_t, boost::multi_index::indexed_by<
         boost::multi_index::ordered_non_unique<
@@ -96,10 +96,10 @@ namespace vault::algorithm {
     struct result {
       In  in;
       Out out;
-      
+
       SuperString superstring;
     };
-    
+
     template<std::ranges::range R>
     using bounds_t = std::pair
       <std::ranges::range_difference_t<R>, std::ranges::range_size_t<R>>;
@@ -130,7 +130,7 @@ namespace vault::algorithm {
         | ::ranges::views::filter(filter_fn)
         | ::ranges::views::transform(to_pattern_failure_table_pair)
         | ::ranges::to<std::vector>();
-      
+
       auto index = overlap_index_t { };
 
       // TODO: Convert to a view that emits off-diagonal pairs.
@@ -147,40 +147,45 @@ namespace vault::algorithm {
 	  index.emplace(pattern_i, pattern_j, score);
         }
       }
-      
+
+      if(filtered.size() == 1) {
+	index.emplace(filtered[0].first, filtered[0].first, filtered[0].first.size());
+      }
+
       auto superstring = std::string { };
-      
+
       while(index.size() != 0) {
         auto node = index.get<overlap_score_t>().extract
 	  (index.get<overlap_score_t>().begin());
-	
+
         auto &[lhs, rhs, overlap] = node.value();
         superstring = lhs + rhs.substr(overlap);
-	
+
         for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(lhs); first != last; ++first) {
 	  index.emplace(superstring, first -> rhs, knuth_morris_pratt_overlap(superstring, first -> rhs).score);
         }
-	
+
         for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(rhs); first != last; ++first) {
 	  index.emplace(first -> lhs, superstring, knuth_morris_pratt_overlap(first -> lhs, superstring).score);
         }
-	
-        index.get<overlap_lhs_t>().erase(lhs);
-        index.get<overlap_lhs_t>().erase(rhs);
-        index.get<overlap_rhs_t>().erase(lhs);
-        index.get<overlap_rhs_t>().erase(rhs);
+
+	index.get<overlap_lhs_t>().erase(lhs);
+	index.get<overlap_lhs_t>().erase(rhs);
+	index.get<overlap_rhs_t>().erase(lhs);
+	index.get<overlap_rhs_t>().erase(rhs);
       }
-      
+
       for(auto &&substring : range) {
-        // TODO: Use the pre-computed KMP failure function to perform the search. We are already
-        // computing the KMP failure function to calculate the pairwise string overlaps, so we
+        // TODO: Use the pre-computed KMP failure function to perform
+        // the search. We are already computing the KMP failure
+        // function to calculate the pairwise string overlaps, so we
         // might as well save some work.
         auto offset = std::ranges::distance
 	  (std::ranges::begin(superstring), std::ranges::begin(std::ranges::search(superstring, substring)));
-	
-        *out = bounds_t<R> { offset, substring.size() };
+
+        *out++ = bounds_t<R> { offset, substring.size() };
       }
-      
+
       return { std::ranges::end(range), out, std::move(superstring) };
     }
 

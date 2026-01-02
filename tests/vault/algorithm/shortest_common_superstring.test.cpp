@@ -19,27 +19,27 @@
 using namespace std::literals::string_literals;
 using namespace std::literals::string_view_literals;
 
+namespace val = vault::algorithm;
+
 TEST(KnuthMorrisPrattFailureFunction, ShortestCommonSuperstring) {
   auto expected_failure_function =  std::vector { 0, 0, 0, 0, 1, 2, 0 };
 
   auto observed_failure_function =
-    vault::algorithm::knuth_morris_pratt_failure_function("abcdabd"sv);
+    val::knuth_morris_pratt_failure_function("abcdabd"sv);
 
   EXPECT_EQ(observed_failure_function, expected_failure_function);
 
   expected_failure_function = std::vector { 0, 0, 1, 2, 0, 1, 2, 3, 4 };
 
   observed_failure_function =
-    vault::algorithm::knuth_morris_pratt_failure_function("ababcabab"sv);
+    val::knuth_morris_pratt_failure_function("ababcabab"sv);
 
-  EXPECT_EQ(observed_failure_function, expected_failure_function);  
+  EXPECT_EQ(observed_failure_function, expected_failure_function);
 }
 
 TEST(KnuthMorrisPrattSearcher, ShortestCommonSuperstring) {
-  auto const foo_searcher =
-    vault::algorithm::knuth_morris_pratt_searcher("foo"sv);
-  auto const bar_searcher =
-    vault::algorithm::knuth_morris_pratt_searcher("bar"sv);
+  auto const foo_searcher = val::knuth_morris_pratt_searcher("foo"sv);
+  auto const bar_searcher = val::knuth_morris_pratt_searcher("bar"sv);
 
   auto const haystack = std::list { 'f', 'o', 'o', 'b', 'a', 'r' };
 
@@ -51,22 +51,41 @@ TEST(KnuthMorrisPrattSearcher, ShortestCommonSuperstring) {
 }
 
 TEST(KnuthMorrisPrattOverlap, ShortestCommonSuperstring) {
-  auto result = vault::algorithm::knuth_morris_pratt_overlap
+  auto result = val::knuth_morris_pratt_overlap
     ("foobar"sv, "barstool"sv);
 
   EXPECT_EQ(result.score, 3);
+}
+
+TEST(ShortestCommonSuperstringOfEmptyRange, ShortestCommonSuperstring) {
+  auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
+
+  auto [in, out, superstring] = val::shortest_common_superstring
+    (std::vector<std::string> { }, std::back_inserter(bounds));
+
+  EXPECT_EQ(superstring, ""sv);
+  EXPECT_TRUE(bounds.empty());
+}
+
+TEST(ShortestCommonSuperstringOfSingletonRange, ShortestCommonSuperstring) {
+  auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
+
+  auto [in, out, superstring] = val::shortest_common_superstring
+    (std::vector { "foobar"s }, std::back_inserter(bounds));
+
+  EXPECT_EQ(superstring, "foobar"sv);
 }
 
 TEST(ShortestCommonSuperstring, ShortestCommonSuperstring) {
   auto input = std::vector {
     "bar"s, "foo"s, "door"s, "foobar"s, "bazfoo"s, "doorstop"s, "stoplight"s,
   };
-  
+
   auto bounds = std::vector<std::pair<std::ptrdiff_t, std::size_t>> { };
-  
-  auto [in, out, superstring] = vault::algorithm::shortest_common_superstring
+
+  auto [in, out, superstring] = val::shortest_common_superstring
     (input, std::back_inserter(bounds));
-  
+
   EXPECT_EQ(superstring, "bazfoobardoorstoplight");
 
   auto reconstructed = bounds | ::ranges::views::transform
