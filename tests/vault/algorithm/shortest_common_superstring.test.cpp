@@ -103,7 +103,8 @@ TEST(ShortestCommonSuperstring1K, ShortestCommonSuperstring) {
   auto [overlap, in, out, superstring] = val::shortest_common_superstring
     (words, std::back_inserter(bounds));
 
-  EXPECT_EQ(overlap, 896);
+  EXPECT_EQ(overlap             ,  896);
+  EXPECT_EQ(superstring.length(), 4665);
 
   auto reconstructed = bounds | ::ranges::views::transform
     ([&](auto const &b) { return superstring.substr(b.first, b.second); });
