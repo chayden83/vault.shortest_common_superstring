@@ -62,7 +62,7 @@ namespace vault::algorithm {
       });
     };
 
-    struct overlap_t {
+    struct overlap_entry_t {
       std::string lhs = {};
       std::string rhs = {};
 
@@ -75,19 +75,19 @@ namespace vault::algorithm {
     struct overlap_score_t { };
 
     using overlap_index_t = boost::multi_index_container<
-      overlap_t, boost::multi_index::indexed_by<
+      overlap_entry_t, boost::multi_index::indexed_by<
         boost::multi_index::ordered_non_unique<
 	  boost::multi_index::tag<overlap_score_t>,
-	  boost::multi_index::member<overlap_t, int, &overlap_t::score>,
+	  boost::multi_index::member<overlap_entry_t, int, &overlap_entry_t::score>,
 	  std::greater<>
 	>,
         boost::multi_index::hashed_non_unique<
 	  boost::multi_index::tag<overlap_lhs_t>,
-	  boost::multi_index::member<overlap_t, std::string, &overlap_t::lhs>
+	  boost::multi_index::member<overlap_entry_t, std::string, &overlap_entry_t::lhs>
 	>,
         boost::multi_index::hashed_non_unique<
 	  boost::multi_index::tag<overlap_rhs_t>,
-	  boost::multi_index::member<overlap_t, std::string, &overlap_t::rhs>
+	  boost::multi_index::member<overlap_entry_t, std::string, &overlap_entry_t::rhs>
 	>
       >
     >;
@@ -196,23 +196,33 @@ namespace vault::algorithm {
       // - Create new entries for the superstring as necessary.
       // - Erase every entry that refers to either of the strings in
       //   the entry with the max overlap.
+      //
+      // Take care not to update the [rhs, lhs, ...] index entry to
+      // [superstring, superstring, ...] or that node will not be
+      // erased as intended and bad things will happen.
       while(index.size() != 0) {
-        auto [lhs, rhs, overlap] = index.get<overlap_score_t>().extract
-	  (index.get<overlap_score_t>().begin()).value();
+        auto [lhs, rhs, overlap] = index.get<overlap_score_t>()
+	  .extract(index.get<overlap_score_t>().begin()).value();
 
 	cum_overlap += overlap;
-        superstring  = lhs + rhs.substr(overlap);
+        superstring  = lhs;
 
+	superstring.append(rhs, overlap);
+
+	// We previously filtered the elements that are proper
+	// substrings of another element, so we know the maximum
+	// overlap between any two strings s1 and s2 if min(len(s1) -
+	// 1, len(s2) - 1). This means that the merged string can
+	// never produce a new overlap that is larger than the
+	// existing overlap. Consequently, we can propagate the
+	// existing overlaps and we never need to perform another
+	// overlap calculation.
         for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs); first != last; ++first) {
-	  if(first -> rhs != lhs) {
-	    index.emplace(superstring, first -> rhs, first -> score);
-	  }
+	  if(first -> rhs != lhs) index.emplace(superstring, first -> rhs, first -> score);
         }
 
         for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
-	  if(first -> lhs != rhs) {
-	    index.emplace(first -> lhs, superstring, first -> score);
-	  }
+	  if(first -> lhs != rhs) index.emplace(first -> lhs, superstring, first -> score);
         }
 
 	index.get<overlap_lhs_t>().erase(lhs);
