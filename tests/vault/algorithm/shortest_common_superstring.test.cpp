@@ -16,7 +16,6 @@
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
 #include <vault/algorithm/shortest_common_superstring.hpp>
 
-
 // clang-format off
 
 using namespace std::literals::string_literals;

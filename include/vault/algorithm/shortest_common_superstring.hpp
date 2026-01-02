@@ -203,12 +203,16 @@ namespace vault::algorithm {
 	cum_overlap += overlap;
         superstring  = lhs + rhs.substr(overlap);
 
-        for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(lhs); first != last; ++first) {
-	  index.emplace(superstring, first -> rhs, knuth_morris_pratt_overlap(superstring, first -> rhs).score);
+        for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs); first != last; ++first) {
+	  if(first -> rhs != lhs) {
+	    index.emplace(superstring, first -> rhs, first -> score);
+	  }
         }
 
-        for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(rhs); first != last; ++first) {
-	  index.emplace(first -> lhs, superstring, knuth_morris_pratt_overlap(first -> lhs, superstring).score);
+        for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
+	  if(first -> lhs != rhs) {
+	    index.emplace(first -> lhs, superstring, first -> score);
+	  }
         }
 
 	index.get<overlap_lhs_t>().erase(lhs);
