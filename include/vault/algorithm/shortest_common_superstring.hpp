@@ -123,15 +123,12 @@ namespace vault::algorithm {
 	| ::ranges::views::transform(knuth_morris_pratt_failure_function)
 	| ::ranges::to<std::vector>();
 
-      auto failure_table_views = ::ranges::views::transform
-	(failure_tables, ::ranges::views::all);
-
       // A random access range to return a searcher for the nth input
       // element. Constructon is cheap because we construct the
       // searcher from element and failure table views, so we
       // construct the searchers on demand instead of caching them.
       auto searchers = ::ranges::views::zip_with
-	(make_knuth_morris_pratt_searcher, range, failure_table_views);
+	(make_knuth_morris_pratt_searcher, range, failure_tables);
 
 
 
@@ -148,7 +145,7 @@ namespace vault::algorithm {
 	};
       };
 
-      auto filtered = ::ranges::views::zip(range, proper_suffixes(range), failure_table_views)
+      auto filtered = ::ranges::views::zip(range, proper_suffixes(range), failure_tables)
         | ::ranges::views::filter(filter_fn)
         | ::ranges::views::transform(to_pattern_failure_table_pair)
         | ::ranges::to<std::vector>();
