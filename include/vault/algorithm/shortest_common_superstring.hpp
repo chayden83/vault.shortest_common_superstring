@@ -62,6 +62,14 @@ namespace vault::algorithm {
       });
     };
 
+    static constexpr inline auto const length_fn = []<std::ranges::range R>(R const &range) {
+      if constexpr (std::ranges::sized_range<R>) {
+	return std::ranges::size(range);
+      } else {
+	return std::ranges::distance(std::ranges::begin(range), std::ranges::end(range));
+      }
+    };
+
     struct overlap_entry_t {
       std::string lhs = {};
       std::string rhs = {};
@@ -112,7 +120,7 @@ namespace vault::algorithm {
       // Sort the input elements by length. This allows us to reduce
       // the number of elements we need to check when filtering each
       // element that is a substring of another element.
-      std::ranges::sort(range, {}, std::ranges::size);
+      std::ranges::sort(range, {}, length_fn);
 
       // Preconstruct the failure tables, cache them, and create a
       // random access range that returns a view of the failure table
