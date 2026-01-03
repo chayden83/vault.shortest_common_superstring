@@ -2,4 +2,5 @@
 
 #include <benchmark/benchmark.h>
 
+// clang-format off
 // clang-format on

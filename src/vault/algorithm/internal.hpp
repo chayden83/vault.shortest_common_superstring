@@ -7,6 +7,7 @@
 
 namespace vault::internal {
   std::span<char const * const> random_words_1k();
+  std::span<char const * const> random_words_10k();
 }
 
 #endif

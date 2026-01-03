@@ -1,2 +1,4 @@
 /build
 /.cache
+
+/tests/vault/algorithm/main.cpp
