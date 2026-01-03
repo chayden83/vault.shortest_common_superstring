@@ -114,11 +114,6 @@ namespace vault::algorithm {
       // element that is a substring of another element.
       std::ranges::sort(range, {}, std::ranges::size);
 
-      // A random access range to return a view for the nth input
-      // element. We use element views whenever possible in order to
-      // avid copies.
-      auto element_views = ::ranges::views::transform(range, ::ranges::views::all);
-
       // Preconstruct the failure tables, cache them, and create a
       // random access range that returns a view of the failure table
       // for the nth input element on demand. We use views of the
@@ -136,7 +131,7 @@ namespace vault::algorithm {
       // searcher from element and failure table views, so we
       // construct the searchers on demand instead of caching them.
       auto searchers = ::ranges::views::zip_with
-	(make_knuth_morris_pratt_searcher, element_views, failure_table_views);
+	(make_knuth_morris_pratt_searcher, range, failure_table_views);
 
 
 
