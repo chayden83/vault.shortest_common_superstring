@@ -40,7 +40,6 @@ void shortest_common_superstring(benchmark::State &state) {
 }
 
 BENCHMARK(shortest_common_superstring) ->
-  RangeMultiplier(2) ->
-  Range(256, 8192);
+  RangeMultiplier(2) -> Range(256, 10000);
 
 // clang-format on
