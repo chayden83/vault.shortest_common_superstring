@@ -85,7 +85,7 @@ namespace vault::algorithm {
       result<std::ranges::iterator_t<R>, O, std::ranges::range_value_t<R>>
     {
       if(std::ranges::empty(strings)) {
-	return { std::ranges::end(strings), out, "", 0 };
+	return { std::ranges::end(strings), out, {}, 0 };
       }
 
       if(std::ranges::next(std::ranges::begin(strings)) == std::ranges::end(strings)) {
