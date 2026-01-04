@@ -151,7 +151,7 @@ namespace vault::algorithm {
 	  index.emplace(i, j, score);
 	}
       }
-      
+
       while(index.size() != 0) {
 	auto const [lhs, rhs, overlap] = index.get<overlap_score_t>()
 	  .extract(index.get<overlap_score_t>().begin()).value();
@@ -165,7 +165,8 @@ namespace vault::algorithm {
 	for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
 	  if(first -> lhs != rhs) index.emplace(first -> lhs, reduced_strings.size(), first -> score);
 	}
-	
+
+	// TODO: Generalize merging of the lhs and rhs strings.
 	reduced_strings.push_back
 	  (reduced_strings[lhs] + reduced_strings[rhs].substr(overlap));
 	
