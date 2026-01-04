@@ -19,12 +19,12 @@
 // ---------------------------------------------------------------------------
 // Benchmark                                 Time             CPU   Iterations
 // ---------------------------------------------------------------------------
-// shortest_common_superstring/256    38510231 ns     38496430 ns           17
-// shortest_common_superstring/512   210588417 ns    210581596 ns            3
-// shortest_common_superstring/1024 1029923903 ns   1029466393 ns            1
-// shortest_common_superstring/2048 3990672851 ns   3988920320 ns            1
-// shortest_common_superstring/4096 1.4399e+10 ns   1.4383e+10 ns            1
-// shortest_common_superstring/8192 4.1446e+10 ns   4.1427e+10 ns            1
+// shortest_common_superstring/256    25514193 ns     25511597 ns           28
+// shortest_common_superstring/512   141118375 ns    141111659 ns            5
+// shortest_common_superstring/1024  638963581 ns    638889634 ns            1
+// shortest_common_superstring/2048 2386243683 ns   2386024710 ns            1
+// shortest_common_superstring/4096 7756590176 ns   7755799602 ns            1
+// shortest_common_superstring/8192 2.0386e+10 ns   2.0384e+10 ns            1
 void shortest_common_superstring(benchmark::State &state) {
   auto strings = vault::internal::random_words_10k()
     | ::ranges::views::transform([](auto arg) { return std::string { arg }; })
