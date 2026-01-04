@@ -3,7 +3,8 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
-#include <tuple>
+#include <print>
+
 #include <string>
 #include <ranges>
 #include <utility>
@@ -56,8 +57,8 @@ namespace vault::algorithm {
     };
 
     struct overlap_entry_t {
-      std::string lhs = {};
-      std::string rhs = {};
+      uint32_t lhs = 0;
+      uint32_t rhs = 0;
 
       int score = 0;
     };
@@ -76,11 +77,11 @@ namespace vault::algorithm {
 	>,
         boost::multi_index::hashed_non_unique<
 	  boost::multi_index::tag<overlap_lhs_t>,
-	  boost::multi_index::member<overlap_entry_t, std::string, &overlap_entry_t::lhs>
+	  boost::multi_index::member<overlap_entry_t, uint32_t, &overlap_entry_t::lhs>
 	>,
         boost::multi_index::hashed_non_unique<
 	  boost::multi_index::tag<overlap_rhs_t>,
-	  boost::multi_index::member<overlap_entry_t, std::string, &overlap_entry_t::rhs>
+	  boost::multi_index::member<overlap_entry_t, uint32_t, &overlap_entry_t::rhs>
 	>
       >
     >;
@@ -102,6 +103,15 @@ namespace vault::algorithm {
     static auto operator ()(R &&strings, O out) ->
       result<std::ranges::iterator_t<R>, O, std::ranges::range_value_t<R>>
     {
+      if(std::ranges::empty(strings)) {
+	return { std::ranges::end(strings), out, "", 0 };
+      }
+
+      if(std::ranges::next(std::ranges::begin(strings)) == std::ranges::end(strings)) {
+	*out++ = bounds_t<R> { 0, length_fn(*std::ranges::begin(strings)) };
+	return { std::ranges::end(strings), out, *std::ranges::begin(strings), 0 };
+      }
+
       auto total_overlap = 0;
 
       auto const filter_fn = [&](auto const &parameters) -> bool {
@@ -152,74 +162,52 @@ namespace vault::algorithm {
       });
 
       auto index = overlap_index_t { };
-
-      // TODO: Convert to a view that emits off-diagonal pairs.
-      for(auto i = 0uz; i < filtered.size(); ++i) {
-        for(auto j = 0uz; j < filtered.size(); ++j) {
+      
+      for(auto i = 0u; i < filtered.size(); ++i) {
+	for(auto j = 0u; j < filtered.size(); ++j) {
 	  if(i == j) continue;
-
+	  
 	  auto const &[pattern_i, _              ] = filtered[i];
 	  auto const &[pattern_j, failure_table_j] = filtered[j];
-
+	  
 	  auto score = knuth_morris_pratt_overlap
 	    (pattern_i, pattern_j, failure_table_j).score;
-
-	  index.emplace(pattern_i, pattern_j, score);
-        }
+	  
+	  index.emplace(i, j, score);
+	}
       }
-
-      if(filtered.size() == 1) {
-	index.emplace(filtered[0].first, filtered[0].first, filtered[0].first.size());
-      }
-
-      auto superstring = std::string { };
-
-      // Repeatedly merge the two index entries with the largest
-      // overlap until we have a single entry. This involves the
-      // following bookkeeping.
-      //
-      // - Extract (and therefore erase) the entry containing the two
-      //   elements with the largest overlap.
-      // - Add the overlap of the entry to the cumulative overlap.
-      // - Calculate the superstring for the two elements in the
-      //   entry.
-      // - Create new entries for the superstring as necessary.
-      // - Erase every entry that refers to either of the strings in
-      //   the entry with the max overlap.
-      //
-      // Take care not to update the [rhs, lhs, ...] index entry to
-      // [superstring, superstring, ...] or that node will not be
-      // erased as intended and bad things will happen.
+      
       while(index.size() != 0) {
-        auto [lhs, rhs, overlap] = index.get<overlap_score_t>()
+	auto const [lhs, rhs, overlap] = index.get<overlap_score_t>()
 	  .extract(index.get<overlap_score_t>().begin()).value();
-
+	
 	total_overlap += overlap;
-        superstring    = lhs;
-
-	superstring.append(rhs, overlap);
-
-	// We previously filtered the elements that are proper
-	// substrings of another element, so we know the maximum
-	// overlap between any two strings s1 and s2 if min(len(s1) -
-	// 1, len(s2) - 1). This means that the merged string can
-	// never produce a new overlap that is larger than the
-	// existing overlap. Consequently, we can propagate the
-	// existing overlaps and we never need to perform another
-	// overlap calculation.
-        for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs); first != last; ++first) {
-	  if(first -> rhs != lhs) index.emplace(superstring, first -> rhs, first -> score);
-        }
-
-        for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
-	  if(first -> lhs != rhs) index.emplace(first -> lhs, superstring, first -> score);
-        }
-
+	
+	for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs); first != last; ++first) {
+	  if(first -> rhs != lhs) index.emplace(filtered.size(), first -> rhs, first -> score);
+	}
+	
+	for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
+	  if(first -> lhs != rhs) index.emplace(first -> lhs, filtered.size(), first -> score);
+	}
+	
+	filtered.push_back({ filtered[lhs].first + filtered[rhs].first.substr(overlap), {} });
+	
 	index.get<overlap_lhs_t>().erase(lhs);
+	index.get<overlap_rhs_t>().erase(rhs);
 	index.get<overlap_lhs_t>().erase(rhs);
 	index.get<overlap_rhs_t>().erase(lhs);
-	index.get<overlap_rhs_t>().erase(rhs);
+	
+	// We need to remove the entry that corresponds to [rhs, lhs]
+	// b/c we just used [lhs, rhs].
+	auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs);
+	
+	if(auto itr = std::ranges::find(first, last, lhs, &overlap_entry_t::rhs); itr != last) {
+	  index.get<overlap_lhs_t>().erase(itr);
+	}
       }
+      
+      auto superstring = std::move(filtered.back().first);
 
       auto super_begin = std::ranges::begin(superstring);
       auto super_end   = std::ranges::end  (superstring);
