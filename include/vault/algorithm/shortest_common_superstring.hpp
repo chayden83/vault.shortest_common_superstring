@@ -18,8 +18,7 @@
 #include <range/v3/range/conversion.hpp>
 
 #include <range/v3/view/zip.hpp>
-#include <range/v3/view/filter.hpp>
-#include <range/v3/view/generate.hpp>
+#include <range/v3/view/indirect.hpp>
 #include <range/v3/view/addressof.hpp>
 #include <range/v3/view/transform.hpp>
 
@@ -30,23 +29,8 @@
 // clang-format off
 
 namespace vault::algorithm {
-  constexpr inline struct proper_suffixes_fn {
-    template<std::forward_iterator I, std::sentinel_for<I> S>
-    [[nodiscard]] static constexpr auto operator ()(I first, S last) {
-      auto generator = [=]() mutable -> std::ranges::subrange<I, S> {
-        return std::ranges::subrange { first == last ? first : ++first, last };
-      };
-
-      return ::ranges::views::generate(std::move(generator));
-    }
-
-    [[nodiscard]] static constexpr auto operator ()(std::ranges::forward_range auto &&range) {
-      return operator ()(std::ranges::begin(range), std::ranges::end(range));
-    }
-  } const proper_suffixes { };
-
   constexpr inline struct shortest_common_superstring_fn {
-    static constexpr inline auto const length_fn = []<std::ranges::range R>(R const &range) {
+    static constexpr inline auto const strlen_fn = []<std::ranges::range R>(R const &range) {
       if constexpr (std::ranges::sized_range<R>) {
 	return std::ranges::size(range);
       } else {
@@ -106,70 +90,63 @@ namespace vault::algorithm {
       }
 
       if(std::ranges::next(std::ranges::begin(strings)) == std::ranges::end(strings)) {
-	*out++ = bounds_t<R> { 0, length_fn(*std::ranges::begin(strings)) };
+	*out++ = bounds_t<R> { 0, strlen_fn(*std::ranges::begin(strings)) };
 	return { std::ranges::end(strings), out, *std::ranges::begin(strings), 0 };
       }
 
       auto total_overlap = 0;
 
-      auto const filter_fn = [&](auto const &parameters) -> bool {
-	auto const &[needle_params, haystack] = parameters;
-
-	auto const &needle = *needle_params.first;
-	auto const &ftable = *needle_params.second;
-
-	auto searcher = knuth_morris_pratt_searcher(needle, ftable);
-
-	return std::ranges::none_of(haystack, [&](auto const &haystrand_params) -> bool {
-	  auto const &haystrand = *haystrand_params.first;
-
-	  auto match_itr = std::search
-	    (std::ranges::begin(haystrand), std::ranges::end(haystrand), searcher);
-
-	  if(match_itr != std::ranges::end(haystrand)) {
-	    return total_overlap += length_fn(needle), true;
-	  }
-
-	  return false;
-	});
-      };
-
-      auto failure_tables = strings
+      auto ftables = strings
 	| ::ranges::views::transform(knuth_morris_pratt_failure_function)
 	| ::ranges::to<std::vector>();
 
-      auto filtered = std::invoke([&]() {
-	auto        string_ptrs = ::ranges::views::addressof(       strings);
-	auto failure_table_ptrs = ::ranges::views::addressof(failure_tables);
+      auto string_ptrs = ::ranges::to<std::vector>(::ranges::views::addressof(strings));
+      auto ftable_ptrs = ::ranges::to<std::vector>(::ranges::views::addressof(ftables));
 
-	auto ptr_pairs = ::ranges::to<std::vector>
-	  (::ranges::views::zip(string_ptrs, failure_table_ptrs));
-
-	std::ranges::sort(ptr_pairs, {}, [](auto ptr_pair) {
-	  return length_fn(*ptr_pair.first);
+      std::invoke([&] {	
+	std::ranges::sort(::ranges::views::zip(string_ptrs, ftable_ptrs), {}, [](auto ptr_pair) {
+	  return strlen_fn(*ptr_pair.first);
 	});
+	
+	auto out_cursor_strings = std::ranges::begin(string_ptrs);
+	auto out_cursor_ftables = std::ranges::begin(ftable_ptrs);
+	
+	auto in_cursor_strings = std::ranges::begin(string_ptrs);
+	auto in_cursor_ftables = std::ranges::begin(ftable_ptrs);
+	
+	while(in_cursor_strings != std::ranges::end(string_ptrs)) {
+	  auto searcher = knuth_morris_pratt_searcher { **in_cursor_strings, **in_cursor_ftables };
+	  
+	  auto is_superstring = [searcher = std::move(searcher)](auto *haystrand_ptr) {
+	    return std::search(std::ranges::begin(*haystrand_ptr), std::ranges::end(*haystrand_ptr), searcher) != std::ranges::end(*haystrand_ptr);
+	  };
+	  
+	  if(std::ranges::none_of(std::ranges::next(in_cursor_strings), std::ranges::end(string_ptrs), is_superstring)) {
+	    *out_cursor_strings++ = *in_cursor_strings;
+	    *out_cursor_ftables++ = *in_cursor_ftables;
+	  } else {
+	    total_overlap += strlen_fn(**in_cursor_strings);
+	  }
 
-	auto to_value_fn = [](auto ptr_pair) {
-	  return std::pair { *ptr_pair.first.first, *ptr_pair.first.second };
-	};
+	  ++in_cursor_strings;
+	  ++in_cursor_ftables;
+	}
 
-	return ::ranges::views::zip(ptr_pairs, proper_suffixes(ptr_pairs))
-	  | ::ranges::views::filter(filter_fn)
-	  | ::ranges::views::transform(to_value_fn)
-	  | ::ranges::to<std::vector>();
+	string_ptrs.erase(out_cursor_strings, std::ranges::end(string_ptrs));
+	ftable_ptrs.erase(out_cursor_ftables, std::ranges::end(ftable_ptrs));
       });
+
+      auto reduced_strings = ::ranges::to<std::vector>
+	(::ranges::views::indirect(string_ptrs));
 
       auto index = overlap_index_t { };
       
-      for(auto i = 0u; i < filtered.size(); ++i) {
-	for(auto j = 0u; j < filtered.size(); ++j) {
+      for(auto i = 0u; i < reduced_strings.size(); ++i) {
+	for(auto j = 0u; j < reduced_strings.size(); ++j) {
 	  if(i == j) continue;
-	  
-	  auto const &[pattern_i, _              ] = filtered[i];
-	  auto const &[pattern_j, failure_table_j] = filtered[j];
-	  
+
 	  auto score = knuth_morris_pratt_overlap
-	    (pattern_i, pattern_j, failure_table_j).score;
+	    (reduced_strings[i], reduced_strings[j], *ftable_ptrs[j]).score;
 	  
 	  index.emplace(i, j, score);
 	}
@@ -182,14 +159,15 @@ namespace vault::algorithm {
 	total_overlap += overlap;
 	
 	for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs); first != last; ++first) {
-	  if(first -> rhs != lhs) index.emplace(filtered.size(), first -> rhs, first -> score);
+	  if(first -> rhs != lhs) index.emplace(reduced_strings.size(), first -> rhs, first -> score);
 	}
 	
 	for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
-	  if(first -> lhs != rhs) index.emplace(first -> lhs, filtered.size(), first -> score);
+	  if(first -> lhs != rhs) index.emplace(first -> lhs, reduced_strings.size(), first -> score);
 	}
 	
-	filtered.push_back({ filtered[lhs].first + filtered[rhs].first.substr(overlap), {} });
+	reduced_strings.push_back
+	  (reduced_strings[lhs] + reduced_strings[rhs].substr(overlap));
 	
 	index.get<overlap_lhs_t>().erase(lhs);
 	index.get<overlap_rhs_t>().erase(rhs);
@@ -197,12 +175,12 @@ namespace vault::algorithm {
 	index.get<overlap_rhs_t>().erase(lhs);
       }
       
-      auto superstring = std::move(filtered.back().first);
+      auto superstring = std::move(reduced_strings.back());
 
       auto super_begin = std::ranges::begin(superstring);
       auto super_end   = std::ranges::end  (superstring);
 
-      for(auto &&[substring, ftable] : ::ranges::views::zip(strings, failure_tables)) {
+      for(auto &&[substring, ftable] : ::ranges::views::zip(strings, ftables)) {
 	auto searcher = knuth_morris_pratt_searcher { substring, std::move(ftable) };
 
         auto offset = std::ranges::distance

@@ -58,13 +58,13 @@ namespace vault::algorithm {
         }
       }
 
-      return {
+      return result<ILHS, IRHS, FailureTable> {
 	rhs_index,
 	std::next(lhs_first, lhs_length - rhs_index),
 	lhs_cursor,
 	rhs_first,
 	std::next(rhs_first, rhs_index),
-	std::move(failure_table)
+	std::forward<FailureTable>(failure_table)
       };
     }
 
