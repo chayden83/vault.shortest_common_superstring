@@ -9,6 +9,7 @@
 
 #include <range/v3/view/transform.hpp>
 #include <range/v3/view/take_exactly.hpp>
+
 #include <range/v3/range/conversion.hpp>
 
 #include <vault/algorithm/internal.hpp>
