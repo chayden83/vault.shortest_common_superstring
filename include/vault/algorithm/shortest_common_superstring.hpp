@@ -3,7 +3,6 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
-
 #include <ranges>
 #include <utility>
 #include <iterator>
@@ -103,24 +102,24 @@ namespace vault::algorithm {
       auto string_ptrs = ::ranges::to<std::vector>(::ranges::views::addressof(strings));
       auto ftable_ptrs = ::ranges::to<std::vector>(::ranges::views::addressof(ftables));
 
-      std::invoke([&] {	
+      std::invoke([&] {
 	std::ranges::sort(::ranges::views::zip(string_ptrs, ftable_ptrs), {}, [](auto ptr_pair) {
 	  return strlen_fn(*ptr_pair.first);
 	});
-	
+
 	auto out_cursor_strings = std::ranges::begin(string_ptrs);
 	auto out_cursor_ftables = std::ranges::begin(ftable_ptrs);
-	
+
 	auto in_cursor_strings = std::ranges::begin(string_ptrs);
 	auto in_cursor_ftables = std::ranges::begin(ftable_ptrs);
-	
+
 	while(in_cursor_strings != std::ranges::end(string_ptrs)) {
 	  auto searcher = knuth_morris_pratt_searcher { **in_cursor_strings, **in_cursor_ftables };
-	  
+
 	  auto is_superstring = [searcher = std::move(searcher)](auto *haystrand_ptr) {
 	    return std::search(std::ranges::begin(*haystrand_ptr), std::ranges::end(*haystrand_ptr), searcher) != std::ranges::end(*haystrand_ptr);
 	  };
-	  
+
 	  if(std::ranges::none_of(std::ranges::next(in_cursor_strings), std::ranges::end(string_ptrs), is_superstring)) {
 	    *out_cursor_strings++ = *in_cursor_strings;
 	    *out_cursor_ftables++ = *in_cursor_ftables;
@@ -140,14 +139,14 @@ namespace vault::algorithm {
 	(::ranges::views::indirect(string_ptrs));
 
       auto index = index_t { };
-      
+
       for(auto i = 0u; i < reduced_strings.size(); ++i) {
 	for(auto j = 0u; j < reduced_strings.size(); ++j) {
 	  if(i == j) continue;
 
 	  auto score = knuth_morris_pratt_overlap
 	    (reduced_strings[i], reduced_strings[j], *ftable_ptrs[j]).score;
-	  
+
 	  index.emplace(i, j, score);
 	}
       }
@@ -155,13 +154,13 @@ namespace vault::algorithm {
       while(index.size() != 0) {
 	auto const [lhs, rhs, overlap] = index.get<index_score_t>()
 	  .extract(index.get<index_score_t>().begin()).value();
-	
+
 	total_overlap += overlap;
-	
+
 	for(auto [first, last] = index.get<index_lhs_t>().equal_range(rhs); first != last; ++first) {
 	  if(first -> rhs != lhs) index.emplace(reduced_strings.size(), first -> rhs, first -> score);
 	}
-	
+
 	for(auto [first, last] = index.get<index_rhs_t>().equal_range(lhs); first != last; ++first) {
 	  if(first -> lhs != rhs) index.emplace(first -> lhs, reduced_strings.size(), first -> score);
 	}
@@ -169,13 +168,13 @@ namespace vault::algorithm {
 	// TODO: Generalize merging of the lhs and rhs strings.
 	reduced_strings.push_back
 	  (reduced_strings[lhs] + reduced_strings[rhs].substr(overlap));
-	
+
 	index.get<index_lhs_t>().erase(lhs);
 	index.get<index_rhs_t>().erase(rhs);
 	index.get<index_lhs_t>().erase(rhs);
 	index.get<index_rhs_t>().erase(lhs);
       }
-      
+
       auto superstring = std::move(reduced_strings.back());
 
       auto super_begin = std::ranges::begin(superstring);
