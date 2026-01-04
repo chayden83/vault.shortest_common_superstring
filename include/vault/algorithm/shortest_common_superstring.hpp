@@ -21,6 +21,7 @@
 #include <range/v3/view/zip.hpp>
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/generate.hpp>
+#include <range/v3/view/addressof.hpp>
 #include <range/v3/view/enumerate.hpp>
 #include <range/v3/view/transform.hpp>
 
@@ -47,21 +48,6 @@ namespace vault::algorithm {
   } const proper_suffixes { };
 
   constexpr inline struct shortest_common_superstring_fn {
-    static constexpr inline auto const filter_fn = []
-      (auto const &parameters) -> bool
-    {
-      auto const &[needle, haystack, failure_table] = parameters;
-
-      auto searcher = knuth_morris_pratt_searcher(needle, failure_table);
-
-      return std::ranges::none_of(haystack, [&](auto const &haystrand) -> bool {
-	auto match_itr = std::search
-	  (std::ranges::begin(haystrand), std::ranges::end(haystrand), searcher);
-
-	return match_itr != std::ranges::end(haystrand);
-      });
-    };
-
     static constexpr inline auto const length_fn = []<std::ranges::range R>(R const &range) {
       if constexpr (std::ranges::sized_range<R>) {
 	return std::ranges::size(range);
@@ -114,49 +100,57 @@ namespace vault::algorithm {
       <std::ranges::range_difference_t<R>, std::ranges::range_size_t<R>>;
 
     template<std::ranges::forward_range R, std::output_iterator<bounds_t<R>> O>
-    static auto operator ()(R &&range, O out) ->
+    static auto operator ()(R &&strings, O out) ->
       result<std::ranges::iterator_t<R>, O, std::ranges::range_value_t<R>>
     {
-      // Sort the input elements by length. This allows us to reduce
-      // the number of elements we need to check when filtering each
-      // element that is a substring of another element.
-      std::ranges::sort(range, {}, length_fn);
+      auto total_overlap = 0;
 
-      // Preconstruct the failure tables, cache them, and create a
-      // random access range that returns a view of the failure table
-      // for the nth input element on demand. We use views of the
-      // faulure tables whenever possible to avoid copies and
-      // recalculations.
-      auto failure_tables = range
+      auto const filter_fn = [&](auto const &parameters) -> bool {
+	auto const &[needle_params, haystack] = parameters;
+
+	auto const &needle = *needle_params.first;
+	auto const &ftable = *needle_params.second;
+
+	auto searcher = knuth_morris_pratt_searcher(needle, ftable);
+
+	return std::ranges::none_of(haystack, [&](auto const &haystrand_params) -> bool {
+	  auto const &haystrand = *haystrand_params.first;
+
+	  auto match_itr = std::search
+	    (std::ranges::begin(haystrand), std::ranges::end(haystrand), searcher);
+
+	  if(match_itr != std::ranges::end(haystrand)) {
+	    return total_overlap += length_fn(needle), true;
+	  }
+
+	  return false;
+	});
+      };
+
+      auto failure_tables = strings
 	| ::ranges::views::transform(knuth_morris_pratt_failure_function)
 	| ::ranges::to<std::vector>();
 
-      // A random access range to return a searcher for the nth input
-      // element. Constructon is cheap because we construct the
-      // searcher from element and failure table views, so we
-      // construct the searchers on demand instead of caching them.
-      auto searchers = ::ranges::views::zip_with
-	(make_knuth_morris_pratt_searcher, range, failure_tables);
+      auto filtered = std::invoke([&]() {
+	auto        string_ptrs = ::ranges::views::addressof(       strings);
+	auto failure_table_ptrs = ::ranges::views::addressof(failure_tables);
 
+	auto ptr_pairs = ::ranges::to<std::vector>
+	  (::ranges::views::zip(string_ptrs, failure_table_ptrs));
 
+	std::ranges::sort(ptr_pairs, {}, [](auto ptr_pair) {
+	  return length_fn(*ptr_pair.first);
+	});
 
-
-
-
-
-      auto to_pattern_failure_table_pair = [](auto &&parameters) {
-	auto &&[pattern, _, failure_table] = parameters;
-
-	return std::pair {
-	  std::forward<decltype(pattern      )>(pattern      ),
-	  std::forward<decltype(failure_table)>(failure_table)
+	auto to_value_fn = [](auto ptr_pair) {
+	  return std::pair { *ptr_pair.first.first, *ptr_pair.first.second };
 	};
-      };
 
-      auto filtered = ::ranges::views::zip(range, proper_suffixes(range), failure_tables)
-        | ::ranges::views::filter(filter_fn)
-        | ::ranges::views::transform(to_pattern_failure_table_pair)
-        | ::ranges::to<std::vector>();
+	return ::ranges::views::zip(ptr_pairs, proper_suffixes(ptr_pairs))
+	  | ::ranges::views::filter(filter_fn)
+	  | ::ranges::views::transform(to_value_fn)
+	  | ::ranges::to<std::vector>();
+      });
 
       auto index = overlap_index_t { };
 
@@ -179,9 +173,6 @@ namespace vault::algorithm {
 	index.emplace(filtered[0].first, filtered[0].first, filtered[0].first.size());
       }
 
-      // TODO: Include cumulative length of words that are proper
-      // sub-strings in cumulative overlap.
-      auto cum_overlap = 0;
       auto superstring = std::string { };
 
       // Repeatedly merge the two index entries with the largest
@@ -204,8 +195,8 @@ namespace vault::algorithm {
         auto [lhs, rhs, overlap] = index.get<overlap_score_t>()
 	  .extract(index.get<overlap_score_t>().begin()).value();
 
-	cum_overlap += overlap;
-        superstring  = lhs;
+	total_overlap += overlap;
+        superstring    = lhs;
 
 	superstring.append(rhs, overlap);
 
@@ -234,14 +225,17 @@ namespace vault::algorithm {
       auto super_begin = std::ranges::begin(superstring);
       auto super_end   = std::ranges::end  (superstring);
 
-      for(auto &&[i, substring] : ::ranges::views::enumerate(range)) {
+      for(auto &&[i, substring] : ::ranges::views::enumerate(strings)) {
+	auto searcher = knuth_morris_pratt_searcher
+	  { substring, std::move(failure_tables[i]) };
+
         auto offset = std::ranges::distance
-	  (super_begin, std::search(super_begin, super_end, searchers[i]));
+	  (super_begin, std::search(super_begin, super_end, searcher));
 
         *out++ = bounds_t<R> { offset, substring.size() };
       }
 
-      return { std::ranges::end(range), out, std::move(superstring), cum_overlap };
+      return { std::ranges::end(strings), out, std::move(superstring), total_overlap };
     }
 
   } const shortest_common_superstring { };
