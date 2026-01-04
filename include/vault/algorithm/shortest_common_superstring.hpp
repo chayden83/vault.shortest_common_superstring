@@ -22,7 +22,6 @@
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/generate.hpp>
 #include <range/v3/view/addressof.hpp>
-#include <range/v3/view/enumerate.hpp>
 #include <range/v3/view/transform.hpp>
 
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
@@ -225,9 +224,8 @@ namespace vault::algorithm {
       auto super_begin = std::ranges::begin(superstring);
       auto super_end   = std::ranges::end  (superstring);
 
-      for(auto &&[i, substring] : ::ranges::views::enumerate(strings)) {
-	auto searcher = knuth_morris_pratt_searcher
-	  { substring, std::move(failure_tables[i]) };
+      for(auto &&[substring, ftable] : ::ranges::views::zip(strings, failure_tables)) {
+	auto searcher = knuth_morris_pratt_searcher { substring, std::move(ftable) };
 
         auto offset = std::ranges::distance
 	  (super_begin, std::search(super_begin, super_end, searcher));
@@ -237,7 +235,6 @@ namespace vault::algorithm {
 
       return { std::ranges::end(strings), out, std::move(superstring), total_overlap };
     }
-
   } const shortest_common_superstring { };
 }
 
