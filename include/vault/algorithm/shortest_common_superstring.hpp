@@ -3,9 +3,7 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
-#include <print>
 
-#include <string>
 #include <ranges>
 #include <utility>
 #include <iterator>
