@@ -195,14 +195,6 @@ namespace vault::algorithm {
 	index.get<overlap_rhs_t>().erase(rhs);
 	index.get<overlap_lhs_t>().erase(rhs);
 	index.get<overlap_rhs_t>().erase(lhs);
-	
-	// We need to remove the entry that corresponds to [rhs, lhs]
-	// b/c we just used [lhs, rhs].
-	auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs);
-	
-	if(auto itr = std::ranges::find(first, last, lhs, &overlap_entry_t::rhs); itr != last) {
-	  index.get<overlap_lhs_t>().erase(itr);
-	}
       }
       
       auto superstring = std::move(filtered.back().first);
