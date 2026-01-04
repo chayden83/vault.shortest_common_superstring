@@ -38,32 +38,32 @@ namespace vault::algorithm {
       }
     };
 
-    struct overlap_entry_t {
+    struct index_entry_t {
       uint32_t lhs = 0;
       uint32_t rhs = 0;
 
       int score = 0;
     };
 
-    struct overlap_lhs_t { };
-    struct overlap_rhs_t { };
+    struct index_lhs_t { };
+    struct index_rhs_t { };
 
-    struct overlap_score_t { };
+    struct index_score_t { };
 
-    using overlap_index_t = boost::multi_index_container<
-      overlap_entry_t, boost::multi_index::indexed_by<
+    using index_t = boost::multi_index_container<
+      index_entry_t, boost::multi_index::indexed_by<
         boost::multi_index::ordered_non_unique<
-	  boost::multi_index::tag<overlap_score_t>,
-	  boost::multi_index::member<overlap_entry_t, int, &overlap_entry_t::score>,
+	  boost::multi_index::tag<index_score_t>,
+	  boost::multi_index::member<index_entry_t, int, &index_entry_t::score>,
 	  std::greater<>
 	>,
         boost::multi_index::hashed_non_unique<
-	  boost::multi_index::tag<overlap_lhs_t>,
-	  boost::multi_index::member<overlap_entry_t, uint32_t, &overlap_entry_t::lhs>
+	  boost::multi_index::tag<index_lhs_t>,
+	  boost::multi_index::member<index_entry_t, uint32_t, &index_entry_t::lhs>
 	>,
         boost::multi_index::hashed_non_unique<
-	  boost::multi_index::tag<overlap_rhs_t>,
-	  boost::multi_index::member<overlap_entry_t, uint32_t, &overlap_entry_t::rhs>
+	  boost::multi_index::tag<index_rhs_t>,
+	  boost::multi_index::member<index_entry_t, uint32_t, &index_entry_t::rhs>
 	>
       >
     >;
@@ -139,7 +139,7 @@ namespace vault::algorithm {
       auto reduced_strings = ::ranges::to<std::vector>
 	(::ranges::views::indirect(string_ptrs));
 
-      auto index = overlap_index_t { };
+      auto index = index_t { };
       
       for(auto i = 0u; i < reduced_strings.size(); ++i) {
 	for(auto j = 0u; j < reduced_strings.size(); ++j) {
@@ -153,16 +153,16 @@ namespace vault::algorithm {
       }
 
       while(index.size() != 0) {
-	auto const [lhs, rhs, overlap] = index.get<overlap_score_t>()
-	  .extract(index.get<overlap_score_t>().begin()).value();
+	auto const [lhs, rhs, overlap] = index.get<index_score_t>()
+	  .extract(index.get<index_score_t>().begin()).value();
 	
 	total_overlap += overlap;
 	
-	for(auto [first, last] = index.get<overlap_lhs_t>().equal_range(rhs); first != last; ++first) {
+	for(auto [first, last] = index.get<index_lhs_t>().equal_range(rhs); first != last; ++first) {
 	  if(first -> rhs != lhs) index.emplace(reduced_strings.size(), first -> rhs, first -> score);
 	}
 	
-	for(auto [first, last] = index.get<overlap_rhs_t>().equal_range(lhs); first != last; ++first) {
+	for(auto [first, last] = index.get<index_rhs_t>().equal_range(lhs); first != last; ++first) {
 	  if(first -> lhs != rhs) index.emplace(first -> lhs, reduced_strings.size(), first -> score);
 	}
 
@@ -170,10 +170,10 @@ namespace vault::algorithm {
 	reduced_strings.push_back
 	  (reduced_strings[lhs] + reduced_strings[rhs].substr(overlap));
 	
-	index.get<overlap_lhs_t>().erase(lhs);
-	index.get<overlap_rhs_t>().erase(rhs);
-	index.get<overlap_lhs_t>().erase(rhs);
-	index.get<overlap_rhs_t>().erase(lhs);
+	index.get<index_lhs_t>().erase(lhs);
+	index.get<index_rhs_t>().erase(rhs);
+	index.get<index_lhs_t>().erase(rhs);
+	index.get<index_rhs_t>().erase(lhs);
       }
       
       auto superstring = std::move(reduced_strings.back());
