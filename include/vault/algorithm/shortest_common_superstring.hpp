@@ -4,9 +4,10 @@
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
 #include <ranges>
+#include <vector>
 #include <utility>
-#include <iterator>
 #include <algorithm>
+#include <functional>
 
 #include <boost/multi_index_container.hpp>
 
