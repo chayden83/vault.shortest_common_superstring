@@ -3,6 +3,8 @@
 #ifndef VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 #define VAULT_ALGORITHM_SHORTEST_COMMON_SUPERSTRING_HPP
 
+#include <print>
+
 #include <ranges>
 #include <vector>
 #include <utility>
@@ -152,34 +154,30 @@ namespace vault::algorithm {
 	}
       }
 
+      auto *superstring = static_cast<std::string const *>(nullptr);
+
       while(index.size() != 0) {
 	auto const [lhs, rhs, overlap] = index.get<index_score_t>()
 	  .extract(index.get<index_score_t>().begin()).value();
 
-	total_overlap += overlap;
+	reduced_strings[lhs].append(reduced_strings[rhs], overlap);
 
-	for(auto [first, last] = index.get<index_lhs_t>().equal_range(rhs); first != last; ++first) {
-	  if(first -> rhs != lhs) index.emplace(reduced_strings.size(), first -> rhs, first -> score);
-	}
-
-	for(auto [first, last] = index.get<index_rhs_t>().equal_range(lhs); first != last; ++first) {
-	  if(first -> lhs != rhs) index.emplace(first -> lhs, reduced_strings.size(), first -> score);
-	}
-
-	// TODO: Generalize merging of the lhs and rhs strings.
-	reduced_strings.push_back
-	  (reduced_strings[lhs] + reduced_strings[rhs].substr(overlap));
+	superstring = std::addressof(reduced_strings[lhs]);
 
 	index.get<index_lhs_t>().erase(lhs);
 	index.get<index_rhs_t>().erase(rhs);
+	
+	for(auto [first, last] = index.get<index_lhs_t>().equal_range(rhs); first != last; ++first) {
+	  if(first -> rhs != lhs) index.emplace(lhs, first -> rhs, first -> score);
+	}
+
 	index.get<index_lhs_t>().erase(rhs);
-	index.get<index_rhs_t>().erase(lhs);
+	
+	total_overlap += overlap;
       }
 
-      auto superstring = std::move(reduced_strings.back());
-
-      auto super_begin = std::ranges::begin(superstring);
-      auto super_end   = std::ranges::end  (superstring);
+      auto super_begin = std::ranges::begin(*superstring);
+      auto super_end   = std::ranges::end  (*superstring);
 
       for(auto &&[substring, ftable] : ::ranges::views::zip(strings, ftables)) {
 	auto searcher = knuth_morris_pratt_searcher { substring, std::move(ftable) };
@@ -190,7 +188,7 @@ namespace vault::algorithm {
         *out++ = bounds_t<R> { offset, substring.size() };
       }
 
-      return { std::ranges::end(strings), out, std::move(superstring), total_overlap };
+      return { std::ranges::end(strings), out, std::move(*superstring), total_overlap };
     }
   } const shortest_common_superstring { };
 }
