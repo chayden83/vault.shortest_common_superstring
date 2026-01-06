@@ -162,8 +162,6 @@ namespace vault::algorithm {
 
 	reduced_strings[lhs].append(reduced_strings[rhs], overlap);
 
-	superstring = std::addressof(reduced_strings[lhs]);
-
 	index.get<index_lhs_t>().erase(lhs);
 	index.get<index_rhs_t>().erase(rhs);
 	
@@ -172,8 +170,9 @@ namespace vault::algorithm {
 	}
 
 	index.get<index_lhs_t>().erase(rhs);
-	
+
 	total_overlap += overlap;
+	superstring = std::addressof(reduced_strings[lhs]);
       }
 
       auto super_begin = std::ranges::begin(*superstring);
