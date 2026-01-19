@@ -48,10 +48,6 @@ namespace vault::algorithm {
 	}
 
 	[[nodiscard]] void const *step() {
-	  if(haystack_first == haystack_last) {
-	    return nullptr;
-	  }
-
 	  auto haystack_middle = bisect(haystack_first, haystack_last);
 
 	  // TODO: Generalize comparison.
