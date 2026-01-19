@@ -63,8 +63,7 @@ namespace vault::algorithm {
 	++next_needle_itr;
       }
 
-      jobs_last  = jobs_first;
-      jobs_first = std::ranges::begin(jobs);
+      jobs_last  = std::exchange(jobs_first, std::ranges::begin(jobs));
 
 
 
