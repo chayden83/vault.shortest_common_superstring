@@ -12,7 +12,8 @@ FetchContent_Declare(googlebench
 FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
-  shortest_common_superstring
+  amac
+  #shortest_common_superstring
 )
 
 message(STATUS "${PROJECT_NAME}: Benchmarks to be built: ${ALL_BENCHMARKS}")

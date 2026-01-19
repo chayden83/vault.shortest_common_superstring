@@ -22,6 +22,7 @@ target_sources(
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/knuth_morris_pratt_searcher.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/knuth_morris_pratt_failure_function.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/shortest_common_superstring.hpp
+        ${PROJECT_SOURCE_DIR}/include/vault/algorithm/amac.hpp
 )
 
 target_link_libraries(
