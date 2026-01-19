@@ -38,6 +38,31 @@ namespace vault::algorithm {
 	  , haystack_last  { std::ranges::end  (haystack) }
 	  , needle_itr     { needle_itr }
 	{ }
+
+	[[nodiscard]] void const *first_address() const {
+	  if(haystack_first == haystack_last) {
+	    return nullptr;
+	  }
+
+	  return std::addressof(*bisect(haystack_first, haystack_last));
+	}
+
+	[[nodiscard]] void const *step() {
+	  if(haystack_first == haystack_last) {
+	    return nullptr;
+	  }
+
+	  auto haystack_middle = bisect(haystack_first, haystack_last);
+
+	  // TODO: Generalize comparison.
+	  if(*haystack_middle < *needle_itr) {
+	    haystack_first = ++haystack_middle;
+	  } else {
+	    haystack_last  =   haystack_middle;
+	  }
+
+	  return std::addressof(*bisect(haystack_first, haystack_last));
+	}
       };
 
       struct alignas(job_t) job_slot_t {
@@ -57,13 +82,16 @@ namespace vault::algorithm {
       auto jobs_last  = std::ranges::end  (jobs);
 
       while(jobs_first != jobs_last and next_needle_itr != next_needle_end) {
-	new (jobs_first -> get()) job_t { haystack, next_needle_itr };
+	new (jobs_first -> get()) job_t { haystack, next_needle_itr++ };
+
+	if(auto *address = jobs_first -> get() -> first_address()) {
+	  __builtin_prefetch(address);
+	}
 
 	++jobs_first;
-	++next_needle_itr;
       }
 
-      jobs_last  = std::exchange(jobs_first, std::ranges::begin(jobs));
+      jobs_last = std::exchange(jobs_first, std::ranges::begin(jobs));
 
 
 
@@ -74,42 +102,26 @@ namespace vault::algorithm {
       /////////////
 
       while(jobs_first != jobs_last) {
-	auto jobs_itr = jobs_first;
-
-	while(jobs_itr != jobs_last) {
-	  ///////////////////////////////////////
-	  // REPORT RESULT AND PULL IN NEW JOB //
-	  ///////////////////////////////////////
-	  if(jobs_itr -> get() -> haystack_first == jobs_itr -> get() -> haystack_last) {
-	    std::invoke(report, *jobs_itr -> get());
-
-	    if(next_needle_itr != next_needle_end) {
-	      *jobs_itr -> get() = job_t { haystack, next_needle_itr++ };
-	    } else {
-	      --jobs_last;
-	      std::exchange(*jobs_itr -> get(), *jobs_last -> get()).~job_t();
-	    }
-
-	    continue;
+	for(auto jobs_itr = jobs_first; jobs_itr != jobs_last; ++jobs_itr) {
+	  if(auto *next_address = jobs_itr -> get() -> step()) {
+	    __builtin_prefetch(next_address);  continue;	    
 	  }
 
-	  /////////////////////////////////////
-	  // UPDATE AND CONTINUE TO NEXT JOB //
-	  /////////////////////////////////////
-	  auto haystack_middle = bisect
-	    (jobs_itr -> get() -> haystack_first, jobs_itr -> get() -> haystack_last);
+	  std::invoke(report, *jobs_itr -> get());
 
-	  if(std::invoke(comp, *haystack_middle, *jobs_itr -> get() -> needle_itr)) {
-	    jobs_itr -> get() -> haystack_first = ++haystack_middle;
+	  if(next_needle_itr != next_needle_end) {
+	    *jobs_itr -> get() = job_t { haystack, next_needle_itr++ };
 	  } else {
-	    jobs_itr -> get() -> haystack_last  =   haystack_middle;
+	    --jobs_last;
+	    std::exchange(*jobs_itr -> get(), *jobs_last -> get());
+	    jobs_last -> get() -> ~job_t();
 	  }
 
-	  __builtin_prefetch(std::addressof(*bisect(
-	    jobs_itr -> get() -> haystack_first, jobs_itr -> get() -> haystack_last
-	  )));
-
-	  ++jobs_itr;
+	  if(jobs_itr == jobs_last) {
+	    break;
+	  } else if(auto *next_address = jobs_itr -> get() -> first_address()) {
+	    __builtin_prefetch(next_address);
+	  }
 	}
       }
     }

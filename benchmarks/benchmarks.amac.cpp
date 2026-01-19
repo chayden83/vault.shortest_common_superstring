@@ -33,7 +33,7 @@ static auto const haystack =
 void baseline(benchmark::State &state) {
   for(auto _ : state) {
     for(auto needle : needles) {
-      benchmark::DoNotOptimize(std::ranges::lower_bound(haystack, needle));
+      assert(*std::ranges::lower_bound(haystack, needle) == needle);
     }
   }
 }
@@ -42,7 +42,7 @@ template<uint8_t N>
 void amac_binary_search(benchmark::State &state) {
   for(auto _ : state) {
     vault::algorithm::amac<N>(haystack, needles, [](auto &&job) {
-      benchmark::DoNotOptimize(job);
+      assert(*job.needle_itr == *job.haystack_first);
     });
   }
 }
