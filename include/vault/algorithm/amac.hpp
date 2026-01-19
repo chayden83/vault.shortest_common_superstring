@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <iterator>
+#include <ranges>
 #include <utility>
 #include <functional>
 
@@ -26,29 +27,52 @@ namespace vault::algorithm {
       // SETUP //
       ///////////
 
-      struct job_state_t {
-	std::size_t i_needle = 0uz;
-
+      struct job_t {
 	std::ranges::iterator_t<haystack_t const> haystack_first = { };
 	std::ranges::iterator_t<haystack_t const> haystack_last  = { };
+
+	std::ranges::iterator_t<needles_t const> needle_itr = { };
+	
+	[[nodiscard]] constexpr job_t(haystack_t const &haystack, std::ranges::iterator_t<needles_t const> needle_itr)
+	  : haystack_first { std::ranges::begin(haystack) }
+	  , haystack_last  { std::ranges::end  (haystack) }
+	  , needle_itr     { needle_itr }
+	{ }
       };
 
-      auto jobs = std::invoke([&]<std::size_t... I>(std::index_sequence<I...>) {
-	return std::array<job_state_t, N> {
-	  job_state_t { I, std::ranges::begin(haystack), std::ranges::end(haystack) } ...
-	};
-      }, std::make_index_sequence<N> { });
+      struct alignas(job_t) job_slot_t {
+	std::byte storage[sizeof(job_t)];
 
-      auto i_next_needle = std::min(std::ranges::size(needles), std::size_t { N });
+	[[nodiscard]] job_t *get() noexcept {
+	  return reinterpret_cast<job_t *>(&storage[0]);
+	}
+      };
+
+      auto next_needle_itr = std::ranges::begin(needles);
+      auto next_needle_end = std::ranges::end  (needles);
+
+      auto jobs = std::array<job_slot_t, N> { };
+
+      auto jobs_first = std::ranges::begin(jobs);
+      auto jobs_last  = std::ranges::end  (jobs);
+
+      while(jobs_first != jobs_last and next_needle_itr != next_needle_end) {
+	new (jobs_first -> get()) job_t { haystack, next_needle_itr };
+
+	++jobs_first;
+	++next_needle_itr;
+      }
+
+      jobs_last  = jobs_first;
+      jobs_first = std::ranges::begin(jobs);
+
+
+
+
 
       /////////////
       // EXECUTE //
       /////////////
-
-      auto jobs_first = std::ranges::begin(jobs);
-
-      auto jobs_last  = std::ranges::next
-	(jobs_first, std::min(std::ranges::size(needles), std::size_t { N }));
 
       while(jobs_first != jobs_last) {
 	auto jobs_itr = jobs_first;
@@ -57,16 +81,14 @@ namespace vault::algorithm {
 	  ///////////////////////////////////////
 	  // REPORT RESULT AND PULL IN NEW JOB //
 	  ///////////////////////////////////////
-	  if(jobs_itr -> haystack_first == jobs_itr -> haystack_last) {
-	    std::invoke(report, jobs_itr -> i_needle, jobs_itr -> haystack_last);
+	  if(jobs_itr -> get() -> haystack_first == jobs_itr -> get() -> haystack_last) {
+	    std::invoke(report, *jobs_itr -> get());
 
-	    if(i_next_needle < std::ranges::size(needles)) {
-	      jobs_itr -> i_needle = i_next_needle++;
-
-	      jobs_itr -> haystack_first = std::ranges::begin(haystack);
-	      jobs_itr -> haystack_last  = std::ranges::end  (haystack);
+	    if(next_needle_itr != next_needle_end) {
+	      *jobs_itr -> get() = job_t { haystack, next_needle_itr++ };
 	    } else {
-	      *jobs_itr = std::move(*--jobs_last);
+	      --jobs_last;
+	      std::exchange(*jobs_itr -> get(), *jobs_last -> get()).~job_t();
 	    }
 
 	    continue;
@@ -76,16 +98,16 @@ namespace vault::algorithm {
 	  // UPDATE AND CONTINUE TO NEXT JOB //
 	  /////////////////////////////////////
 	  auto haystack_middle = bisect
-	    (jobs_itr -> haystack_first, jobs_itr -> haystack_last);
+	    (jobs_itr -> get() -> haystack_first, jobs_itr -> get() -> haystack_last);
 
-	  if(std::invoke(comp, *haystack_middle, needles[jobs_itr -> i_needle])) {
-	    jobs_itr -> haystack_first = ++haystack_middle;
+	  if(std::invoke(comp, *haystack_middle, *jobs_itr -> get() -> needle_itr)) {
+	    jobs_itr -> get() -> haystack_first = ++haystack_middle;
 	  } else {
-	    jobs_itr -> haystack_last  =   haystack_middle;
+	    jobs_itr -> get() -> haystack_last  =   haystack_middle;
 	  }
 
 	  __builtin_prefetch(std::addressof(*bisect(
-	    jobs_itr -> haystack_first, jobs_itr -> haystack_last
+	    jobs_itr -> get() -> haystack_first, jobs_itr -> get() -> haystack_last
 	  )));
 
 	  ++jobs_itr;
