@@ -84,7 +84,14 @@ namespace vault::algorithm {
       while(jobs_first != jobs_last and next_needle_itr != next_needle_end) {
 	new (jobs_first -> get()) job_t { haystack, next_needle_itr++ };
 
-	if(auto *address = jobs_first -> get() -> first_address()) {
+	auto *address = jobs_first -> get() -> first_address();
+
+	while(address == nullptr && next_needle_itr != next_needle_end) {
+	  *jobs_first -> get() = job_t { haystack, next_needle_itr++ };
+	  address = jobs_first -> get() -> first_address();
+	}
+
+	if(address != nullptr) {
 	  __builtin_prefetch(address);
 	}
 
