@@ -2,6 +2,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include <iostream>
+
 #include <random>
 #include <vector>
 #include <cassert>
@@ -41,9 +43,14 @@ void baseline(benchmark::State &state) {
 template<uint8_t N>
 void amac_binary_search(benchmark::State &state) {
   for(auto _ : state) {
-    vault::algorithm::amac<N>(haystack, needles, [](auto &&job) {
+    auto i = 0;
+
+    vault::algorithm::amac<N>(haystack, needles, [&](auto &&job) {
       assert(*job.needle_itr == *job.haystack_first);
+      ++i;
     });
+
+    assert(i == 64);
   }
 }
 

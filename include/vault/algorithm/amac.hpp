@@ -141,16 +141,36 @@ namespace vault::algorithm {
 
     needles_consumed:
 
-      while(active_jobs_first != active_jobs_last) {
-	active_jobs_last = std::stable_partition(active_jobs_first, active_jobs_last, [&](auto &job) {
-	  if(auto *next_address = job.get() -> step()) {
-	    return __builtin_prefetch(next_address), true;
-	  } else {
-	    return std::invoke(report, *job.get()), false;
-	  }
-	});
+      // The loop above breaks when it encounters a finished job for
+      // which there is no remaining needle with which it can
+      // construct a new job. That means the active_jobs_first
+      // iterator refers to a now inactive job, so we shift it out of
+      // the array.
+      active_jobs_last = std::shift_left(active_jobs_first, active_jobs_last, 1);
+
+      auto still_active = [&](auto &job) {
+	if(auto *next_address = job.get() -> step()) {
+	  return __builtin_prefetch(next_address), true;
+	} else {
+	  return std::invoke(report, *job.get()), false;
+	}
+      };
+
+      // We use stable partition to remove the jobs that are finished
+      // while preservingt the order of the remaining jobs. This
+      // maximizes the latency between consecutive steps on the same
+      // job in order to give the the prefetch instruction the
+      // greatest possible opportunity to complete.
+      active_jobs_last = std::stable_partition
+	(active_jobs_first, active_jobs_last, still_active);
+
+      while(active_jobs_last != jobs_first) {
+	active_jobs_last = std::stable_partition
+	  (jobs_first, active_jobs_last, still_active);
       }
 
+      // We constructed the jobs in-place, so we have to explicitly
+      // destroy them.
       std::destroy(jobs_first, jobs_last);
     }
   };
