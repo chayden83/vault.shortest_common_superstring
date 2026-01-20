@@ -13,11 +13,6 @@
 // clang-format off
 
 namespace vault::algorithm {
-  template<typename T, typename U>
-  constexpr T &assign(T &lhs, U &&rhs) {
-    lhs = std::forward<U>(rhs);  return lhs;
-  }
-
   template<std::forward_iterator I, std::sentinel_for<I> S>
   [[nodiscard]] constexpr I bisect(I first, S last) {
     return std::ranges::next(first, std::ranges::distance(first, last) / 2);
@@ -29,10 +24,6 @@ namespace vault::algorithm {
     static constexpr void operator ()
       (haystack_t const &haystack, needles_t const &needles, auto report, comp_t comp = {})
     {
-      ///////////
-      // SETUP //
-      ///////////
-
       struct job_t {
 	std::ranges::iterator_t<haystack_t const> haystack_first = { };
 	std::ranges::iterator_t<haystack_t const> haystack_last  = { };
@@ -67,6 +58,10 @@ namespace vault::algorithm {
 	}
       };
 
+      ///////////
+      // SETUP //
+      ///////////
+
       struct alignas(job_t) job_slot_t {
 	std::byte storage[sizeof(job_t)];
 
@@ -75,41 +70,27 @@ namespace vault::algorithm {
 	}
       };
 
+      auto jobs = std::array<job_slot_t, N> { };
+
       auto needles_itr = std::ranges::begin(needles);
       auto needles_end = std::ranges::end  (needles);
-
-      auto jobs = std::array<job_slot_t, N> { };
 
       auto const [jobs_first, jobs_last] = std::invoke([&] {
 	auto jobs_first = std::ranges::begin(jobs);
 	auto jobs_last  = std::ranges::end  (jobs);
 	
 	while(jobs_first != jobs_last and needles_itr != needles_end) {
-	  auto *job = std::construct_at
-	    (jobs_first -> get(), haystack, needles_itr++);
-	  
-	  auto *address = job -> first_address();
-	  
-	  while(address == nullptr && needles_itr != needles_end) {
-	    std::invoke(report, *job);
-	    
-	    address = assign(*job, job_t { haystack, needles_itr++ })
-	      .step();
-	  }
-	  
-	  if(address != nullptr) {
+	  auto job = job_t { haystack, needles_itr++ };
+
+	  if(auto *address = job.first_address()) {
 	    __builtin_prefetch(address);
+	    std::construct_at(jobs_first -> get(), std::move(job));
+	    ++jobs_first;
 	  }
-	  
-	  ++jobs_first;
 	}
 	
 	return std::pair { std::ranges::begin(jobs), jobs_first };
       });
-
-      if(jobs_first == jobs_last) {
-	return;
-      }
 
       /////////////
       // EXECUTE //
