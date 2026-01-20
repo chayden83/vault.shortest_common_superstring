@@ -44,7 +44,7 @@ template<uint8_t N>
 void amac_lower_bound(benchmark::State &state) {
   for(auto _ : state) {
     vault::algorithm::amac_lower_bound<N>(haystack, needles, [&](auto &&job) {
-      assert(*job.needle_itr == *job.haystack_first);
+      assert(*job.needle_itr() == *job.haystack_first());
     });
   }
 }
