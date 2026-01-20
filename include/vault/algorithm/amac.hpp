@@ -116,40 +116,7 @@ namespace vault::algorithm {
       auto active_jobs_first = jobs_first;
       auto active_jobs_last  = jobs_last;
 
-      while(true) {
-	for(/*noop*/; active_jobs_first != active_jobs_last; ++active_jobs_first) {
-	  auto *next_address = active_jobs_first -> get() -> step();
-
-	  while(next_address == nullptr) {
-	    std::invoke(report, *active_jobs_first -> get());
-
-	    if(needles_itr == needles_end) {
-	      goto needles_consumed;
-	    }
-
-	    auto &job = assign
-	      (*active_jobs_first -> get(), job_t { haystack, needles_itr++ });
-
-	    next_address = job.first_address();
-	  }
-
-	  __builtin_prefetch(next_address);
-	}
-
-	active_jobs_first = jobs_first;
-      }
-
-    needles_consumed:
-
-      // The loop above breaks when it encounters a finished job for
-      // which there is no remaining needle with which it can
-      // construct a new job. That means the active_jobs_first
-      // iterator refers to a now inactive job, so we shift it out of
-      // the array.
-      active_jobs_last = std::shift_left
-	(active_jobs_first, active_jobs_last, 1);
-
-      auto still_active = [&](auto &job) {
+      auto is_active = [&](auto &job) {
 	if(auto *next_address = job.get() -> step()) {
 	  return __builtin_prefetch(next_address), true;
 	} else {
@@ -157,17 +124,43 @@ namespace vault::algorithm {
 	}
       };
 
+      // We step each of the jobs one after another. Each time we find
+      // an inactive (i.e. a complete) job, we report it and construct
+      // a new job for the next needle in its place. We repeat this
+      // until new job construction consumes all needles.
+      while(needles_itr != needles_end) {
+	active_jobs_first = std::find_if_not
+	  (active_jobs_first, active_jobs_last, is_active);
+	
+	if(active_jobs_first == active_jobs_last) {
+	  active_jobs_first = jobs_first;  continue;
+	};
+
+	while(needles_itr != needles_end) {
+	  auto job = job_t { haystack, needles_itr++ };
+
+	  if(auto *address = job.first_address()) {
+	    __builtin_prefetch(address);
+	    *active_jobs_first -> get() = std::move(job);
+	    ++active_jobs_first;
+	    break;
+	  }
+
+	  std::invoke(report, job);
+	}
+      }
+
       // We use stable partition to remove the jobs that are finished
       // while preservingt the order of the remaining jobs. This
       // maximizes the latency between consecutive steps on the same
       // job in order to give the the prefetch instruction the
       // greatest possible opportunity to complete.
       active_jobs_last = std::stable_partition
-	(active_jobs_first, active_jobs_last, still_active);
+	(active_jobs_first, active_jobs_last, is_active);
 
       while(active_jobs_last != jobs_first) {
 	active_jobs_last = std::stable_partition
-	  (jobs_first, active_jobs_last, still_active);
+	  (jobs_first, active_jobs_last, is_active);
       }
 
       // We constructed the jobs in-place, so we have to explicitly
