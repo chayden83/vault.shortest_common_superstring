@@ -146,7 +146,8 @@ namespace vault::algorithm {
       // construct a new job. That means the active_jobs_first
       // iterator refers to a now inactive job, so we shift it out of
       // the array.
-      active_jobs_last = std::shift_left(active_jobs_first, active_jobs_last, 1);
+      active_jobs_last = std::shift_left
+	(active_jobs_first, active_jobs_last, 1);
 
       auto still_active = [&](auto &job) {
 	if(auto *next_address = job.get() -> step()) {
