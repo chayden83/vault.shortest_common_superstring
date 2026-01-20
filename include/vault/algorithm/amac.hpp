@@ -3,15 +3,21 @@
 #ifndef VAULT_AMAC_HPP
 #define VAULT_AMAC_HPP
 
-#include <cstdint>
-#include <iterator>
 #include <ranges>
+#include <cstdint>
 #include <utility>
+#include <iterator>
+#include <algorithm>
 #include <functional>
 
 // clang-format off
 
 namespace vault::algorithm {
+  template<typename T, typename U>
+  constexpr T &assign(T &lhs, U &&rhs) {
+    lhs = std::forward<U>(rhs);  return lhs;
+  }
+
   template<std::forward_iterator I, std::sentinel_for<I> S>
   [[nodiscard]] constexpr I bisect(I first, S last) {
     return std::ranges::next(first, std::ranges::distance(first, last) / 2);
@@ -32,7 +38,7 @@ namespace vault::algorithm {
 	std::ranges::iterator_t<haystack_t const> haystack_last  = { };
 
 	std::ranges::iterator_t<needles_t const> needle_itr = { };
-	
+
 	[[nodiscard]] constexpr job_t(haystack_t const &haystack, std::ranges::iterator_t<needles_t const> needle_itr)
 	  : haystack_first { std::ranges::begin(haystack) }
 	  , haystack_last  { std::ranges::end  (haystack) }
@@ -57,7 +63,7 @@ namespace vault::algorithm {
 	    haystack_last  =   haystack_middle;
 	  }
 
-	  return std::addressof(*bisect(haystack_first, haystack_last));
+	  return first_address();
 	}
       };
 
@@ -69,22 +75,25 @@ namespace vault::algorithm {
 	}
       };
 
-      auto next_needle_itr = std::ranges::begin(needles);
-      auto next_needle_end = std::ranges::end  (needles);
+      auto needles_itr = std::ranges::begin(needles);
+      auto needles_end = std::ranges::end  (needles);
 
       auto jobs = std::array<job_slot_t, N> { };
 
       auto jobs_first = std::ranges::begin(jobs);
       auto jobs_last  = std::ranges::end  (jobs);
 
-      while(jobs_first != jobs_last and next_needle_itr != next_needle_end) {
-	new (jobs_first -> get()) job_t { haystack, next_needle_itr++ };
+      while(jobs_first != jobs_last and needles_itr != needles_end) {
+	auto *job = std::construct_at
+	  (jobs_first -> get(), haystack, needles_itr++);
 
-	auto *address = jobs_first -> get() -> first_address();
+	auto *address = job -> first_address();
 
-	while(address == nullptr && next_needle_itr != next_needle_end) {
-	  *jobs_first -> get() = job_t { haystack, next_needle_itr++ };
-	  address = jobs_first -> get() -> first_address();
+	while(address == nullptr && needles_itr != needles_end) {
+	  std::invoke(report, *job);
+
+	  address = assign(*job, job_t { haystack, needles_itr++ })
+	    .step();
 	}
 
 	if(address != nullptr) {
@@ -96,37 +105,53 @@ namespace vault::algorithm {
 
       jobs_last = std::exchange(jobs_first, std::ranges::begin(jobs));
 
-
-
-
+      if(jobs_first == jobs_last) {
+	return;
+      }
 
       /////////////
       // EXECUTE //
       /////////////
 
-      while(jobs_first != jobs_last) {
-	for(auto jobs_itr = jobs_first; jobs_itr != jobs_last; ++jobs_itr) {
-	  if(auto *next_address = jobs_itr -> get() -> step()) {
-	    __builtin_prefetch(next_address);  continue;	    
+      auto active_jobs_first = jobs_first;
+      auto active_jobs_last  = jobs_last;
+
+      while(true) {
+	for(/*noop*/; active_jobs_first != active_jobs_last; ++active_jobs_first) {
+	  auto *next_address = active_jobs_first -> get() -> step();
+
+	  while(next_address == nullptr) {
+	    std::invoke(report, *active_jobs_first -> get());
+
+	    if(needles_itr == needles_end) {
+	      goto needles_consumed;
+	    }
+
+	    auto &job = assign
+	      (*active_jobs_first -> get(), job_t { haystack, needles_itr++ });
+
+	    next_address = job.first_address();
 	  }
 
-	  std::invoke(report, *jobs_itr -> get());
-
-	  if(next_needle_itr != next_needle_end) {
-	    *jobs_itr -> get() = job_t { haystack, next_needle_itr++ };
-	  } else {
-	    --jobs_last;
-	    std::exchange(*jobs_itr -> get(), *jobs_last -> get());
-	    jobs_last -> get() -> ~job_t();
-	  }
-
-	  if(jobs_itr == jobs_last) {
-	    break;
-	  } else if(auto *next_address = jobs_itr -> get() -> first_address()) {
-	    __builtin_prefetch(next_address);
-	  }
+	  __builtin_prefetch(next_address);
 	}
+
+	active_jobs_first = jobs_first;
       }
+
+    needles_consumed:
+
+      while(active_jobs_first != active_jobs_last) {
+	active_jobs_last = std::stable_partition(active_jobs_first, active_jobs_last, [&](auto &job) {
+	  if(auto *next_address = job.get() -> step()) {
+	    return __builtin_prefetch(next_address), true;
+	  } else {
+	    return std::invoke(report, *job.get()), false;
+	  }
+	});
+      }
+
+      std::destroy(jobs_first, jobs_last);
     }
   };
 
