@@ -20,9 +20,9 @@ namespace vault::algorithm {
 
   template<uint8_t N>
   struct amac_fn {
-    template<typename haystack_t, typename needles_t, typename comp_t = std::less<>>
+    template<typename haystack_t, typename needles_t>
     static constexpr void operator ()
-      (haystack_t const &haystack, needles_t const &needles, auto report, comp_t comp = {})
+      (haystack_t const &haystack, needles_t const &needles, auto report)
     {
       struct job_t {
 	std::ranges::iterator_t<haystack_t const> haystack_first = { };
@@ -107,7 +107,7 @@ namespace vault::algorithm {
 	}
       };
 
-      // We step each of the active jobs one after another. If a job
+      // Step each of the active jobs one after another. If a job
       // completes, we begin constructing new jobs from the remaining
       // needles. Once we find a newly constructed job that
       // successfully activates, we insert it into the jobs slot where
@@ -135,11 +135,11 @@ namespace vault::algorithm {
 	}
       }
 
-      // We use stable partition to remove the jobs that are finished
-      // while preservingt the order of the remaining jobs. This
-      // maximizes the latency between consecutive steps on the same
-      // job in order to give the the prefetch instruction the
-      // greatest possible opportunity to complete.
+      // Stable partition removes the jobs that are finished while
+      // preserving the order of the remaining jobs. This maximizes
+      // the latency between consecutive steps on the same job in
+      // order to give the the prefetch instruction the greatest
+      // possible opportunity to complete.
       active_jobs_last = std::stable_partition
 	(active_jobs_first, active_jobs_last, is_active);
 
