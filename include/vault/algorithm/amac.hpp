@@ -80,30 +80,32 @@ namespace vault::algorithm {
 
       auto jobs = std::array<job_slot_t, N> { };
 
-      auto jobs_first = std::ranges::begin(jobs);
-      auto jobs_last  = std::ranges::end  (jobs);
-
-      while(jobs_first != jobs_last and needles_itr != needles_end) {
-	auto *job = std::construct_at
-	  (jobs_first -> get(), haystack, needles_itr++);
-
-	auto *address = job -> first_address();
-
-	while(address == nullptr && needles_itr != needles_end) {
-	  std::invoke(report, *job);
-
-	  address = assign(*job, job_t { haystack, needles_itr++ })
-	    .step();
+      auto const [jobs_first, jobs_last] = std::invoke([&] {
+	auto jobs_first = std::ranges::begin(jobs);
+	auto jobs_last  = std::ranges::end  (jobs);
+	
+	while(jobs_first != jobs_last and needles_itr != needles_end) {
+	  auto *job = std::construct_at
+	    (jobs_first -> get(), haystack, needles_itr++);
+	  
+	  auto *address = job -> first_address();
+	  
+	  while(address == nullptr && needles_itr != needles_end) {
+	    std::invoke(report, *job);
+	    
+	    address = assign(*job, job_t { haystack, needles_itr++ })
+	      .step();
+	  }
+	  
+	  if(address != nullptr) {
+	    __builtin_prefetch(address);
+	  }
+	  
+	  ++jobs_first;
 	}
-
-	if(address != nullptr) {
-	  __builtin_prefetch(address);
-	}
-
-	++jobs_first;
-      }
-
-      jobs_last = std::exchange(jobs_first, std::ranges::begin(jobs));
+	
+	return std::pair { std::ranges::begin(jobs), jobs_first };
+      });
 
       if(jobs_first == jobs_last) {
 	return;
@@ -124,10 +126,12 @@ namespace vault::algorithm {
 	}
       };
 
-      // We step each of the jobs one after another. Each time we find
-      // an inactive (i.e. a complete) job, we report it and construct
-      // a new job for the next needle in its place. We repeat this
-      // until new job construction consumes all needles.
+      // We step each of the active jobs one after another. If a job
+      // completes, we begin constructing new jobs from the remaining
+      // needles. Once we find a newly constructed job that
+      // successfully activates, we insert it into the jobs slot where
+      // we found the complete job. We immediately report and then
+      // discard any newly constructed job that fails to activate.
       while(needles_itr != needles_end) {
 	active_jobs_first = std::find_if_not
 	  (active_jobs_first, active_jobs_last, is_active);
