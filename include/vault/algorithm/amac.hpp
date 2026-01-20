@@ -18,46 +18,12 @@ namespace vault::algorithm {
     return std::ranges::next(first, std::ranges::distance(first, last) / 2);
   }
 
-  template<uint8_t N>
+  template<uint8_t N, typename job_t>
   struct amac_fn {
     template<typename haystack_t, typename needles_t>
     static constexpr void operator ()
       (haystack_t const &haystack, needles_t const &needles, auto report)
     {
-      struct job_t {
-	std::ranges::iterator_t<haystack_t const> haystack_first = { };
-	std::ranges::iterator_t<haystack_t const> haystack_last  = { };
-
-	std::ranges::iterator_t<needles_t const> needle_itr = { };
-
-	[[nodiscard]] constexpr job_t(haystack_t const &haystack, std::ranges::iterator_t<needles_t const> needle_itr)
-	  : haystack_first { std::ranges::begin(haystack) }
-	  , haystack_last  { std::ranges::end  (haystack) }
-	  , needle_itr     { needle_itr }
-	{ }
-
-	[[nodiscard]] void const *first_address() const {
-	  if(haystack_first == haystack_last) {
-	    return nullptr;
-	  }
-
-	  return std::addressof(*bisect(haystack_first, haystack_last));
-	}
-
-	[[nodiscard]] void const *step() {
-	  auto haystack_middle = bisect(haystack_first, haystack_last);
-
-	  // TODO: Generalize comparison.
-	  if(*haystack_middle < *needle_itr) {
-	    haystack_first = ++haystack_middle;
-	  } else {
-	    haystack_last  =   haystack_middle;
-	  }
-
-	  return first_address();
-	}
-      };
-
       ///////////
       // SETUP //
       ///////////
@@ -78,7 +44,7 @@ namespace vault::algorithm {
       auto const [jobs_first, jobs_last] = std::invoke([&] {
 	auto jobs_first = std::ranges::begin(jobs);
 	auto jobs_last  = std::ranges::end  (jobs);
-	
+
 	while(jobs_first != jobs_last and needles_itr != needles_end) {
 	  auto job = job_t { haystack, needles_itr++ };
 
@@ -88,7 +54,7 @@ namespace vault::algorithm {
 	    ++jobs_first;
 	  }
 	}
-	
+
 	return std::pair { std::ranges::begin(jobs), jobs_first };
       });
 
@@ -116,7 +82,7 @@ namespace vault::algorithm {
       while(needles_itr != needles_end) {
 	active_jobs_first = std::find_if_not
 	  (active_jobs_first, active_jobs_last, is_active);
-	
+
 	if(active_jobs_first == active_jobs_last) {
 	  active_jobs_first = jobs_first;  continue;
 	};
@@ -154,8 +120,56 @@ namespace vault::algorithm {
     }
   };
 
+  template<uint8_t N, typename job_t>
+  constexpr inline auto const amac = amac_fn<N, job_t> { };
+
   template<uint8_t N>
-  constexpr inline auto const amac = amac_fn<N> { };
+  struct amac_lower_bound_fn {
+    template<typename haystack_t, typename needles_t>
+    struct job_t {
+      std::ranges::iterator_t<haystack_t const> haystack_first = { };
+      std::ranges::iterator_t<haystack_t const> haystack_last  = { };
+
+      std::ranges::iterator_t<needles_t const> needle_itr = { };
+
+      [[nodiscard]] constexpr job_t(haystack_t const &haystack, std::ranges::iterator_t<needles_t const> needle_itr)
+	: haystack_first { std::ranges::begin(haystack) }
+	, haystack_last  { std::ranges::end  (haystack) }
+	, needle_itr     { needle_itr }
+      { }
+
+      [[nodiscard]] void const *first_address() const {
+	if(haystack_first == haystack_last) {
+	  return nullptr;
+	}
+
+	return std::addressof(*bisect(haystack_first, haystack_last));
+      }
+
+      [[nodiscard]] void const *step() {
+	auto haystack_middle = bisect(haystack_first, haystack_last);
+
+	// TODO: Generalize comparison.
+	if(*haystack_middle < *needle_itr) {
+	  haystack_first = ++haystack_middle;
+	} else {
+	  haystack_last  =   haystack_middle;
+	}
+
+	return first_address();
+      }
+    };
+
+    template<typename haystack_t, typename needles_t>
+    static constexpr void operator ()
+      (haystack_t const &haystack, needles_t const &needles, auto report)
+    {
+      amac<N, job_t<haystack_t, needles_t>>(haystack, needles, std::move(report));
+    }
+  };
+
+  template<uint8_t N>
+  constexpr inline auto const amac_lower_bound = amac_lower_bound_fn<N> { };
 }
 
 #endif

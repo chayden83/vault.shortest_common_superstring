@@ -41,9 +41,9 @@ void baseline(benchmark::State &state) {
 }
 
 template<uint8_t N>
-void amac_binary_search(benchmark::State &state) {
+void amac_lower_bound(benchmark::State &state) {
   for(auto _ : state) {
-    vault::algorithm::amac<N>(haystack, needles, [&](auto &&job) {
+    vault::algorithm::amac_lower_bound<N>(haystack, needles, [&](auto &&job) {
       assert(*job.needle_itr == *job.haystack_first);
     });
   }
@@ -51,12 +51,12 @@ void amac_binary_search(benchmark::State &state) {
 
 BENCHMARK(baseline);
 
-BENCHMARK(amac_binary_search< 1>);
-BENCHMARK(amac_binary_search< 2>);
-BENCHMARK(amac_binary_search< 4>);
-BENCHMARK(amac_binary_search< 8>);
-BENCHMARK(amac_binary_search<16>);
-BENCHMARK(amac_binary_search<32>);
-BENCHMARK(amac_binary_search<64>);
+BENCHMARK(amac_lower_bound< 1>);
+BENCHMARK(amac_lower_bound< 2>);
+BENCHMARK(amac_lower_bound< 4>);
+BENCHMARK(amac_lower_bound< 8>);
+BENCHMARK(amac_lower_bound<16>);
+BENCHMARK(amac_lower_bound<32>);
+BENCHMARK(amac_lower_bound<64>);
 
 // clang-format on
