@@ -12,7 +12,7 @@
 #include "implicit_btree_layout_policy.hpp"
 
 namespace eytzinger::detail {
-    consteval std::size_t get_cache_line_size() {
+    [[nodiscard]] consteval std::size_t get_cache_line_size() {
 #ifdef __cpp_lib_hardware_interference_size
         return std::hardware_destructive_interference_size;
 #else
@@ -21,7 +21,7 @@ namespace eytzinger::detail {
     }
 
     template <typename K>
-    consteval int calculate_optimal_prefetch() {
+    [[nodiscard]] consteval int calculate_optimal_prefetch() {
         constexpr std::size_t cache_line = get_cache_line_size();
         constexpr std::size_t target_lookahead_bytes = 4 * cache_line;
         if constexpr (sizeof(K) >= target_lookahead_bytes) return 1; 
@@ -32,7 +32,7 @@ namespace eytzinger::detail {
     }
 
     template <typename K>
-    consteval std::size_t calculate_optimal_block_size() {
+    [[nodiscard]] consteval std::size_t calculate_optimal_block_size() {
         // 1. SIMD Optimization Check
         // If K is integral and fits within the 64-byte AVX2 width, we force B to 
         // match that width to enable the specialized SIMD paths.
