@@ -19,7 +19,7 @@
 // clang-format off
 
 namespace std {
-  static constexpr inline struct sorted_unique_t { } const sorted_unique { };
+    static constexpr inline struct sorted_unique_t { } const sorted_unique { };
 }
 
 /**
@@ -45,29 +45,34 @@ requires eytzinger::ForwardLayoutPolicy<
 >
 class layout_map {
 public:
-    using key_type        = K;
-    using mapped_type     = V;
-    using value_type      = std::pair<K, V>;
-    using key_compare     = Compare;
-    using allocator_type  = Allocator;
-    using policy_type     = LayoutPolicy; // Exposed for iterator access
-    using size_type       = std::size_t;
+    using        key_type = K;
+    using     mapped_type = V;
+    using      value_type = std::pair<K, V>;
+    using  allocator_type = Allocator;
+    using     policy_type = LayoutPolicy; // Exposed for iterator access
+    using       size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
 
-    using key_allocator_type   = typename std::allocator_traits<Allocator>::template rebind_alloc<K>;
+    using key_compare = Compare;
+
+    using   key_allocator_type = typename std::allocator_traits<Allocator>::template rebind_alloc<K>;
     using value_allocator_type = typename std::allocator_traits<Allocator>::template rebind_alloc<V>;
-    using key_storage_type   = KeyContainer<K, key_allocator_type>;
+
+    using   key_storage_type =   KeyContainer<K,   key_allocator_type>;
     using value_storage_type = ValueContainer<V, value_allocator_type>;
 
-    using iterator        = layout_iterator<const layout_map>;
-    using const_iterator  = iterator;
-    using reverse_iterator = std::reverse_iterator<iterator>;
+    using       iterator = layout_iterator<const layout_map>;
+    using const_iterator = layout_iterator<const layout_map>;
+
+    using       reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
-    using reference       = std::pair<const key_type&, const mapped_type&>;
+
+    using reference = std::pair<const key_type&, const mapped_type&>;
 
 private:
     key_storage_type   keys_;
     value_storage_type values_;
+
     [[no_unique_address]] Compare compare_;
 
 public:
@@ -141,7 +146,6 @@ public:
         , values_(std::move(v_cont), value_allocator_type(alloc))
         , compare_(comp)
     {
-        if (keys_.empty()) return;
         sort_and_unique_zipped();
         policy_type::permute(std::views::zip(keys_, values_));
     }

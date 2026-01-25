@@ -24,7 +24,7 @@ template <int L = 6>
 struct eytzinger_layout_policy {
 private:
     // Robust calculation of subtree size rooted at i (0-based index)
-    static constexpr std::size_t count_nodes(std::size_t i, std::size_t n) noexcept {
+    [[nodiscard]] static constexpr std::size_t count_nodes(std::size_t i, std::size_t n) noexcept {
         std::size_t size = 0;
         std::size_t k = i + 1; // Convert to 1-based index for easier level math
         std::size_t p = 1;     // Capacity of current level
@@ -37,7 +37,7 @@ private:
         return size;
     }
 
-    static constexpr std::size_t restore_lower_bound_index(std::size_t i) noexcept {
+    [[nodiscard]] static constexpr std::size_t restore_lower_bound_index(std::size_t i) noexcept {
         std::size_t j = i + 1;
         j >>= (std::countr_one(j) + 1);
         return j == 0 ? static_cast<std::size_t>(-1) : (j - 1);
@@ -45,7 +45,7 @@ private:
 
 public:
     struct sorted_rank_to_index_fn {
-        constexpr std::size_t operator()(std::size_t rank, std::size_t n) const noexcept {
+        [[nodiscard]] static constexpr std::size_t operator()(std::size_t rank, std::size_t n) noexcept {
             std::size_t i = 0;
             while (true) {
                 std::size_t l_sz = count_nodes((i << 1) + 1, n);
@@ -61,7 +61,7 @@ public:
     };
 
     struct index_to_sorted_rank_fn {
-        constexpr std::size_t operator()(std::size_t i, std::size_t n) const noexcept {
+        [[nodiscard]] static constexpr std::size_t operator()(std::size_t i, std::size_t n) noexcept {
             std::size_t r = count_nodes((i << 1) + 1, n);
             while (i > 0) {
                 if (i % 2 == 0) { 
@@ -83,7 +83,7 @@ public:
         // Visits indices k in the order: Left Subtree -> Root -> Right Subtree
         // Since input is sorted, we simply pull the next element from source_iter at each visit.
         template<typename SrcIter, typename TempVec>
-        static void fill_in_order(TempVec& temp, SrcIter& source_iter, std::size_t k, std::size_t n) {
+        static constexpr void fill_in_order(TempVec& temp, SrcIter& source_iter, std::size_t k, std::size_t n) {
             if (k >= n) return;
 
             // 1. Recurse Left (2*k + 1)
@@ -99,7 +99,7 @@ public:
 
     public:
         template<std::random_access_iterator I, std::sentinel_for<I> S>
-        void operator()(I first, S last) const {
+        static constexpr void operator()(I first, S last) {
             const auto n = static_cast<std::size_t>(std::distance(first, last));
             if (n <= 1) return;
 
@@ -116,26 +116,26 @@ public:
         }
 
         template<std::ranges::random_access_range R>
-        void operator()(R&& range) const { 
-            (*this)(std::ranges::begin(range), std::ranges::end(range)); 
+        static constexpr void operator()(R&& range) { 
+	    operator ()(std::ranges::begin(range), std::ranges::end(range)); 
         }
     };
 
     struct get_nth_sorted_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S>
-        [[nodiscard]] constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) const {
+        [[nodiscard]] static constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) {
             const auto size = static_cast<std::size_t>(std::distance(first, last));
             if (n >= size) throw std::out_of_range("eytzinger index out of range");
             return *(first + sorted_rank_to_index(n, size));
         }
         template<std::ranges::random_access_range R>
-        [[nodiscard]] constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) const {
-            return (*this)(std::ranges::begin(range), std::ranges::end(range), n);
+        [[nodiscard]] static constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) {
+	    return operator ()(std::ranges::begin(range), std::ranges::end(range), n);
         }
     };
 
     struct next_index_fn {
-        constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) const noexcept {
+        [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept {
             std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
             auto right_child = (i << 1) + 2;
             if (right_child < n) {
@@ -151,7 +151,7 @@ public:
     };
 
     struct prev_index_fn {
-        constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) const noexcept {
+        [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept {
             std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
             if (i == -1) {
                 i = 0;
@@ -174,7 +174,7 @@ public:
     struct lower_bound_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S, 
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
             if (first == last) return last;
             const auto n = static_cast<std::size_t>(std::distance(first, last));
             const auto* base = std::to_address(first);
@@ -190,15 +190,15 @@ public:
         }
         template<std::ranges::random_access_range R, 
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
-            return (*this)(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
+        [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
+  	    return operator ()(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
         }
     };
 
     struct upper_bound_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S, 
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
             if (first == last) return last;
             const auto n = static_cast<std::size_t>(std::distance(first, last));
             const auto* base = std::to_address(first);
@@ -214,8 +214,8 @@ public:
         }
         template<std::ranges::random_access_range R, 
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
-            return (*this)(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
+        [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
+	    return operator ()(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
         }
     };
 

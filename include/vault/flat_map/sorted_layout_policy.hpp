@@ -17,13 +17,13 @@ struct sorted_layout_policy {
 
     // Identity mapping: Physical Index == Sorted Rank
     struct sorted_rank_to_index_fn {
-        constexpr std::size_t operator()(std::size_t rank, std::size_t /*n*/) const noexcept {
+        [[nodiscard]] static constexpr std::size_t operator()(std::size_t rank, std::size_t /*n*/) noexcept {
             return rank;
         }
     };
 
     struct index_to_sorted_rank_fn {
-        constexpr std::size_t operator()(std::size_t i, std::size_t /*n*/) const noexcept {
+        [[nodiscard]] static constexpr std::size_t operator()(std::size_t i, std::size_t /*n*/) noexcept {
             return i;
         }
     };
@@ -34,27 +34,27 @@ struct sorted_layout_policy {
     // No-op: Data is already sorted
     struct permute_fn {
         template<typename... Args>
-        constexpr void operator()(Args&&...) const noexcept {}
+        [[nodiscard]] static constexpr void operator()(Args&&...) noexcept {}
     };
 
     // Standard O(1) random access
     struct get_nth_sorted_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S>
-        [[nodiscard]] constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) const {
+        [[nodiscard]] static constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) {
             if (n >= static_cast<std::size_t>(std::distance(first, last))) {
                 throw std::out_of_range("sorted_layout_policy index out of range");
             }
             return *(first + n);
         }
         template<std::ranges::random_access_range R>
-        [[nodiscard]] constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) const {
-            return (*this)(std::ranges::begin(range), std::ranges::end(range), n);
+        [[nodiscard]] static constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) {
+	    return operator ()(std::ranges::begin(range), std::ranges::end(range), n);
         }
     };
 
     // Standard increment: i + 1. Returns -1 if we hit end (n).
     struct next_index_fn {
-        constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) const noexcept {
+        [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept {
             std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
             if (i >= n - 1) return -1;
             return i + 1;
@@ -63,7 +63,7 @@ struct sorted_layout_policy {
 
     // Standard decrement: i - 1. If i == -1 (end), returns n - 1.
     struct prev_index_fn {
-        constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) const noexcept {
+        [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept {
             std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
             if (i == -1) return (n == 0) ? -1 : n - 1;
             if (i == 0) return -1; // Going before begin
@@ -75,12 +75,12 @@ struct sorted_layout_policy {
     struct lower_bound_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
             return std::ranges::lower_bound(first, last, value, comp, proj);
         }
         template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
             return std::ranges::lower_bound(range, value, comp, proj);
         }
     };
@@ -88,12 +88,12 @@ struct sorted_layout_policy {
     struct upper_bound_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
             return std::ranges::upper_bound(first, last, value, comp, proj);
         }
         template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
             return std::ranges::upper_bound(range, value, comp, proj);
         }
     };
