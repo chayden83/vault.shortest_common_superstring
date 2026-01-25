@@ -14,6 +14,7 @@ namespace eytzinger {
  * No template parameters required as it mimics standard std::vector behavior.
  */
 struct sorted_layout_policy {
+    static constexpr inline const auto UID_V001 = 4185834535822629149uLL;
 
     // Identity mapping: Physical Index == Sorted Rank
     struct sorted_rank_to_index_fn {

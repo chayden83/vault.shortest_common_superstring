@@ -22,6 +22,8 @@ namespace eytzinger {
 
 template <int L = 6>
 struct eytzinger_layout_policy {
+    static constexpr inline const auto UID_V001 = 16427278603008041617uLL;
+
 private:
     // Robust calculation of subtree size rooted at i (0-based index)
     [[nodiscard]] static constexpr std::size_t count_nodes(std::size_t i, std::size_t n) noexcept {

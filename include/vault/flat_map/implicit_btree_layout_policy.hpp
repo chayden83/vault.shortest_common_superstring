@@ -181,7 +181,8 @@ DEFINE_SIMD_SPECIALIZATION(uint8,  64, IsStandardGreater, greater)
 
 template <std::size_t B = 16>
 struct implicit_btree_layout_policy {
-
+    static constexpr inline const auto UID_V001 = 15922480214965706541uLL;
+  
     // --- Private Helper Implementations (Generic Logic) ---
 private:
     template <typename T, typename Comp, typename Proj>
