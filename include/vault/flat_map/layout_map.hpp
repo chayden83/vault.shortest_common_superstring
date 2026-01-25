@@ -1,16 +1,16 @@
 #ifndef LAYOUT_MAP_HPP
 #define LAYOUT_MAP_HPP
 
-#include "layout_iterator.hpp"
-#include "eytzinger_layout_policy.hpp"
-#include <bit>
+#include <memory>
+#include <ranges>
 #include <vector>
+#include <utility>
 #include <algorithm>
 #include <stdexcept>
-#include <memory>
-#include <utility>
 #include <initializer_list>
-#include <ranges> 
+
+#include "layout_iterator.hpp"
+#include "eytzinger_layout_policy.hpp"
 
 namespace std {
   static constexpr inline struct sorted_unique_t { } const sorted_unique { };

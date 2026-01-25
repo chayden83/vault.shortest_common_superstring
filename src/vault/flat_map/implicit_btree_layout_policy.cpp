@@ -1,4 +1,3 @@
-#include <bit>
 #include <vault/flat_map/implicit_btree_layout_policy.hpp>
 
 #ifdef LAYOUT_USE_AVX2
@@ -37,12 +36,12 @@ static std::size_t subtree_size(std::size_t block_idx, std::size_t n, std::size_
 
         std::size_t level_capacity = current_level_blocks * B;
         std::size_t level_end_idx = level_start_idx + level_capacity;
-        
+
         if (n >= level_end_idx) {
             size += level_capacity;
         } else {
             size += (n - level_start_idx);
-            break; 
+            break;
         }
 
         first_block = child_block_index(first_block, 0, B);
@@ -58,20 +57,20 @@ static std::ptrdiff_t find_max_in_subtree(std::size_t start_block, std::size_t n
         std::size_t c_b = child_block_index(curr, B, B);
         if (c_b * B < n_sz) {
             curr = c_b;
-            continue; 
+            continue;
         }
         for (int k = static_cast<int>(B) - 1; k >= 0; --k) {
             std::size_t key_idx = curr * B + k;
             if (key_idx < n_sz) return static_cast<std::ptrdiff_t>(key_idx);
-            
+
             std::size_t c_k = child_block_index(curr, k, B);
             if (c_k * B < n_sz) {
                 curr = c_k;
                 moved = true;
-                break; 
+                break;
             }
         }
-        if (!moved) return -1; 
+        if (!moved) return -1;
     }
 }
 
@@ -119,7 +118,7 @@ std::size_t btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::si
         std::size_t child_id = which_child(current_block, B);
         for (std::size_t i = 0; i < child_id; ++i) {
             rank += subtree_size(child_block_index(parent, i, B), n, B);
-            if (i < B) rank++; 
+            if (i < B) rank++;
         }
         current_block = parent;
     }
@@ -147,7 +146,7 @@ std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t 
     }
     while (block > 0) {
         std::size_t p = parent_block_index(block, B);
-        std::size_t c_idx = which_child(block, B); 
+        std::size_t c_idx = which_child(block, B);
         if (c_idx < B) return static_cast<std::ptrdiff_t>(p * B + c_idx);
         block = p;
     }
@@ -173,7 +172,7 @@ std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t 
         if (c_idx > 0) return static_cast<std::ptrdiff_t>(p * B + c_idx - 1);
         block = p;
     }
-    return -1; 
+    return -1;
 }
 
 // -----------------------------------------------------------------------------

@@ -5,13 +5,10 @@
 #include <vault/flat_map/eytzinger_layout_policy.hpp>
 #include <vault/flat_map/sorted_layout_policy.hpp>
 #include <vault/flat_map/implicit_btree_layout_policy.hpp>
-#include <vault/flat_map/aliases.hpp> 
+#include <vault/flat_map/aliases.hpp>
 
 #include <vector>
-#include <numeric>
 #include <algorithm>
-#include <random>
-#include <stdexcept>
 
 // --- Helper: Test Fixture for Layout Policies ---
 
@@ -25,7 +22,7 @@ void test_layout_permutations(size_t n) {
     // 1. Verify sorted_rank_to_index generates a valid permutation of 0..N-1
     for (size_t rank = 0; rank < n; ++rank) {
         size_t idx = Policy::sorted_rank_to_index(rank, n);
-        REQUIRE(idx < n); 
+        REQUIRE(idx < n);
         p_indices.push_back(idx);
     }
 
@@ -56,17 +53,17 @@ void test_traversal_logic(size_t n) {
 
         ptrdiff_t next = Policy::next_index(curr, n);
         CHECK(next != -1);
-        
+
         size_t expected_next = Policy::sorted_rank_to_index(rank + 1, n);
         CHECK(static_cast<size_t>(next) == expected_next);
-        
+
         curr = next;
     }
     CHECK(Policy::next_index(curr, n) == -1);
 
     // 2. Backward Traversal
     curr = static_cast<ptrdiff_t>(Policy::sorted_rank_to_index(n - 1, n));
-    
+
     for (size_t rank = n - 1; rank > 0; --rank) {
         size_t expected_curr = Policy::sorted_rank_to_index(rank, n);
         CHECK(static_cast<size_t>(curr) == expected_curr);
@@ -107,7 +104,7 @@ void test_lower_bound_correctness(size_t n) {
         REQUIRE(it != data.end());
         CHECK(*it == key + 1);
     }
-    
+
     // Greater than all
     auto it = Policy::lower_bound(data, static_cast<int>(n * 2 + 100));
     CHECK(it == data.end());
@@ -190,7 +187,7 @@ void test_map_interface(size_t n) {
         auto [first, last] = map.equal_range(0);
         REQUIRE(first != map.end());
         CHECK(first->first == 0);
-        
+
         // If n=1, 0 is the max element, so last should be end()
         if (n == 1) {
             CHECK(last == map.end());
@@ -200,14 +197,14 @@ void test_map_interface(size_t n) {
         }
         CHECK(std::next(first) == last);
     }
-    
+
     // Missing key (1)
     // Only perform this check if we have enough elements (0, 2...)
     if (n >= 2) {
         auto [first, last] = map.equal_range(1);
         // Should point to 2
         REQUIRE(first != map.end());
-        CHECK(first->first == 2); 
+        CHECK(first->first == 2);
         CHECK(first == last);     // Empty range
     } else {
         // If n=1, keys={0}. Search for 1 returns end()
@@ -227,28 +224,28 @@ void test_map_interface(size_t n) {
 
 using Sorted = eytzinger::sorted_layout_policy;
 using Eytzinger = eytzinger::eytzinger_layout_policy<6>;
-using ImplicitBTree_Tiny = eytzinger::implicit_btree_layout_policy<2>; 
-using ImplicitBTree_Large = eytzinger::implicit_btree_layout_policy<8>; 
+using ImplicitBTree_Tiny = eytzinger::implicit_btree_layout_policy<2>;
+using ImplicitBTree_Large = eytzinger::implicit_btree_layout_policy<8>;
 
-TEMPLATE_TEST_CASE("Layout Policy: Index Mapping", "[layout][mapping]", 
+TEMPLATE_TEST_CASE("Layout Policy: Index Mapping", "[layout][mapping]",
                    Sorted, Eytzinger, ImplicitBTree_Tiny, ImplicitBTree_Large) {
     auto n = GENERATE(0, 1, 2, 3, 7, 8, 15, 16, 20, 31, 32, 100);
     test_layout_permutations<TestType>(n);
 }
 
-TEMPLATE_TEST_CASE("Layout Policy: Traversal", "[layout][traversal]", 
+TEMPLATE_TEST_CASE("Layout Policy: Traversal", "[layout][traversal]",
                    Sorted, Eytzinger, ImplicitBTree_Tiny, ImplicitBTree_Large) {
     auto n = GENERATE(1, 2, 3, 7, 8, 15, 16, 20, 64);
     test_traversal_logic<TestType>(n);
 }
 
-TEMPLATE_TEST_CASE("Layout Policy: Lower Bound", "[layout][search]", 
+TEMPLATE_TEST_CASE("Layout Policy: Lower Bound", "[layout][search]",
                    Sorted, Eytzinger, ImplicitBTree_Tiny, ImplicitBTree_Large) {
     auto n = GENERATE(0, 1, 2, 5, 8, 15, 16, 100, 1024);
     test_lower_bound_correctness<TestType>(n);
 }
 
-TEMPLATE_TEST_CASE("Layout Policy: Upper Bound", "[layout][search]", 
+TEMPLATE_TEST_CASE("Layout Policy: Upper Bound", "[layout][search]",
                    Sorted, Eytzinger, ImplicitBTree_Tiny, ImplicitBTree_Large) {
     auto n = GENERATE(0, 1, 2, 5, 8, 15, 16, 100, 1024);
     test_upper_bound_correctness<TestType>(n);
@@ -259,7 +256,7 @@ using SortedMap = sorted_map<int, int>;
 using EytzingerMap = eytzinger_map<int, int>;
 using BTreeMap = btree_map<int, int>;
 
-TEMPLATE_TEST_CASE("Layout Map: Interface", "[map][interface]", 
+TEMPLATE_TEST_CASE("Layout Map: Interface", "[map][interface]",
                    SortedMap, EytzingerMap, BTreeMap) {
     auto n = GENERATE(0, 1, 5, 16, 100);
     test_map_interface<TestType>(n);

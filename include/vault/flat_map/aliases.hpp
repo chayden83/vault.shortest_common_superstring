@@ -1,14 +1,15 @@
 #ifndef MAPS_HPP
 #define MAPS_HPP
 
+#include <bit>
+#include <new> 
+#include <algorithm>
+#include <type_traits> 
+
 #include "layout_map.hpp"
 #include "eytzinger_layout_policy.hpp"
 #include "sorted_layout_policy.hpp"
 #include "implicit_btree_layout_policy.hpp"
-#include <bit>
-#include <algorithm>
-#include <new> 
-#include <type_traits> 
 
 namespace eytzinger::detail {
     consteval std::size_t get_cache_line_size() {
