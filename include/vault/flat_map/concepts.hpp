@@ -3,18 +3,8 @@
 
 #include <concepts>
 #include <iterator>
-#include <functional>
 
 namespace eytzinger {
-
-// Internal detail to detect the presence of static members effectively
-namespace detail {
-    template <typename T>
-    using diff_t = std::iter_difference_t<T>;
-
-    template <typename T>
-    using size_t = std::size_t;
-}
 
 /**
  * @brief Concept for a Layout Policy that supports forward traversal and binary search.
