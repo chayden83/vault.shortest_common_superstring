@@ -10,19 +10,19 @@ namespace eytzinger::detail {
 // Core Arithmetic Helpers (Internal)
 // -----------------------------------------------------------------------------
 
-static std::size_t child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B) {
+[[nodiscard]] static std::size_t child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B) {
     return block_idx * (B + 1) + 1 + child_slot;
 }
 
-static std::size_t parent_block_index(std::size_t block_idx, std::size_t B) {
+[[nodiscard]] static std::size_t parent_block_index(std::size_t block_idx, std::size_t B) {
     return (block_idx == 0) ? 0 : (block_idx - 1) / (B + 1);
 }
 
-static std::size_t which_child(std::size_t block_idx, std::size_t B) {
+[[nodiscard]] static std::size_t which_child(std::size_t block_idx, std::size_t B) {
     return (block_idx == 0) ? 0 : (block_idx - 1) % (B + 1);
 }
 
-static std::size_t subtree_size(std::size_t block_idx, std::size_t n, std::size_t B) {
+[[nodiscard]] static std::size_t subtree_size(std::size_t block_idx, std::size_t n, std::size_t B) {
     std::size_t start_idx = block_idx * B;
     if (start_idx >= n) return 0;
 
@@ -50,7 +50,7 @@ static std::size_t subtree_size(std::size_t block_idx, std::size_t n, std::size_
     return size;
 }
 
-static std::ptrdiff_t find_max_in_subtree(std::size_t start_block, std::size_t n_sz, std::size_t B) {
+[[nodiscard]] static std::ptrdiff_t find_max_in_subtree(std::size_t start_block, std::size_t n_sz, std::size_t B) {
     std::size_t curr = start_block;
     while (true) {
         bool moved = false;
@@ -78,11 +78,11 @@ static std::ptrdiff_t find_max_in_subtree(std::size_t start_block, std::size_t n
 // Exposed Topology/Traversal Functions
 // -----------------------------------------------------------------------------
 
-std::size_t btree_child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B) {
+[[nodiscard]] std::size_t btree_child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B) {
     return child_block_index(block_idx, child_slot, B);
 }
 
-std::size_t btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::size_t B) {
+[[nodiscard]] std::size_t btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::size_t B) {
     std::size_t current_block = 0;
     while (true) {
         if (current_block * B >= n) return n;
@@ -104,7 +104,7 @@ std::size_t btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::siz
     }
 }
 
-std::size_t btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::size_t B) {
+[[nodiscard]] std::size_t btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::size_t B) {
     if (index >= n) return n;
     std::size_t rank = 0;
     std::size_t current_block = index / B;
@@ -125,7 +125,7 @@ std::size_t btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::si
     return rank;
 }
 
-std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t B) {
+[[nodiscard]] std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t B) {
     if (i < 0 || static_cast<std::size_t>(i) >= n_sz) return -1;
     std::size_t curr = static_cast<std::size_t>(i);
     std::size_t block = curr / B;
@@ -153,7 +153,7 @@ std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t 
     return -1;
 }
 
-std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t B) {
+[[nodiscard]] std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t B) {
     if (i == -1) {
         if (n_sz == 0) return -1;
         return find_max_in_subtree(0, n_sz, B);
@@ -183,7 +183,7 @@ std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t 
 
 // --- Helper: XOR Sign Bit ---
 template <typename T>
-__m256i xor_sign_bit(__m256i v) {
+[[nodiscard]] __m256i xor_sign_bit(__m256i v) {
     if constexpr (sizeof(T) == 8) {
         return _mm256_xor_si256(v, _mm256_set1_epi64x(0x8000000000000000ULL));
     } else if constexpr (sizeof(T) == 4) {
@@ -199,7 +199,7 @@ __m256i xor_sign_bit(__m256i v) {
 
 // 64-bit (int64/uint64)
 #define IMPL_LB_64(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi64x(static_cast<long long>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 4))); \
@@ -209,7 +209,7 @@ std::size_t NAME(const T* b, T k) { \
 }
 
 #define IMPL_UB_64(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi64x(static_cast<long long>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 4))); \
@@ -220,7 +220,7 @@ std::size_t NAME(const T* b, T k) { \
 
 // 32-bit (int32/uint32)
 #define IMPL_LB_32(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi32(static_cast<int>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 8))); \
@@ -230,7 +230,7 @@ std::size_t NAME(const T* b, T k) { \
 }
 
 #define IMPL_UB_32(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi32(static_cast<int>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 8))); \
@@ -241,7 +241,7 @@ std::size_t NAME(const T* b, T k) { \
 
 // 16-bit (int16/uint16)
 #define IMPL_LB_16(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi16(static_cast<short>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 16))); \
@@ -251,7 +251,7 @@ std::size_t NAME(const T* b, T k) { \
 }
 
 #define IMPL_UB_16(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi16(static_cast<short>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 16))); \
@@ -264,7 +264,7 @@ std::size_t NAME(const T* b, T k) { \
 
 // 8-bit (int8/uint8)
 #define IMPL_LB_8(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi8(static_cast<char>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 32))); \
@@ -274,7 +274,7 @@ std::size_t NAME(const T* b, T k) { \
 }
 
 #define IMPL_UB_8(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
-std::size_t NAME(const T* b, T k) { \
+[[nodiscard]] std::size_t NAME(const T* b, T k) { \
     __m256i kv = PRE_OP(T, _mm256_set1_epi8(static_cast<char>(k))); \
     __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
     __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 32))); \
@@ -344,7 +344,7 @@ IMPL_UB_8(simd_ub_uint8_greater, uint8_t, char, _mm256_cmpgt_epi8, XOR_SIGN)
 // -----------------------------------------------------------------------------
 
 #define IMPL_FAST_PATH_LOOPS(SUFFIX, TYPE, SIMD_LB, SIMD_UB) \
-std::size_t search_loop_lb_##SUFFIX(const TYPE* base, std::size_t n, TYPE key, std::size_t B) { \
+[[nodiscard]] std::size_t search_loop_lb_##SUFFIX(const TYPE* base, std::size_t n, TYPE key, std::size_t B) { \
     std::size_t k = 0; \
     std::size_t result_idx = n; \
     while (true) { \
@@ -371,7 +371,7 @@ std::size_t search_loop_lb_##SUFFIX(const TYPE* base, std::size_t n, TYPE key, s
     } \
     return result_idx; \
 } \
-std::size_t search_loop_ub_##SUFFIX(const TYPE* base, std::size_t n, TYPE key, std::size_t B) { \
+[[nodiscard]] std::size_t search_loop_ub_##SUFFIX(const TYPE* base, std::size_t n, TYPE key, std::size_t B) { \
     std::size_t k = 0; \
     std::size_t result_idx = n; \
     while (true) { \
