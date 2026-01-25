@@ -5,6 +5,7 @@ target_sources(vault.flat_map PRIVATE
 )
 
 target_sources(vault.flat_map PUBLIC FILE_SET HEADERS BASE_DIRS ${PROJECT_SOURCE_DIR}/include FILES
+  ${PROJECT_SOURCE_DIR}/include/vault/flat_map/concepts.hpp
   ${PROJECT_SOURCE_DIR}/include/vault/flat_map/aliases.hpp
   ${PROJECT_SOURCE_DIR}/include/vault/flat_map/eytzinger_layout_policy.hpp
   ${PROJECT_SOURCE_DIR}/include/vault/flat_map/implicit_btree_layout_policy.hpp

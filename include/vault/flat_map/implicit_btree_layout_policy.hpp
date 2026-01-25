@@ -312,9 +312,16 @@ public:
     static constexpr inline permute_fn permute{};
 
     struct get_nth_sorted_fn {
+        template<std::random_access_iterator I, std::sentinel_for<I> S>
+        [[nodiscard]] constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) const {
+            const auto size = static_cast<std::size_t>(std::distance(first, last));
+            if (n >= size) throw std::out_of_range("eytzinger index out of range");
+            return *(first + sorted_rank_to_index(n, size));
+        }
+
         template<std::ranges::random_access_range R>
         [[nodiscard]] constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) const {
-            return *(std::ranges::begin(range) + sorted_rank_to_index(n, std::ranges::size(range)));
+	    return (*this)(std::ranges::begin(range), std::ranges::end(range));
         }
     };
     static constexpr inline get_nth_sorted_fn get_nth_sorted{};

@@ -5,12 +5,16 @@
 #include <ranges>
 #include <vector>
 #include <utility>
+#include <concepts>
 #include <algorithm>
 #include <stdexcept>
 #include <initializer_list>
 
+#include "concepts.hpp"
 #include "layout_iterator.hpp"
 #include "eytzinger_layout_policy.hpp"
+
+// clang-format off
 
 namespace std {
   static constexpr inline struct sorted_unique_t { } const sorted_unique { };
@@ -24,11 +28,18 @@ namespace std {
 template<
     typename K,
     typename V,
-    typename Compare = std::less<>,
+    std::strict_weak_order<K, K> Compare = std::less<>,
     typename LayoutPolicy = eytzinger::eytzinger_layout_policy<6>,
     typename Allocator = std::allocator<std::pair<const K, V>>,
     template <typename, typename> typename KeyContainer = std::vector,
     template <typename, typename> typename ValueContainer = std::vector
+>
+requires eytzinger::ForwardLayoutPolicy<
+    LayoutPolicy,
+    std::ranges::iterator_t<
+        KeyContainer<K, typename std::allocator_traits<Allocator>::template rebind_alloc<K>>
+    >,
+    Compare
 >
 class layout_map {
 public:
