@@ -3,6 +3,7 @@
 
 #include <ranges>
 #include <vector>
+#include <cstdint>
 #include <concepts>
 #include <iterator>
 #include <algorithm>
@@ -133,45 +134,45 @@ struct block_searcher {
 #ifdef LAYOUT_USE_AVX2
 #define DEFINE_SIMD_SPECIALIZATION(TYPE, BLOCK_SIZE, CONCEPT, SUFFIX) \
     template <typename Comp> \
-    requires CONCEPT<Comp, TYPE> \
-    struct block_searcher<TYPE, Comp, BLOCK_SIZE> { \
+    requires CONCEPT<Comp, TYPE##_t> \
+    struct block_searcher<TYPE##_t, Comp, BLOCK_SIZE> { \
         template <typename Proj> \
-        [[nodiscard]] static std::size_t lower_bound(const TYPE* block, const TYPE& key, Comp comp, Proj proj) { \
+        [[nodiscard]] static std::size_t lower_bound(const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj) { \
             if constexpr (std::is_same_v<Proj, std::identity>) { \
                 return detail::simd_lb_##TYPE##_##SUFFIX(block, key); \
             } else { \
-                return scalar_block_searcher::lower_bound<TYPE, BLOCK_SIZE>(block, key, comp, proj); \
+                return scalar_block_searcher::lower_bound<TYPE##_t, BLOCK_SIZE>(block, key, comp, proj); \
             } \
         } \
         template <typename Proj> \
-        [[nodiscard]] static std::size_t upper_bound(const TYPE* block, const TYPE& key, Comp comp, Proj proj) { \
+        [[nodiscard]] static std::size_t upper_bound(const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj) { \
             if constexpr (std::is_same_v<Proj, std::identity>) { \
                 return detail::simd_ub_##TYPE##_##SUFFIX(block, key); \
             } else { \
-                return scalar_block_searcher::upper_bound<TYPE, BLOCK_SIZE>(block, key, comp, proj); \
+                return scalar_block_searcher::upper_bound<TYPE##_t, BLOCK_SIZE>(block, key, comp, proj); \
             } \
         } \
     };
 
-DEFINE_SIMD_SPECIALIZATION(int64_t,  8, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(uint64_t, 8, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(int64_t,  8, IsStandardGreater, greater)
-DEFINE_SIMD_SPECIALIZATION(uint64_t, 8, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(int64,  8, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(uint64, 8, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(int64,  8, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(uint64, 8, IsStandardGreater, greater)
 
-DEFINE_SIMD_SPECIALIZATION(int32_t,  16, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(uint32_t, 16, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(int32_t,  16, IsStandardGreater, greater)
-DEFINE_SIMD_SPECIALIZATION(uint32_t, 16, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(int32,  16, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(uint32, 16, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(int32,  16, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(uint32, 16, IsStandardGreater, greater)
 
-DEFINE_SIMD_SPECIALIZATION(int16_t,  32, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(uint16_t, 32, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(int16_t,  32, IsStandardGreater, greater)
-DEFINE_SIMD_SPECIALIZATION(uint16_t, 32, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(int16,  32, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(uint16, 32, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(int16,  32, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(uint16, 32, IsStandardGreater, greater)
 
-DEFINE_SIMD_SPECIALIZATION(int8_t,   64, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(uint8_t,  64, IsStandardLess,    less)
-DEFINE_SIMD_SPECIALIZATION(int8_t,   64, IsStandardGreater, greater)
-DEFINE_SIMD_SPECIALIZATION(uint8_t,  64, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(int8,   64, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(uint8,  64, IsStandardLess,    less)
+DEFINE_SIMD_SPECIALIZATION(int8,   64, IsStandardGreater, greater)
+DEFINE_SIMD_SPECIALIZATION(uint8,  64, IsStandardGreater, greater)
 
 #undef DEFINE_SIMD_SPECIALIZATION
 #endif

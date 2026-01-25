@@ -200,9 +200,9 @@ __m256i xor_sign_bit(__m256i v) {
 // 64-bit (int64/uint64)
 #define IMPL_LB_64(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi64x(static_cast<long long>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 4))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi64x(static_cast<long long>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 4))); \
     int m = _mm256_movemask_pd(_mm256_castsi256_pd(CMP_INTRIN(kv, v0))) | \
            (_mm256_movemask_pd(_mm256_castsi256_pd(CMP_INTRIN(kv, v1))) << 4); \
     return static_cast<std::size_t>(std::popcount(static_cast<uint32_t>(m))); \
@@ -210,9 +210,9 @@ std::size_t NAME(const T* b, T k) { \
 
 #define IMPL_UB_64(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi64x(static_cast<long long>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 4))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi64x(static_cast<long long>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 4))); \
     int m = _mm256_movemask_pd(_mm256_castsi256_pd(CMP_INTRIN(v0, kv))) | \
            (_mm256_movemask_pd(_mm256_castsi256_pd(CMP_INTRIN(v1, kv))) << 4); \
     return static_cast<std::size_t>(std::countr_zero(static_cast<uint32_t>(m | (1 << 8)))); \
@@ -221,9 +221,9 @@ std::size_t NAME(const T* b, T k) { \
 // 32-bit (int32/uint32)
 #define IMPL_LB_32(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi32(static_cast<int>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 8))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi32(static_cast<int>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 8))); \
     int m = _mm256_movemask_ps(_mm256_castsi256_ps(CMP_INTRIN(kv, v0))) | \
            (_mm256_movemask_ps(_mm256_castsi256_ps(CMP_INTRIN(kv, v1))) << 8); \
     return static_cast<std::size_t>(std::popcount(static_cast<uint32_t>(m))); \
@@ -231,9 +231,9 @@ std::size_t NAME(const T* b, T k) { \
 
 #define IMPL_UB_32(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi32(static_cast<int>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 8))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi32(static_cast<int>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 8))); \
     int m = _mm256_movemask_ps(_mm256_castsi256_ps(CMP_INTRIN(v0, kv))) | \
            (_mm256_movemask_ps(_mm256_castsi256_ps(CMP_INTRIN(v1, kv))) << 8); \
     return static_cast<std::size_t>(std::countr_zero(static_cast<uint32_t>(m | (1 << 16)))); \
@@ -242,9 +242,9 @@ std::size_t NAME(const T* b, T k) { \
 // 16-bit (int16/uint16)
 #define IMPL_LB_16(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi16(static_cast<short>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 16))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi16(static_cast<short>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 16))); \
     uint32_t m0 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(kv, v0))); \
     uint32_t m1 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(kv, v1))); \
     return static_cast<std::size_t>((std::popcount(m0) + std::popcount(m1)) / 2); \
@@ -252,9 +252,9 @@ std::size_t NAME(const T* b, T k) { \
 
 #define IMPL_UB_16(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi16(static_cast<short>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 16))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi16(static_cast<short>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 16))); \
     uint32_t m0 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(v0, kv))); \
     uint32_t m1 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(v1, kv))); \
     uint64_t fm = static_cast<uint64_t>(m0) | (static_cast<uint64_t>(m1) << 32); \
@@ -265,9 +265,9 @@ std::size_t NAME(const T* b, T k) { \
 // 8-bit (int8/uint8)
 #define IMPL_LB_8(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi8(static_cast<char>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 32))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi8(static_cast<char>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 32))); \
     uint32_t m0 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(kv, v0))); \
     uint32_t m1 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(kv, v1))); \
     return static_cast<std::size_t>(std::popcount(m0) + std::popcount(m1)); \
@@ -275,9 +275,9 @@ std::size_t NAME(const T* b, T k) { \
 
 #define IMPL_UB_8(NAME, T, CAST, CMP_INTRIN, PRE_OP) \
 std::size_t NAME(const T* b, T k) { \
-    __m256i kv = PRE_OP(_mm256_set1_epi8(static_cast<char>(k))); \
-    __m256i v0 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
-    __m256i v1 = PRE_OP(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 32))); \
+    __m256i kv = PRE_OP(T, _mm256_set1_epi8(static_cast<char>(k))); \
+    __m256i v0 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b))); \
+    __m256i v1 = PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + 32))); \
     uint32_t m0 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(v0, kv))); \
     uint32_t m1 = static_cast<uint32_t>(_mm256_movemask_epi8(CMP_INTRIN(v1, kv))); \
     uint64_t fm = static_cast<uint64_t>(m0) | (static_cast<uint64_t>(m1) << 32); \
@@ -285,8 +285,8 @@ std::size_t NAME(const T* b, T k) { \
     return static_cast<std::size_t>(std::countr_zero(fm)); \
 }
 
-#define NO_OP(x) x
-#define XOR_SIGN(x) xor_sign_bit<T>(x)
+#define NO_OP(T, x) x
+#define XOR_SIGN(T, x) xor_sign_bit<T>(x)
 
 // --- Instantiations (32 total) ---
 
