@@ -46,7 +46,7 @@ class layout_map {
 public:
     using key_type        = K;
     using mapped_type     = V;
-    using value_type      = std::pair<const K, V>;
+    using value_type      = std::pair<K, V>;
     using key_compare     = Compare;
     using allocator_type  = Allocator;
     using policy_type     = LayoutPolicy; // Exposed for iterator access
