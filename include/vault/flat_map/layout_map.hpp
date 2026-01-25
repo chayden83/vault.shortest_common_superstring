@@ -1,12 +1,13 @@
 #ifndef LAYOUT_MAP_HPP
 #define LAYOUT_MAP_HPP
 
-#include <iterator>
 #include <memory>
 #include <ranges>
 #include <vector>
 #include <utility>
+#include <iterator>
 #include <concepts>
+#include <iterator>
 #include <algorithm>
 #include <stdexcept>
 #include <initializer_list>
@@ -38,7 +39,7 @@ template<
 requires eytzinger::ForwardLayoutPolicy<
     LayoutPolicy,
     std::ranges::iterator_t<
-        KeyContainer<K, typename std::allocator_traits<Allocator>::template rebind_alloc<K>>
+        const KeyContainer<K, typename std::allocator_traits<Allocator>::template rebind_alloc<K>>
     >,
     Compare
 >
@@ -253,6 +254,30 @@ public:
     [[nodiscard]] constexpr const_iterator end() const noexcept { return const_iterator(*this, -1); }
     [[nodiscard]] constexpr const_iterator cbegin() const noexcept { return begin(); }
     [[nodiscard]] constexpr const_iterator cend() const noexcept { return end(); }
+
+    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> rbegin() const noexcept
+      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+    {
+      return { end() };
+    }
+
+    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> rend() const noexcept
+      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+    {
+      return { begin() };
+    }
+
+    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> crbegin() const noexcept
+      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+    {
+      return rbegin();
+    }
+
+    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> crend() const noexcept
+      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+    {
+      return rend();
+    }
 
 private:
     constexpr void sort_and_unique_zipped() {
