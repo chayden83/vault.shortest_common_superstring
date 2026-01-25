@@ -90,7 +90,7 @@ public:
             fill_in_order(temp, source_iter, 2 * k + 1, n);
 
             // 2. Visit Root (k)
-            temp[k] = *source_iter;
+            temp[k] = std::move(*source_iter);
             ++source_iter;
 
             // 3. Recurse Right (2*k + 2)

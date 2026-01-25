@@ -1,6 +1,7 @@
 #ifndef LAYOUT_MAP_HPP
 #define LAYOUT_MAP_HPP
 
+#include <iterator>
 #include <memory>
 #include <ranges>
 #include <vector>
@@ -73,29 +74,29 @@ public:
     }
 
     // --- Constructors ---
-    layout_map() : layout_map(Compare(), Allocator()) {}
+    [[nodiscard]] layout_map() : layout_map(Compare(), Allocator()) {}
 
-    explicit layout_map(const Compare& comp, const Allocator& alloc = Allocator())
+    [[nodiscard]] explicit layout_map(const Compare& comp, const Allocator& alloc = Allocator())
         : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp) {}
 
-    explicit layout_map(const Allocator& alloc)
+    [[nodiscard]] explicit layout_map(const Allocator& alloc)
         : layout_map(Compare(), alloc) {}
 
-    layout_map(const layout_map& other) = default;
-    layout_map(layout_map&& other) noexcept = default;
+    [[nodiscard]] layout_map(const layout_map& other) = default;
+    [[nodiscard]] layout_map(layout_map&& other) noexcept = default;
 
-    layout_map(const layout_map& other, const Allocator& alloc)
+    [[nodiscard]] layout_map(const layout_map& other, const Allocator& alloc)
         : keys_(other.keys_, key_allocator_type(alloc))
         , values_(other.values_, value_allocator_type(alloc))
         , compare_(other.compare_) {}
 
-    layout_map(layout_map&& other, const Allocator& alloc)
+    [[nodiscard]] layout_map(layout_map&& other, const Allocator& alloc)
         : keys_(std::move(other.keys_), key_allocator_type(alloc))
         , values_(std::move(other.values_), value_allocator_type(alloc))
         , compare_(std::move(other.compare_)) {}
 
     template<std::input_iterator It>
-    layout_map(It first, It last, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
+    [[nodiscard]] layout_map(It first, It last, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp)
     {
         for (; first != last; ++first) {
@@ -107,17 +108,17 @@ public:
     }
 
     template<std::input_iterator It>
-    layout_map(It first, It last, const Allocator& alloc)
+    [[nodiscard]] layout_map(It first, It last, const Allocator& alloc)
         : layout_map(first, last, Compare(), alloc) {}
 
-    layout_map(std::initializer_list<value_type> init, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
+    [[nodiscard]] layout_map(std::initializer_list<value_type> init, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : layout_map(init.begin(), init.end(), comp, alloc) {}
 
-    layout_map(std::initializer_list<value_type> init, const Allocator& alloc)
+    [[nodiscard]] layout_map(std::initializer_list<value_type> init, const Allocator& alloc)
         : layout_map(init.begin(), init.end(), Compare(), alloc) {}
 
     template<std::ranges::forward_range R>
-    layout_map(std::sorted_unique_t, R&& range, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
+    [[nodiscard]] layout_map(std::sorted_unique_t, R&& range, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp)
     {
         for (auto&& [k, v] : range) {
@@ -128,10 +129,10 @@ public:
     }
 
     template<std::ranges::forward_range R>
-    layout_map(std::sorted_unique_t tag, R&& range, const Allocator& alloc)
+    [[nodiscard]] layout_map(std::sorted_unique_t tag, R&& range, const Allocator& alloc)
         : layout_map(tag, std::forward<R>(range), Compare(), alloc) {}
 
-    layout_map(std::in_place_t, key_storage_type&& k_cont, value_storage_type&& v_cont,
+    [[nodiscard]] layout_map(std::in_place_t, key_storage_type&& k_cont, value_storage_type&& v_cont,
                   const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(std::move(k_cont), key_allocator_type(alloc))
         , values_(std::move(v_cont), value_allocator_type(alloc))
@@ -142,7 +143,7 @@ public:
         policy_type::permute(std::views::zip(keys_, values_));
     }
 
-    layout_map(std::in_place_t tag, key_storage_type&& k_cont, value_storage_type&& v_cont, const Allocator& alloc)
+    [[nodiscard]] layout_map(std::in_place_t tag, key_storage_type&& k_cont, value_storage_type&& v_cont, const Allocator& alloc)
         : layout_map(tag, std::move(k_cont), std::move(v_cont), Compare(), alloc) {}
 
     // Assignment
