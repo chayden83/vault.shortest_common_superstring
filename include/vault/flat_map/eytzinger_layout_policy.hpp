@@ -181,7 +181,7 @@ public:
             std::size_t i = 0;
             while (i < n) {
                 const std::size_t future_i = ((i + 1) << L) - 1;
-                if (future_i < n) { EYTZINGER_PREFETCH(&base[future_i]); }
+                EYTZINGER_PREFETCH(&base[future_i]);
                 bool go_right = std::invoke(comp, std::invoke(proj, base[i]), value);
                 i = (i << 1) + 1 + static_cast<std::size_t>(go_right);
             }
@@ -205,7 +205,7 @@ public:
             std::size_t i = 0;
             while (i < n) {
                 const std::size_t future_i = ((i + 1) << L) - 1;
-                if (future_i < n) { EYTZINGER_PREFETCH(&base[future_i]); }
+                EYTZINGER_PREFETCH(&base[future_i]);
                 bool go_right = !std::invoke(comp, value, std::invoke(proj, base[i]));
                 i = (i << 1) + 1 + static_cast<std::size_t>(go_right);
             }
