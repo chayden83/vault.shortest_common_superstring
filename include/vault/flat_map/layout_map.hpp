@@ -61,6 +61,8 @@ public:
 
     using iterator        = layout_iterator<const layout_map>;
     using const_iterator  = iterator;
+    using reverse_iterator = std::reverse_iterator<iterator>;
+    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
     using reference       = std::pair<const key_type&, const mapped_type&>;
 
 private:
@@ -255,25 +257,25 @@ public:
     [[nodiscard]] constexpr const_iterator cbegin() const noexcept { return begin(); }
     [[nodiscard]] constexpr const_iterator cend() const noexcept { return end(); }
 
-    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> rbegin() const noexcept
+    [[nodiscard]] constexpr const_reverse_iterator rbegin() const noexcept
       requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
     {
-      return { end() };
+      return const_reverse_iterator { end() };
     }
 
-    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> rend() const noexcept
+    [[nodiscard]] constexpr const_reverse_iterator rend() const noexcept
       requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
     {
-      return { begin() };
+      return const_reverse_iterator { begin() };
     }
 
-    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> crbegin() const noexcept
+    [[nodiscard]] constexpr const_reverse_iterator crbegin() const noexcept
       requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
     {
       return rbegin();
     }
 
-    [[nodiscard]] constexpr std::reverse_iterator<const_iterator> crend() const noexcept
+    [[nodiscard]] constexpr const_reverse_iterator crend() const noexcept
       requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
     {
       return rend();
