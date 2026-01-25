@@ -34,7 +34,7 @@ struct sorted_layout_policy {
     // No-op: Data is already sorted
     struct permute_fn {
         template<typename... Args>
-        [[nodiscard]] static constexpr void operator()(Args&&...) noexcept {}
+        static constexpr void operator()(Args&&...) noexcept {}
     };
 
     // Standard O(1) random access

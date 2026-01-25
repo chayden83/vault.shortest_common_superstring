@@ -39,39 +39,39 @@ concept IsStandardGreater =
 
 namespace detail {
     // Topology / Math Helpers
-    std::size_t btree_child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B);
-    std::size_t btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::size_t B);
-    std::size_t btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::size_t B);
-    std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n, std::size_t B);
-    std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n, std::size_t B);
+    [[nodiscard]] std::size_t btree_child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B);
+    [[nodiscard]] std::size_t btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::size_t B);
+    [[nodiscard]] std::size_t btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::size_t B);
+    [[nodiscard]] std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n, std::size_t B);
+    [[nodiscard]] std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n, std::size_t B);
 
 #ifdef LAYOUT_USE_AVX2
     // Fast Path Full-Loop Implementations
-    std::size_t search_loop_lb_uint64_less(const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
-    std::size_t search_loop_ub_uint64_less(const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
-    std::size_t search_loop_lb_int64_less(const int64_t* base, std::size_t n, int64_t key, std::size_t B);
-    std::size_t search_loop_ub_int64_less(const int64_t* base, std::size_t n, int64_t key, std::size_t B);
+    [[nodiscard]] std::size_t search_loop_lb_uint64_less(const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
+    [[nodiscard]] std::size_t search_loop_ub_uint64_less(const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
+    [[nodiscard]] std::size_t search_loop_lb_int64_less(const int64_t* base, std::size_t n, int64_t key, std::size_t B);
+    [[nodiscard]] std::size_t search_loop_ub_int64_less(const int64_t* base, std::size_t n, int64_t key, std::size_t B);
 
     // SIMD Block Searcher Trampolines
-    std::size_t simd_lb_int64_less(const int64_t* b, int64_t k);    std::size_t simd_ub_int64_less(const int64_t* b, int64_t k);
-    std::size_t simd_lb_uint64_less(const uint64_t* b, uint64_t k); std::size_t simd_ub_uint64_less(const uint64_t* b, uint64_t k);
-    std::size_t simd_lb_int64_greater(const int64_t* b, int64_t k); std::size_t simd_ub_int64_greater(const int64_t* b, int64_t k);
-    std::size_t simd_lb_uint64_greater(const uint64_t* b, uint64_t k); std::size_t simd_ub_uint64_greater(const uint64_t* b, uint64_t k);
+    [[nodiscard]] std::size_t simd_lb_int64_less(const int64_t* b, int64_t k);    std::size_t simd_ub_int64_less(const int64_t* b, int64_t k);
+    [[nodiscard]] std::size_t simd_lb_uint64_less(const uint64_t* b, uint64_t k); std::size_t simd_ub_uint64_less(const uint64_t* b, uint64_t k);
+    [[nodiscard]] std::size_t simd_lb_int64_greater(const int64_t* b, int64_t k); std::size_t simd_ub_int64_greater(const int64_t* b, int64_t k);
+    [[nodiscard]] std::size_t simd_lb_uint64_greater(const uint64_t* b, uint64_t k); std::size_t simd_ub_uint64_greater(const uint64_t* b, uint64_t k);
 
-    std::size_t simd_lb_int32_less(const int32_t* b, int32_t k);    std::size_t simd_ub_int32_less(const int32_t* b, int32_t k);
-    std::size_t simd_lb_uint32_less(const uint32_t* b, uint32_t k); std::size_t simd_ub_uint32_less(const uint32_t* b, uint32_t k);
-    std::size_t simd_lb_int32_greater(const int32_t* b, int32_t k); std::size_t simd_ub_int32_greater(const int32_t* b, int32_t k);
-    std::size_t simd_lb_uint32_greater(const uint32_t* b, uint32_t k); std::size_t simd_ub_uint32_greater(const uint32_t* b, uint32_t k);
+    [[nodiscard]] std::size_t simd_lb_int32_less(const int32_t* b, int32_t k);    std::size_t simd_ub_int32_less(const int32_t* b, int32_t k);
+    [[nodiscard]] std::size_t simd_lb_uint32_less(const uint32_t* b, uint32_t k); std::size_t simd_ub_uint32_less(const uint32_t* b, uint32_t k);
+    [[nodiscard]] std::size_t simd_lb_int32_greater(const int32_t* b, int32_t k); std::size_t simd_ub_int32_greater(const int32_t* b, int32_t k);
+    [[nodiscard]] std::size_t simd_lb_uint32_greater(const uint32_t* b, uint32_t k); std::size_t simd_ub_uint32_greater(const uint32_t* b, uint32_t k);
 
-    std::size_t simd_lb_int16_less(const int16_t* b, int16_t k);    std::size_t simd_ub_int16_less(const int16_t* b, int16_t k);
-    std::size_t simd_lb_uint16_less(const uint16_t* b, uint16_t k); std::size_t simd_ub_uint16_less(const uint16_t* b, uint16_t k);
-    std::size_t simd_lb_int16_greater(const int16_t* b, int16_t k); std::size_t simd_ub_int16_greater(const int16_t* b, int16_t k);
-    std::size_t simd_lb_uint16_greater(const uint16_t* b, uint16_t k); std::size_t simd_ub_uint16_greater(const uint16_t* b, uint16_t k);
+    [[nodiscard]] std::size_t simd_lb_int16_less(const int16_t* b, int16_t k);    std::size_t simd_ub_int16_less(const int16_t* b, int16_t k);
+    [[nodiscard]] std::size_t simd_lb_uint16_less(const uint16_t* b, uint16_t k); std::size_t simd_ub_uint16_less(const uint16_t* b, uint16_t k);
+    [[nodiscard]] std::size_t simd_lb_int16_greater(const int16_t* b, int16_t k); std::size_t simd_ub_int16_greater(const int16_t* b, int16_t k);
+    [[nodiscard]] std::size_t simd_lb_uint16_greater(const uint16_t* b, uint16_t k); std::size_t simd_ub_uint16_greater(const uint16_t* b, uint16_t k);
 
-    std::size_t simd_lb_int8_less(const int8_t* b, int8_t k);       std::size_t simd_ub_int8_less(const int8_t* b, int8_t k);
-    std::size_t simd_lb_uint8_less(const uint8_t* b, uint8_t k);    std::size_t simd_ub_uint8_less(const uint8_t* b, uint8_t k);
-    std::size_t simd_lb_int8_greater(const int8_t* b, int8_t k);    std::size_t simd_ub_int8_greater(const int8_t* b, int8_t k);
-    std::size_t simd_lb_uint8_greater(const uint8_t* b, uint8_t k); std::size_t simd_ub_uint8_greater(const uint8_t* b, uint8_t k);
+    [[nodiscard]] std::size_t simd_lb_int8_less(const int8_t* b, int8_t k);       std::size_t simd_ub_int8_less(const int8_t* b, int8_t k);
+    [[nodiscard]] std::size_t simd_lb_uint8_less(const uint8_t* b, uint8_t k);    std::size_t simd_ub_uint8_less(const uint8_t* b, uint8_t k);
+    [[nodiscard]] std::size_t simd_lb_int8_greater(const int8_t* b, int8_t k);    std::size_t simd_ub_int8_greater(const int8_t* b, int8_t k);
+    [[nodiscard]] std::size_t simd_lb_uint8_greater(const uint8_t* b, uint8_t k); std::size_t simd_ub_uint8_greater(const uint8_t* b, uint8_t k);
 #endif
 }
 
@@ -259,26 +259,27 @@ private:
 
 public:
     struct sorted_rank_to_index_fn {
-        std::size_t operator()(std::size_t rank, std::size_t n) const { return detail::btree_sorted_rank_to_index(rank, n, B); }
+        [[nodiscard]] static constexpr std::size_t operator()(std::size_t rank, std::size_t n) { return detail::btree_sorted_rank_to_index(rank, n, B); }
     };
     struct index_to_sorted_rank_fn {
-        std::size_t operator()(std::size_t index, std::size_t n) const { return detail::btree_index_to_sorted_rank(index, n, B); }
+        [[nodiscard]] static constexpr std::size_t operator()(std::size_t index, std::size_t n) { return detail::btree_index_to_sorted_rank(index, n, B); }
     };
     struct next_index_fn {
-        std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) const { return detail::btree_next_index(i, n_sz, B); }
+        [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) { return detail::btree_next_index(i, n_sz, B); }
     };
     struct prev_index_fn {
-        std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) const { return detail::btree_prev_index(i, n_sz, B); }
+        [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) { return detail::btree_prev_index(i, n_sz, B); }
     };
 
     static constexpr inline sorted_rank_to_index_fn sorted_rank_to_index{};
     static constexpr inline index_to_sorted_rank_fn index_to_sorted_rank{};
+    
     static constexpr inline next_index_fn next_index{};
     static constexpr inline prev_index_fn prev_index{};
 
     struct permute_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S>
-        void operator()(I first, S last) const {
+        static constexpr void operator()(I first, S last) {
             const auto n = static_cast<std::size_t>(std::distance(first, last));
             if (n <= 1) return;
             using ValueT = std::iter_value_t<I>;
@@ -290,13 +291,13 @@ public:
         }
 
         template<std::ranges::random_access_range R>
-        void operator()(R&& range) const {
-            (*this)(std::ranges::begin(range), std::ranges::end(range));
+        static constexpr void operator()(R&& range) {
+	    operator ()(std::ranges::begin(range), std::ranges::end(range));
         }
 
     private:
         template<typename SrcIter, typename TempVec>
-        static void fill_in_order(TempVec& temp, SrcIter& source_iter, std::size_t block_idx, std::size_t n) {
+        static constexpr void fill_in_order(TempVec& temp, SrcIter& source_iter, std::size_t block_idx, std::size_t n) {
             std::size_t block_start = block_idx * B;
             if (block_start >= n) return;
             for (std::size_t i = 0; i <= B; ++i) {
@@ -329,7 +330,7 @@ public:
     struct lower_bound_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
             if (first == last) return last;
             const auto n = static_cast<std::size_t>(std::distance(first, last));
             const auto* base = std::to_address(first);
@@ -353,8 +354,8 @@ public:
 
         template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
-            return (*this)(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
+        [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
+	    return operator ()(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
         }
     };
     static constexpr inline lower_bound_fn lower_bound{};
@@ -362,7 +363,7 @@ public:
     struct upper_bound_fn {
         template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
+        [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
              if (first == last) return last;
             const auto n = static_cast<std::size_t>(std::distance(first, last));
             const auto* base = std::to_address(first);
@@ -386,8 +387,8 @@ public:
 
         template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
-        [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
-            return (*this)(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
+        [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
+	    return operator ()(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
         }
     };
     static constexpr inline upper_bound_fn upper_bound{};
