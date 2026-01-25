@@ -1,11 +1,9 @@
 #ifndef SORTED_LAYOUT_POLICY_HPP
 #define SORTED_LAYOUT_POLICY_HPP
 
-#include "utilities.hpp"
-#include <algorithm>
-#include <iterator>
 #include <ranges>
-#include <concepts>
+#include <iterator>
+#include <algorithm>
 #include <stdexcept>
 #include <functional>
 
@@ -75,12 +73,12 @@ struct sorted_layout_policy {
 
     // Standard Binary Search
     struct lower_bound_fn {
-        template<std::random_access_iterator I, std::sentinel_for<I> S, 
+        template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
             return std::ranges::lower_bound(first, last, value, comp, proj);
         }
-        template<std::ranges::random_access_range R, 
+        template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
             return std::ranges::lower_bound(range, value, comp, proj);
@@ -88,12 +86,12 @@ struct sorted_layout_policy {
     };
 
     struct upper_bound_fn {
-        template<std::random_access_iterator I, std::sentinel_for<I> S, 
+        template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
             return std::ranges::upper_bound(first, last, value, comp, proj);
         }
-        template<std::ranges::random_access_range R, 
+        template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
             return std::ranges::upper_bound(range, value, comp, proj);

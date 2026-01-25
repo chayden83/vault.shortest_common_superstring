@@ -1,16 +1,13 @@
 #ifndef EYTZINGER_LAYOUT_POLICY_HPP
 #define EYTZINGER_LAYOUT_POLICY_HPP
 
-#include "utilities.hpp"
 #include <bit>
-#include <algorithm>
-#include <iterator>
 #include <ranges>
-#include <concepts>
-#include <utility>
+#include <vector>
+#include <iterator>
+#include <algorithm>
 #include <stdexcept>
 #include <functional>
-#include <vector>
 
 #if defined(__GNUC__) || defined(__clang__)
     #define EYTZINGER_PREFETCH(ptr) __builtin_prefetch(ptr, 0, 3)

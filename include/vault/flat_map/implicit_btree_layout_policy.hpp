@@ -1,17 +1,12 @@
 #ifndef IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 #define IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 
-#include "utilities.hpp"
-#include <algorithm>
-#include <bit>
-#include <concepts>
-#include <cstdint>
-#include <functional>
-#include <iterator>
 #include <ranges>
-#include <stdexcept>
-#include <utility>
 #include <vector>
+#include <concepts>
+#include <iterator>
+#include <algorithm>
+#include <functional>
 
 #if defined(__GNUC__) || defined(__clang__)
     #define LAYOUT_PREFETCH(ptr) __builtin_prefetch(ptr, 0, 3)
@@ -31,13 +26,13 @@ namespace eytzinger {
 // --- Concepts ---
 
 template <typename Comp, typename T>
-concept IsStandardLess = 
-    std::same_as<Comp, std::less<T>> || std::same_as<Comp, std::less<void>> || 
+concept IsStandardLess =
+    std::same_as<Comp, std::less<T>> || std::same_as<Comp, std::less<void>> ||
     std::same_as<Comp, std::less<>> || std::same_as<Comp, std::ranges::less>;
 
 template <typename Comp, typename T>
-concept IsStandardGreater = 
-    std::same_as<Comp, std::greater<T>> || std::same_as<Comp, std::greater<void>> || 
+concept IsStandardGreater =
+    std::same_as<Comp, std::greater<T>> || std::same_as<Comp, std::greater<void>> ||
     std::same_as<Comp, std::greater<>> || std::same_as<Comp, std::ranges::greater>;
 
 // --- Internal Declarations (Implemented in .cpp) ---
@@ -179,7 +174,7 @@ DEFINE_SIMD_SPECIALIZATION(int8_t,   64, IsStandardGreater, greater)
 DEFINE_SIMD_SPECIALIZATION(uint8_t,  64, IsStandardGreater, greater)
 
 #undef DEFINE_SIMD_SPECIALIZATION
-#endif 
+#endif
 
 // --- Main Layout Policy ---
 
@@ -190,9 +185,9 @@ struct implicit_btree_layout_policy {
 private:
     template <typename T, typename Comp, typename Proj>
     static constexpr std::size_t lower_bound_generic(const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj) {
-        std::size_t k = 0; 
-        std::size_t result_idx = n; 
-        
+        std::size_t k = 0;
+        std::size_t result_idx = n;
+
         while (true) {
             std::size_t block_start = k * B;
             if (block_start >= n) break;
@@ -205,8 +200,8 @@ private:
                 std::size_t idx_in_block = block_searcher<T, Comp, B>::lower_bound(
                     base + block_start, value, comp, proj
                 );
-                
-                if (idx_in_block < B) result_idx = block_start + idx_in_block; 
+
+                if (idx_in_block < B) result_idx = block_start + idx_in_block;
                 k = detail::btree_child_block_index(k, idx_in_block, B);
             } else {
                 // Tail Block: Always scalar
@@ -214,7 +209,7 @@ private:
                 std::size_t idx_in_tail = scalar_block_searcher::lower_bound_n(
                     base + block_start, count, value, comp, proj
                 );
-                
+
                 if (idx_in_tail < count) {
                     result_idx = block_start + idx_in_tail;
                     k = detail::btree_child_block_index(k, idx_in_tail, B);
@@ -228,9 +223,9 @@ private:
 
     template <typename T, typename Comp, typename Proj>
     static constexpr std::size_t upper_bound_generic(const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj) {
-        std::size_t k = 0; 
-        std::size_t result_idx = n; 
-        
+        std::size_t k = 0;
+        std::size_t result_idx = n;
+
         while (true) {
             std::size_t block_start = k * B;
             if (block_start >= n) break;
@@ -242,7 +237,7 @@ private:
                 std::size_t idx_in_block = block_searcher<T, Comp, B>::upper_bound(
                     base + block_start, value, comp, proj
                 );
-                
+
                 if (idx_in_block < B) result_idx = block_start + idx_in_block;
                 k = detail::btree_child_block_index(k, idx_in_block, B);
             } else {
@@ -250,7 +245,7 @@ private:
                 std::size_t idx_in_tail = scalar_block_searcher::upper_bound_n(
                     base + block_start, count, value, comp, proj
                 );
-                
+
                 if (idx_in_tail < count) {
                     result_idx = block_start + idx_in_tail;
                     k = detail::btree_child_block_index(k, idx_in_tail, B);
@@ -288,7 +283,7 @@ public:
             if (n <= 1) return;
             using ValueT = std::iter_value_t<I>;
             std::vector<ValueT> temp;
-            temp.resize(n); 
+            temp.resize(n);
             I current_source = first;
             fill_in_order(temp, current_source, 0, n);
             std::ranges::move(temp, first);
@@ -325,7 +320,7 @@ public:
     static constexpr inline get_nth_sorted_fn get_nth_sorted{};
 
     struct lower_bound_fn {
-        template<std::random_access_iterator I, std::sentinel_for<I> S, 
+        template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
             if (first == last) return last;
@@ -348,8 +343,8 @@ public:
                 return (idx == n) ? last : (first + idx);
             }
         }
-        
-        template<std::ranges::random_access_range R, 
+
+        template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
             return (*this)(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
@@ -358,7 +353,7 @@ public:
     static constexpr inline lower_bound_fn lower_bound{};
 
     struct upper_bound_fn {
-        template<std::random_access_iterator I, std::sentinel_for<I> S, 
+        template<std::random_access_iterator I, std::sentinel_for<I> S,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const {
              if (first == last) return last;
@@ -381,8 +376,8 @@ public:
                 return (idx == n) ? last : (first + idx);
             }
         }
-        
-        template<std::ranges::random_access_range R, 
+
+        template<std::ranges::random_access_range R,
                  typename T, typename Comp = std::ranges::less, typename Proj = std::identity>
         [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) const {
             return (*this)(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));

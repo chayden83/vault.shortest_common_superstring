@@ -18,13 +18,13 @@ namespace std {
 
 /**
  * @brief A generic map container that decouples storage layout from interface.
- * * @tparam LayoutPolicy Controls memory layout, permutation, and search algorithms 
+ * * @tparam LayoutPolicy Controls memory layout, permutation, and search algorithms
  * (e.g., eytzinger_layout_policy, sorted_layout_policy).
  */
 template<
-    typename K, 
-    typename V, 
-    typename Compare = std::less<>, 
+    typename K,
+    typename V,
+    typename Compare = std::less<>,
     typename LayoutPolicy = eytzinger::eytzinger_layout_policy<6>,
     typename Allocator = std::allocator<std::pair<const K, V>>,
     template <typename, typename> typename KeyContainer = std::vector,
@@ -34,7 +34,7 @@ class layout_map {
 public:
     using key_type        = K;
     using mapped_type     = V;
-    using value_type      = std::pair<const K, V>; 
+    using value_type      = std::pair<const K, V>;
     using key_compare     = Compare;
     using allocator_type  = Allocator;
     using policy_type     = LayoutPolicy; // Exposed for iterator access
@@ -45,7 +45,7 @@ public:
     using value_allocator_type = typename std::allocator_traits<Allocator>::template rebind_alloc<V>;
     using key_storage_type   = KeyContainer<K, key_allocator_type>;
     using value_storage_type = ValueContainer<V, value_allocator_type>;
-    
+
     using iterator        = layout_iterator<const layout_map>;
     using const_iterator  = iterator;
     using reference       = std::pair<const key_type&, const mapped_type&>;
@@ -72,7 +72,7 @@ public:
 
     layout_map(const layout_map& other) = default;
     layout_map(layout_map&& other) noexcept = default;
-    
+
     layout_map(const layout_map& other, const Allocator& alloc)
         : keys_(other.keys_, key_allocator_type(alloc))
         , values_(other.values_, value_allocator_type(alloc))
@@ -85,7 +85,7 @@ public:
 
     template<std::input_iterator It>
     layout_map(It first, It last, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
-        : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp) 
+        : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp)
     {
         for (; first != last; ++first) {
             keys_.push_back(first->first);
@@ -94,7 +94,7 @@ public:
         sort_and_unique_zipped();
         policy_type::permute(std::views::zip(keys_, values_));
     }
-    
+
     template<std::input_iterator It>
     layout_map(It first, It last, const Allocator& alloc)
         : layout_map(first, last, Compare(), alloc) {}
@@ -120,17 +120,17 @@ public:
     layout_map(std::sorted_unique_t tag, R&& range, const Allocator& alloc)
         : layout_map(tag, std::forward<R>(range), Compare(), alloc) {}
 
-    layout_map(std::in_place_t, key_storage_type&& k_cont, value_storage_type&& v_cont, 
+    layout_map(std::in_place_t, key_storage_type&& k_cont, value_storage_type&& v_cont,
                   const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(std::move(k_cont), key_allocator_type(alloc))
         , values_(std::move(v_cont), value_allocator_type(alloc))
-        , compare_(comp) 
+        , compare_(comp)
     {
         if (keys_.empty()) return;
         sort_and_unique_zipped();
         policy_type::permute(std::views::zip(keys_, values_));
     }
-    
+
     layout_map(std::in_place_t tag, key_storage_type&& k_cont, value_storage_type&& v_cont, const Allocator& alloc)
         : layout_map(tag, std::move(k_cont), std::move(v_cont), Compare(), alloc) {}
 
@@ -257,5 +257,3 @@ private:
 };
 
 #endif // LAYOUT_MAP_HPP
-
-

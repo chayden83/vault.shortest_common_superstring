@@ -1,11 +1,10 @@
 #ifndef LAYOUT_ITERATOR_HPP
 #define LAYOUT_ITERATOR_HPP
 
-#include "utilities.hpp"
-#include <iterator>
-#include <concepts>
 #include <memory>
-#include <utility>
+#include <iterator>
+
+#include "utilities.hpp"
 
 /**
  * @brief Generic bidirectional iterator for policy-based layout maps.
@@ -16,13 +15,13 @@ template <typename Container>
 class layout_iterator {
 public:
     using iterator_category = std::bidirectional_iterator_tag;
-    
-    // Fix: Break circular dependency by using nested types directly 
+
+    // Fix: Break circular dependency by using nested types directly
     // instead of std::ranges traits which require the container to be complete.
     using value_type        = typename Container::value_type;
     using reference         = typename Container::reference;
     using difference_type   = typename Container::difference_type;
-    
+
     // Access the policy type from the container to find traversal algorithms
     using policy_type       = typename Container::policy_type;
 
@@ -37,12 +36,12 @@ public:
     constexpr layout_iterator(Container& container, std::ptrdiff_t index) noexcept
         : container_(std::addressof(container)), index_(index) {}
 
-    [[nodiscard]] constexpr reference operator*() const noexcept { 
-        return (*container_)[eytzinger::unordered_index<std::ptrdiff_t>{index_}]; 
+    [[nodiscard]] constexpr reference operator*() const noexcept {
+        return (*container_)[eytzinger::unordered_index<std::ptrdiff_t>{index_}];
     }
 
-    [[nodiscard]] constexpr pointer operator->() const noexcept { 
-        return { **this }; 
+    [[nodiscard]] constexpr pointer operator->() const noexcept {
+        return { **this };
     }
 
     constexpr layout_iterator& operator++() noexcept {
@@ -63,7 +62,7 @@ public:
 
 private:
     Container* container_;
-    std::ptrdiff_t index_; 
+    std::ptrdiff_t index_;
 };
 
 #endif // LAYOUT_ITERATOR_HPP

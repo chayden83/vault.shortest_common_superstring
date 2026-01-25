@@ -1,8 +1,8 @@
 #ifndef UTILITIES_HPP
 #define UTILITIES_HPP
 
-#include <concepts>
 #include <cstddef>
+#include <concepts>
 
 namespace eytzinger {
 
