@@ -69,34 +69,34 @@ private:
 
 public:
     // --- Allocator Access ---
-    [[nodiscard]] allocator_type get_allocator() const noexcept {
+    [[nodiscard]] constexpr allocator_type get_allocator() const noexcept {
         return allocator_type(keys_.get_allocator());
     }
 
     // --- Constructors ---
-    [[nodiscard]] layout_map() : layout_map(Compare(), Allocator()) {}
+    [[nodiscard]] constexpr layout_map() : layout_map(Compare(), Allocator()) {}
 
-    [[nodiscard]] explicit layout_map(const Compare& comp, const Allocator& alloc = Allocator())
+    [[nodiscard]] constexpr explicit layout_map(const Compare& comp, const Allocator& alloc = Allocator())
         : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp) {}
 
-    [[nodiscard]] explicit layout_map(const Allocator& alloc)
+    [[nodiscard]] constexpr explicit layout_map(const Allocator& alloc)
         : layout_map(Compare(), alloc) {}
 
-    [[nodiscard]] layout_map(const layout_map& other) = default;
-    [[nodiscard]] layout_map(layout_map&& other) noexcept = default;
+    [[nodiscard]] constexpr layout_map(const layout_map& other) = default;
+    [[nodiscard]] constexpr layout_map(layout_map&& other) noexcept = default;
 
-    [[nodiscard]] layout_map(const layout_map& other, const Allocator& alloc)
+    [[nodiscard]] constexpr layout_map(const layout_map& other, const Allocator& alloc)
         : keys_(other.keys_, key_allocator_type(alloc))
         , values_(other.values_, value_allocator_type(alloc))
         , compare_(other.compare_) {}
 
-    [[nodiscard]] layout_map(layout_map&& other, const Allocator& alloc)
+    [[nodiscard]] constexpr layout_map(layout_map&& other, const Allocator& alloc)
         : keys_(std::move(other.keys_), key_allocator_type(alloc))
         , values_(std::move(other.values_), value_allocator_type(alloc))
         , compare_(std::move(other.compare_)) {}
 
     template<std::input_iterator It>
-    [[nodiscard]] layout_map(It first, It last, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
+    [[nodiscard]] constexpr layout_map(It first, It last, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp)
     {
         for (; first != last; ++first) {
@@ -108,17 +108,17 @@ public:
     }
 
     template<std::input_iterator It>
-    [[nodiscard]] layout_map(It first, It last, const Allocator& alloc)
+    [[nodiscard]] constexpr layout_map(It first, It last, const Allocator& alloc)
         : layout_map(first, last, Compare(), alloc) {}
 
-    [[nodiscard]] layout_map(std::initializer_list<value_type> init, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
+    [[nodiscard]] constexpr layout_map(std::initializer_list<value_type> init, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : layout_map(init.begin(), init.end(), comp, alloc) {}
 
-    [[nodiscard]] layout_map(std::initializer_list<value_type> init, const Allocator& alloc)
+    [[nodiscard]] constexpr layout_map(std::initializer_list<value_type> init, const Allocator& alloc)
         : layout_map(init.begin(), init.end(), Compare(), alloc) {}
 
     template<std::ranges::forward_range R>
-    [[nodiscard]] layout_map(std::sorted_unique_t, R&& range, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
+    [[nodiscard]] constexpr layout_map(std::sorted_unique_t, R&& range, const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(key_allocator_type(alloc)), values_(value_allocator_type(alloc)), compare_(comp)
     {
         for (auto&& [k, v] : range) {
@@ -129,10 +129,10 @@ public:
     }
 
     template<std::ranges::forward_range R>
-    [[nodiscard]] layout_map(std::sorted_unique_t tag, R&& range, const Allocator& alloc)
+    [[nodiscard]] constexpr layout_map(std::sorted_unique_t tag, R&& range, const Allocator& alloc)
         : layout_map(tag, std::forward<R>(range), Compare(), alloc) {}
 
-    [[nodiscard]] layout_map(std::in_place_t, key_storage_type&& k_cont, value_storage_type&& v_cont,
+    [[nodiscard]] constexpr layout_map(std::in_place_t, key_storage_type&& k_cont, value_storage_type&& v_cont,
                   const Compare& comp = Compare(), const Allocator& alloc = Allocator())
         : keys_(std::move(k_cont), key_allocator_type(alloc))
         , values_(std::move(v_cont), value_allocator_type(alloc))
@@ -143,13 +143,13 @@ public:
         policy_type::permute(std::views::zip(keys_, values_));
     }
 
-    [[nodiscard]] layout_map(std::in_place_t tag, key_storage_type&& k_cont, value_storage_type&& v_cont, const Allocator& alloc)
+    [[nodiscard]] constexpr layout_map(std::in_place_t tag, key_storage_type&& k_cont, value_storage_type&& v_cont, const Allocator& alloc)
         : layout_map(tag, std::move(k_cont), std::move(v_cont), Compare(), alloc) {}
 
     // Assignment
-    layout_map& operator=(const layout_map&) = default;
-    layout_map& operator=(layout_map&&) noexcept = default;
-    layout_map& operator=(std::initializer_list<value_type> ilist) {
+    constexpr layout_map& operator=(const layout_map&) = default;
+    constexpr layout_map& operator=(layout_map&&) noexcept = default;
+    constexpr layout_map& operator=(std::initializer_list<value_type> ilist) {
         layout_map tmp(ilist, compare_, get_allocator());
         *this = std::move(tmp);
         return *this;
@@ -171,18 +171,21 @@ public:
     }
 
     // --- Direct Storage Access ---
-    [[nodiscard]] const key_storage_type& unordered_keys() const noexcept { return keys_; }
-    [[nodiscard]] const value_storage_type& unordered_values() const noexcept { return values_; }
-    [[nodiscard]] auto unordered_items() const noexcept { return std::views::zip(keys_, values_); }
+    [[nodiscard]] constexpr const key_storage_type& unordered_keys() const noexcept { return keys_; }
+    [[nodiscard]] constexpr const value_storage_type& unordered_values() const noexcept { return values_; }
+
+    [[nodiscard]] constexpr auto unordered_items() const noexcept -> decltype(std::views::zip(keys_, values_)) {
+      return std::views::zip(keys_, values_);
+    }
 
     // --- Sorted Views ---
-    [[nodiscard]] auto keys() const noexcept {
+    [[nodiscard]] constexpr auto keys() const noexcept {
         using Iter = layout_iterator<const key_storage_type>;
         std::size_t start_idx = keys_.empty() ? -1 : policy_type::sorted_rank_to_index(0, keys_.size());
         return std::ranges::subrange(Iter(keys_, static_cast<std::ptrdiff_t>(start_idx)), Iter(keys_, -1));
     }
 
-    [[nodiscard]] auto values() const noexcept {
+    [[nodiscard]] constexpr auto values() const noexcept {
         using Iter = layout_iterator<const value_storage_type>;
         std::size_t start_idx = values_.empty() ? -1 : policy_type::sorted_rank_to_index(0, values_.size());
         return std::ranges::subrange(Iter(values_, static_cast<std::ptrdiff_t>(start_idx)), Iter(values_, -1));
@@ -190,7 +193,7 @@ public:
 
     // --- Lookup Interface ---
     template <typename K0 = key_type>
-    [[nodiscard]] const_iterator lower_bound(const K0& key) const noexcept {
+    [[nodiscard]] constexpr const_iterator lower_bound(const K0& key) const noexcept {
         if (keys_.empty()) return end();
         auto kit = policy_type::lower_bound(keys_, key, compare_);
         if (kit == keys_.end()) return end();
@@ -199,7 +202,7 @@ public:
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] const_iterator upper_bound(const K0& key) const noexcept {
+    [[nodiscard]] constexpr const_iterator upper_bound(const K0& key) const noexcept {
         if (keys_.empty()) return end();
         auto kit = policy_type::upper_bound(keys_, key, compare_);
         if (kit == keys_.end()) return end();
@@ -208,20 +211,20 @@ public:
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] const_iterator find(const K0& key) const noexcept {
+    [[nodiscard]] constexpr const_iterator find(const K0& key) const noexcept {
         const auto lb = lower_bound(key);
         if (lb != end() && !compare_(key, lb->first)) return lb;
         return end();
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] bool contains(const K0& key) const noexcept { return find(key) != end(); }
+    [[nodiscard]] constexpr bool contains(const K0& key) const noexcept { return find(key) != end(); }
 
     template <typename K0 = key_type>
-    [[nodiscard]] size_type count(const K0& key) const noexcept { return contains(key) ? 1 : 0; }
+    [[nodiscard]] constexpr size_type count(const K0& key) const noexcept { return contains(key) ? 1 : 0; }
 
     template <typename K0 = key_type>
-    [[nodiscard]] std::pair<const_iterator, const_iterator> equal_range(const K0& key) const noexcept {
+    [[nodiscard]] constexpr std::pair<const_iterator, const_iterator> equal_range(const K0& key) const noexcept {
         const auto lb = lower_bound(key);
         if (lb != end() && !compare_(key, lb->first)) {
             auto ub = lb;
@@ -231,28 +234,28 @@ public:
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] const mapped_type& at(const K0& key) const {
+    [[nodiscard]] constexpr const mapped_type& at(const K0& key) const {
         auto it = find(key);
         if (it == end()) throw std::out_of_range("layout_map::at: key not found");
         return it->second;
     }
 
     // --- Capacity and Iterators ---
-    [[nodiscard]] size_type size() const noexcept { return keys_.size(); }
-    [[nodiscard]] bool empty() const noexcept { return keys_.empty(); }
+    [[nodiscard]] constexpr size_type size() const noexcept { return keys_.size(); }
+    [[nodiscard]] constexpr bool empty() const noexcept { return keys_.empty(); }
 
-    const_iterator begin() const noexcept {
+    [[nodiscard]] constexpr const_iterator begin() const noexcept {
         if (keys_.empty()) return end();
         std::size_t idx = policy_type::sorted_rank_to_index(0, keys_.size());
         return const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
     }
 
-    const_iterator end() const noexcept { return const_iterator(*this, -1); }
-    const_iterator cbegin() const noexcept { return begin(); }
-    const_iterator cend() const noexcept { return end(); }
+    [[nodiscard]] constexpr const_iterator end() const noexcept { return const_iterator(*this, -1); }
+    [[nodiscard]] constexpr const_iterator cbegin() const noexcept { return begin(); }
+    [[nodiscard]] constexpr const_iterator cend() const noexcept { return end(); }
 
 private:
-    void sort_and_unique_zipped() {
+    constexpr void sort_and_unique_zipped() {
         auto z = std::views::zip(keys_, values_);
         std::ranges::sort(z, [this](const auto& a, const auto& b) {
             return compare_(std::get<0>(a), std::get<0>(b));
