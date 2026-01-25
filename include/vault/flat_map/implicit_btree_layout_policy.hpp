@@ -194,7 +194,7 @@ private:
             if (block_start >= n) break;
 
             std::size_t child_start = detail::btree_child_block_index(k, 0, B) * B;
-            if (child_start < n) { LAYOUT_PREFETCH(&base[child_start]); }
+            LAYOUT_PREFETCH(&base[child_start]);
 
             if (block_start + B <= n) {
                 // Full Block: Delegate to block_searcher (which handles SIMD or Scalar)
@@ -232,7 +232,7 @@ private:
             if (block_start >= n) break;
 
             std::size_t child_start = detail::btree_child_block_index(k, 0, B) * B;
-            if (child_start < n) { LAYOUT_PREFETCH(&base[child_start]); }
+            LAYOUT_PREFETCH(&base[child_start]);
 
             if (block_start + B <= n) {
                 std::size_t idx_in_block = block_searcher<T, Comp, B>::upper_bound(
