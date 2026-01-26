@@ -12,9 +12,9 @@
 #include <utility>
 
 #include "concepts.hpp"
-#include "freeze_traits.hpp"
 #include "frozen_vector.hpp"
 #include "shared_storage_policy.hpp"
+#include "traits.hpp"
 
 namespace frozen {
 
@@ -48,7 +48,6 @@ public:
       , capacity_(0)
   {}
 
-  // UPDATED CONSTRUCTOR: Ensures Zero-Initialization
   [[nodiscard]]
   explicit frozen_vector_builder(
       size_type count, const allocator_type &a = allocator_type()
@@ -58,10 +57,6 @@ public:
       , capacity_(count)
   {
     data_ = ptr_policy::allocate(count, allocator_);
-
-    // Explicitly value-initialize the active elements.
-    // For fundamental types (int, float), this performs zero-initialization.
-    // For class types, it calls the default constructor.
     if (data_) {
       std::uninitialized_value_construct_n(data_.get(), count);
     }
@@ -179,8 +174,22 @@ public:
     return allocator_;
   }
 
+  // ========================================================================
   // FREEZE METHOD
-  template <typename ConstHandle = std::shared_ptr<const T[]>>
+  // ========================================================================
+
+  // Helper type alias for the default logic
+  // We want the frozen vector to hold 'const T[]'
+  using DefaultConstHandle = std::conditional_t<
+      frozen::pointer_traits<
+          typename ptr_policy::mutable_handle_type>::is_reference_counted,
+      // Case A: Ref Counted -> Rebind to const T[]
+      typename frozen::pointer_traits<
+          typename ptr_policy::mutable_handle_type>::template rebind<const T[]>,
+      // Case B: Not Ref Counted -> Default to std::shared_ptr<const T[]>
+      std::shared_ptr<const T[]>>;
+
+  template <typename ConstHandle = DefaultConstHandle>
   [[nodiscard]]
   frozen_vector<T, ConstHandle> freeze() &&
   {
@@ -267,20 +276,13 @@ public:
     }
   }
 
-  // UPDATED RESIZE: Ensures initialization of new elements
   void resize(size_type count)
   {
     if (count > size_) {
       if (count > capacity_)
         reserve(count);
-      // Default construct (value-initialize) the new elements
       std::uninitialized_value_construct(begin() + size_, begin() + count);
     }
-    // No destruction needed for POD types, but for objects we rely on standard
-    // vector behavior which often destructs on resize down. However, for
-    // ptr_policy based storage, we are just managing count. Proper object
-    // destruction would require allocator traits destroy(). For simplicity with
-    // shared_ptr<T[]>, we just adjust size.
     size_ = count;
   }
 
