@@ -14,7 +14,8 @@ FetchContent_MakeAvailable(googlebench)
 set(ALL_BENCHMARKS
   #amac
   #flat_map
-  segmented_vector
+  frozen_vector
+  #segmented_vector
   #shortest_common_superstring
 )
 
@@ -34,6 +35,7 @@ foreach(benchmark ${ALL_BENCHMARKS})
     benchmark::benchmark
     benchmark::benchmark_main
     vault::flat_map
+    vault::frozen_vector
     vault::segmented_vector
     vault::shortest_common_superstring
     vault::shortest_common_superstring.internal
