@@ -13,10 +13,10 @@
  * @brief segmented_vector
  * A C++23 container with stable references, stable iterators, and fast random
  * access.
- * * * Optimization Update:
- * Uses "Cursor Optimization" for push_back/emplace_back.
- * Maintains a direct pointer (m_push_cursor) to the next write location
- * to bypass block lookup logic during sequential insertion.
+ * * * Final Optimization: Implied Size
+ * The 'm_size' member has been removed to reduce 'push_back' instruction count.
+ * Size is now calculated on-demand using the distance between 'm_push_cursor'
+ * and the start of the current block.
  */
 template <
     typename T,
@@ -58,15 +58,17 @@ private:
 
   [[no_unique_address]] Allocator m_allocator;
   Spine m_spine;
-  size_type m_size = 0;
+
+  // Implied Size Tracking
+  // m_size is removed. We track how many elements are in blocks BEFORE the
+  // current one.
+  size_type m_size_prefix = 0;
   size_type m_capacity = 0;
 
-  // Cursor Optimization Members
-  // Points to the memory location where the NEXT element will be constructed.
+  // Cursor Optimization
   T *m_push_cursor = nullptr;
-  // Points to the end of the current block (one past the valid range).
   T *m_push_limit = nullptr;
-  // Tracks which block the cursor is currently in.
+  T *m_current_block_begin = nullptr; // Needed to calc size() from cursor
   size_type m_current_block_idx = 0;
 
   // -------------------------------------------------------------------------
@@ -95,34 +97,18 @@ private:
     return k_initial_cap << (block_idx - 1);
   }
 
-  // Helper to reset cursors (e.g. after clear or construct)
   void reset_cursors()
   {
+    m_size_prefix = 0;
+    m_current_block_idx = 0;
     if (m_spine.empty()) {
       m_push_cursor = nullptr;
       m_push_limit = nullptr;
-      m_current_block_idx = 0;
+      m_current_block_begin = nullptr;
     } else {
-      // Point to start of Block 0
-      m_current_block_idx = 0;
       m_push_cursor = m_spine[0];
+      m_current_block_begin = m_spine[0];
       m_push_limit = m_spine[0] + get_block_capacity(0);
-    }
-  }
-
-  // Helper to sync cursors to a specific size (used after copy/move)
-  void sync_cursors_to_size()
-  {
-    if (m_size == m_capacity) {
-      // Full, force slow path on next push
-      m_push_cursor = nullptr;
-      m_push_limit = nullptr;
-    } else {
-      // Partially full, locate correct block and offset
-      auto [k, off] = get_location(m_size);
-      m_current_block_idx = k;
-      m_push_cursor = m_spine[k] + off;
-      m_push_limit = m_spine[k] + get_block_capacity(k);
     }
   }
 
@@ -176,16 +162,18 @@ public:
   [[nodiscard]] segmented_vector(segmented_vector &&other) noexcept
       : m_allocator(std::move(other.m_allocator))
       , m_spine(std::move(other.m_spine), m_allocator)
-      , m_size(other.m_size)
+      , m_size_prefix(other.m_size_prefix)
       , m_capacity(other.m_capacity)
       , m_push_cursor(other.m_push_cursor)
       , m_push_limit(other.m_push_limit)
+      , m_current_block_begin(other.m_current_block_begin)
       , m_current_block_idx(other.m_current_block_idx)
   {
-    other.m_size = 0;
+    other.m_size_prefix = 0;
     other.m_capacity = 0;
     other.m_push_cursor = nullptr;
     other.m_push_limit = nullptr;
+    other.m_current_block_begin = nullptr;
   }
 
   [[nodiscard]] segmented_vector(
@@ -196,22 +184,21 @@ public:
   {
     if (alloc == other.m_allocator) {
       m_spine = std::move(other.m_spine);
-      m_size = other.m_size;
+      m_size_prefix = other.m_size_prefix;
       m_capacity = other.m_capacity;
       m_push_cursor = other.m_push_cursor;
       m_push_limit = other.m_push_limit;
+      m_current_block_begin = other.m_current_block_begin;
       m_current_block_idx = other.m_current_block_idx;
 
-      other.m_size = 0;
+      other.m_size_prefix = 0;
       other.m_capacity = 0;
       other.m_push_cursor = nullptr;
       other.m_push_limit = nullptr;
+      other.m_current_block_begin = nullptr;
     } else {
       try {
-        copy_from(other); // Actually move-constructs via emplace logic below if
-                          // implemented tailored
-        // For simplicity, reusing copy_from logic but with moves requires
-        // manual loop Since this is rare, we rely on standard construction.
+        copy_from(other);
       } catch (...) {
         clear();
         deallocate_all_blocks();
@@ -260,19 +247,21 @@ public:
       deallocate_all_blocks();
       m_allocator = std::move(other.m_allocator);
       m_spine = std::move(other.m_spine);
-      m_size = other.m_size;
+      m_size_prefix = other.m_size_prefix;
       m_capacity = other.m_capacity;
       m_push_cursor = other.m_push_cursor;
       m_push_limit = other.m_push_limit;
+      m_current_block_begin = other.m_current_block_begin;
       m_current_block_idx = other.m_current_block_idx;
     } else if (m_allocator == other.m_allocator) {
       clear();
       deallocate_all_blocks();
       m_spine = std::move(other.m_spine);
-      m_size = other.m_size;
+      m_size_prefix = other.m_size_prefix;
       m_capacity = other.m_capacity;
       m_push_cursor = other.m_push_cursor;
       m_push_limit = other.m_push_limit;
+      m_current_block_begin = other.m_current_block_begin;
       m_current_block_idx = other.m_current_block_idx;
     } else {
       clear();
@@ -280,17 +269,28 @@ public:
         emplace_back(std::move(elem));
     }
 
-    other.m_size = 0;
+    other.m_size_prefix = 0;
     other.m_capacity = 0;
     other.m_spine.clear();
     other.m_push_cursor = nullptr;
     other.m_push_limit = nullptr;
+    other.m_current_block_begin = nullptr;
     return *this;
   }
 
   // -------------------------------------------------------------------------
-  // Access
+  // Access & Size
   // -------------------------------------------------------------------------
+
+  [[nodiscard]] size_type size() const noexcept
+  {
+    if (!m_push_cursor)
+      return 0;
+    // Size = (Elements in prev blocks) + (Elements in current block)
+    return m_size_prefix +
+           static_cast<size_type>(m_push_cursor - m_current_block_begin);
+  }
+
   [[nodiscard]] reference operator[](size_type index) noexcept
   {
     auto [k, off] = get_location(index);
@@ -305,14 +305,14 @@ public:
 
   [[nodiscard]] reference at(size_type index)
   {
-    if (index >= m_size)
+    if (index >= size())
       throw std::out_of_range("segmented_vector::at");
     return (*this)[index];
   }
 
   [[nodiscard]] const_reference at(size_type index) const
   {
-    if (index >= m_size)
+    if (index >= size())
       throw std::out_of_range("segmented_vector::at");
     return (*this)[index];
   }
@@ -327,23 +327,16 @@ public:
   }
   [[nodiscard]] reference back() noexcept
   {
-    return (*this)[m_size - 1];
+    return *(m_push_cursor - 1);
   }
   [[nodiscard]] const_reference back() const noexcept
   {
-    return (*this)[m_size - 1];
+    return *(m_push_cursor - 1);
   }
 
-  // -------------------------------------------------------------------------
-  // Capacity & Modifiers
-  // -------------------------------------------------------------------------
   [[nodiscard]] bool empty() const noexcept
   {
-    return m_size == 0;
-  }
-  [[nodiscard]] size_type size() const noexcept
-  {
-    return m_size;
+    return size() == 0;
   }
   [[nodiscard]] size_type max_size() const noexcept
   {
@@ -356,17 +349,17 @@ public:
 
   void clear() noexcept
   {
-    for (size_type i = m_size; i > 0; --i) {
+    size_type current_sz = size();
+    for (size_type i = current_sz; i > 0; --i) {
       auto [k, off] = get_location(i - 1);
       AllocTraits::destroy(m_allocator, m_spine[k] + off);
     }
-    m_size = 0;
     // Capacity preserved. Reset cursors to start of Block 0.
     reset_cursors();
   }
 
   // -------------------------------------------------------------------------
-  // Optimized Push Back / Emplace Back
+  // Hyper-Optimized Push Back
   // -------------------------------------------------------------------------
   void push_back(const T &value)
   {
@@ -379,51 +372,59 @@ public:
 
   template <typename... Args> reference emplace_back(Args &&...args)
   {
-    // FAST PATH: Cursor is valid and within bounds
+    // FAST PATH:
+    // 1. Branch
+    // 2. Construct
+    // 3. Increment Cursor
+    // (No size increment, no size load/store)
     if (m_push_cursor != m_push_limit) [[likely]] {
       AllocTraits::construct(
           m_allocator, m_push_cursor, std::forward<Args>(args)...
       );
       reference ret = *m_push_cursor;
       ++m_push_cursor;
-      ++m_size;
       return ret;
     }
 
-    // SLOW PATH: Boundary crossing or allocation needed
     return emplace_back_slow(std::forward<Args>(args)...);
   }
 
 private:
-  // Noinline to keep the hot path instruction cache usage minimal
   template <typename... Args>
   [[gnu::noinline]] reference emplace_back_slow(Args &&...args)
   {
-    // If m_size < m_capacity, it means we have allocated blocks ahead.
-    // We just need to hop to the next block.
-    if (m_size < m_capacity) {
-      // Move to next block
+    size_type current_sz = size();
+    if (current_sz < m_capacity) {
+      // Next block already exists. Hop to it.
+      // Commit size of the block we just finished to prefix
+      if (m_current_block_begin) {
+        m_size_prefix += get_block_capacity(m_current_block_idx);
+      }
+
       ++m_current_block_idx;
-      m_push_cursor = m_spine[m_current_block_idx];
+      m_current_block_begin = m_spine[m_current_block_idx];
+      m_push_cursor = m_current_block_begin;
       m_push_limit = m_push_cursor + get_block_capacity(m_current_block_idx);
     } else {
-      // No space left, allocate new block
       grow();
-      // grow() updates cursor/limit
+      // grow updates cursors and size prefix
     }
 
-    // Now safe to construct
     AllocTraits::construct(
         m_allocator, m_push_cursor, std::forward<Args>(args)...
     );
     reference ret = *m_push_cursor;
     ++m_push_cursor;
-    ++m_size;
     return ret;
   }
 
   void grow()
   {
+    // Before growing, ensure prefix is updated for full blocks up to now
+    if (m_push_cursor && m_push_cursor == m_push_limit) {
+      m_size_prefix += get_block_capacity(m_current_block_idx);
+    }
+
     size_type next_idx = m_spine.size();
     size_type next_size = get_block_capacity(next_idx);
     BlockPtr new_block = AllocTraits::allocate(m_allocator, next_size);
@@ -436,8 +437,8 @@ private:
     }
     m_capacity += next_size;
 
-    // Update cursors to point to the new block
     m_current_block_idx = next_idx;
+    m_current_block_begin = new_block;
     m_push_cursor = new_block;
     m_push_limit = new_block + next_size;
   }
@@ -451,27 +452,18 @@ private:
     m_capacity = 0;
     m_push_cursor = nullptr;
     m_push_limit = nullptr;
+    m_current_block_begin = nullptr;
+    m_size_prefix = 0;
   }
 
   void copy_from(const segmented_vector &other)
   {
-    // Pre-allocate blocks if needed
-    while (m_capacity < other.m_size)
+    while (m_capacity < other.size())
       grow();
-
-    // Reset to start for writing (in case this was called on non-empty, though
-    // typically called on fresh) Note: For copy ctor, we are empty. For
-    // assignment, we cleared. If we are fresh, cursors might be null if grow()
-    // wasn't called (size 0).
-    if (m_size == 0 && m_capacity > 0)
+    if (size() == 0 && m_capacity > 0)
       reset_cursors();
-
-    // Copy elements
-    // We can use standard emplace_back, it will use the cursors we just set
-    // up/grew.
-    for (const auto &item : other) {
+    for (const auto &item : other)
       emplace_back(item);
-    }
   }
 
 public:
@@ -493,15 +485,15 @@ public:
 
   [[nodiscard]] iterator end() noexcept
   {
-    return iterator(this, m_size);
+    return iterator(this, size());
   }
   [[nodiscard]] const_iterator end() const noexcept
   {
-    return const_iterator(this, m_size);
+    return const_iterator(this, size());
   }
   [[nodiscard]] const_iterator cend() const noexcept
   {
-    return const_iterator(this, m_size);
+    return const_iterator(this, size());
   }
 
   [[nodiscard]] reverse_iterator rbegin() noexcept
@@ -545,15 +537,16 @@ public:
       swap(m_allocator, other.m_allocator);
     }
     swap(m_spine, other.m_spine);
-    swap(m_size, other.m_size);
+    swap(m_size_prefix, other.m_size_prefix);
     swap(m_capacity, other.m_capacity);
     swap(m_push_cursor, other.m_push_cursor);
     swap(m_push_limit, other.m_push_limit);
+    swap(m_current_block_begin, other.m_current_block_begin);
     swap(m_current_block_idx, other.m_current_block_idx);
   }
 
   // -------------------------------------------------------------------------
-  // Iterator Implementation (Cached)
+  // Iterator Implementation
   // -------------------------------------------------------------------------
   template <bool IsConst> class iterator_impl {
     friend class segmented_vector;
@@ -567,7 +560,7 @@ public:
 
     void update_cache()
     {
-      if (!m_cont || m_global_index >= m_cont->m_size) {
+      if (!m_cont || m_global_index >= m_cont->size()) {
         m_current_ptr = nullptr;
         m_block_end_ptr = nullptr;
         return;
