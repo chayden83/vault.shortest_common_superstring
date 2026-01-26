@@ -1,6 +1,9 @@
 #include <benchmark/benchmark.h>
+
 #include <cmath>
+#include <cstddef>
 #include <deque>
+#include <memory_resource>
 #include <random>
 #include <vector>
 
@@ -171,5 +174,104 @@ BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::deque<ValueType>)
     ->Apply(CustomArguments);
 BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::vector<ValueType>)
     ->Apply(CustomArguments);
+
+// Define a PMR-compatible alias for the segmented_vector
+using PmrSegmentedVector =
+    segmented_vector<size_t, std::pmr::polymorphic_allocator<size_t>>;
+
+static void BM_PushBack_Monotonic(benchmark::State &state)
+{
+  size_t N = state.range(0);
+
+  // Calculate a buffer size large enough to hold N elements + overhead (spine,
+  // etc.) We multiply by 2 to be safe and ensure we never hit the upstream
+  // allocator.
+  size_t buffer_size = (N * sizeof(size_t)) * 2 + 4096;
+
+  // Allocate the raw memory ONCE outside the timing loop.
+  // This removes 'malloc' and 'mmap' costs entirely from the benchmark
+  // measurements.
+  std::vector<std::byte> buffer(buffer_size);
+
+  for (auto _ : state) {
+    // Construct a monotonic resource over the pre-allocated buffer.
+    // This is extremely fast (just pointer initialization).
+    std::pmr::monotonic_buffer_resource pool(
+        buffer.data(), buffer.size(), std::pmr::null_memory_resource()
+    );
+
+    // Create vector using the pool
+    PmrSegmentedVector sv(&pool);
+
+    // Perform the actual work
+    for (int i = 0; i < N; ++i) {
+      sv.push_back(i);
+    }
+
+    // Destructor of sv runs here, but no deallocation happens
+    // because the pool owns the memory.
+  }
+  state.SetComplexityN(state.range(0));
+}
+
+// Register the benchmark with the same ranges as before
+BENCHMARK(BM_PushBack_Monotonic)
+    ->RangeMultiplier(8)
+    ->Range(8, 2 << 15)
+    ->Complexity();
+
+// -----------------------------------------------------------------------------
+// 4. Iteration Benchmark (Traverse All Elements)
+// -----------------------------------------------------------------------------
+
+template <typename Container> static void BM_Iteration(benchmark::State &state)
+{
+  size_t N = state.range(0);
+  Container c;
+  // Fill container
+  for (size_t i = 0; i < N; ++i) {
+    c.push_back(static_cast<typename Container::value_type>(i));
+  }
+
+  for (auto _ : state) {
+    // Use a volatile sink to ensure the loop isn't optimized away,
+    // but keep the operation simple (addition) to expose iterator overhead.
+    size_t sum = 0;
+    for (const auto &val : c) {
+      sum += val;
+    }
+    benchmark::DoNotOptimize(sum);
+  }
+
+  // Report items processed per second (throughput)
+  state.SetItemsProcessed(state.iterations() * N);
+}
+
+BENCHMARK_TEMPLATE(BM_Iteration, segmented_vector<size_t>)
+    ->Range(1 << 12, 1 << 20); // 4k to 1M elements
+
+BENCHMARK_TEMPLATE(BM_Iteration, std::deque<size_t>)->Range(1 << 12, 1 << 20);
+
+BENCHMARK_TEMPLATE(BM_Iteration, std::vector<size_t>)->Range(1 << 12, 1 << 20);
+
+template <typename Container>
+static void BM_ForEachSegment(benchmark::State &state)
+{
+  size_t N = state.range(0);
+  Container c;
+  for (size_t i = 0; i < N; ++i)
+    c.push_back(i);
+
+  for (auto _ : state) {
+    size_t sum = 0;
+    // Lambda inlines perfectly, exposing the addition to the optimizer
+    c.for_each_segment([&](size_t val) { sum += val; });
+    benchmark::DoNotOptimize(sum);
+  }
+  state.SetItemsProcessed(state.iterations() * N);
+}
+
+BENCHMARK_TEMPLATE(BM_ForEachSegment, segmented_vector<size_t>)
+    ->Range(1 << 12, 1 << 20);
 
 BENCHMARK_MAIN();

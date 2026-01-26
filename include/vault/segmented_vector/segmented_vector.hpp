@@ -389,6 +389,50 @@ public:
     return emplace_back_slow(std::forward<Args>(args)...);
   }
 
+  // -------------------------------------------------------------------------
+  // High-Performance Block Iteration
+  // -------------------------------------------------------------------------
+
+  // Applies func(const T& element) to every element.
+  // loops over the contiguous segments directly, enabling
+  // SIMD/Auto-vectorization.
+  template <typename Func> void for_each_segment(Func &&func) const
+  {
+    if (empty())
+      return;
+
+    // 1. Process fully filled blocks
+    // The last block might be partial, so we handle it separately or carefully.
+    // Actually, we know the size of every block.
+
+    // Block 0
+    if (!m_spine.empty()) {
+      size_type count = (m_current_block_idx == 0)
+                            ? static_cast<size_type>(m_push_cursor - m_spine[0])
+                            : get_block_capacity(0);
+      T *ptr = m_spine[0];
+      for (size_type i = 0; i < count; ++i) {
+        func(ptr[i]);
+      }
+    }
+
+    // Blocks 1 to k
+    for (size_type k = 1; k <= m_current_block_idx; ++k) {
+      T *ptr = m_spine[k];
+      // If this is the current (last) block, calculate used size
+      size_type capacity = get_block_capacity(k);
+      size_type count = (k == m_current_block_idx)
+                            ? static_cast<size_type>(m_push_cursor - ptr)
+                            : capacity;
+
+      // This inner loop over raw pointers will be Auto-Vectorized by the
+      // compiler
+      for (size_type i = 0; i < count; ++i) {
+        func(ptr[i]);
+      }
+    }
+  }
+
 private:
   template <typename... Args>
   [[gnu::noinline]] reference emplace_back_slow(Args &&...args)
