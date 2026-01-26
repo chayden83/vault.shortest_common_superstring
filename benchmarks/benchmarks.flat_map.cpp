@@ -7,6 +7,8 @@
 
 #include <vault/flat_map/aliases.hpp>
 
+using namespace eytzinger;
+
 // --- Configuration ---
 
 // Define a B-Tree map alias locally for benchmarking

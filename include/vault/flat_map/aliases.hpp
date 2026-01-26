@@ -62,6 +62,8 @@ namespace eytzinger::detail {
 
 // Convenience aliases for common map types
 
+namespace eytzinger {
+
 template <
     typename K, 
     typename V, 
@@ -72,7 +74,7 @@ using eytzinger_map = layout_map<
     K, 
     V, 
     Compare, 
-    eytzinger::eytzinger_layout_policy<eytzinger::detail::calculate_optimal_prefetch<K>()>, 
+    eytzinger_layout_policy<detail::calculate_optimal_prefetch<K>()>, 
     Allocator
 >;
 
@@ -93,7 +95,7 @@ using btree_map = layout_map<
     K, 
     V, 
     Compare, 
-    eytzinger::implicit_btree_layout_policy<eytzinger::detail::calculate_optimal_block_size<K>()>, 
+    implicit_btree_layout_policy<detail::calculate_optimal_block_size<K>()>, 
     Allocator
 >;
 
@@ -103,6 +105,8 @@ template <
     typename Compare = std::less<>, 
     typename Allocator = std::allocator<std::pair<const K, V>>
 >
-using sorted_map = layout_map<K, V, Compare, eytzinger::sorted_layout_policy, Allocator>;
+using sorted_map = layout_map<K, V, Compare, sorted_layout_policy, Allocator>;
+
+}
 
 #endif // MAPS_HPP

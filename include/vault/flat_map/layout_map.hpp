@@ -22,6 +22,8 @@ namespace std {
     static constexpr inline struct sorted_unique_t { } const sorted_unique { };
 }
 
+namespace eytzinger {
+
 /**
  * @brief A generic map container that decouples storage layout from interface.
  * * @tparam LayoutPolicy Controls memory layout, permutation, and search algorithms
@@ -31,12 +33,12 @@ template<
     typename K,
     typename V,
     std::strict_weak_order<K, K> Compare = std::less<>,
-    typename LayoutPolicy = eytzinger::eytzinger_layout_policy<6>,
+    typename LayoutPolicy = eytzinger_layout_policy<6>,
     typename Allocator = std::allocator<std::pair<const K, V>>,
     template <typename, typename> typename KeyContainer = std::vector,
     template <typename, typename> typename ValueContainer = std::vector
 >
-requires eytzinger::ForwardLayoutPolicy<
+requires OrderedForwardLayoutPolicy<
     LayoutPolicy,
     std::ranges::iterator_t<
         const KeyContainer<K, typename std::allocator_traits<Allocator>::template rebind_alloc<K>>
@@ -166,13 +168,13 @@ public:
 
     // O(1) access by physical layout index
     template <std::integral I>
-    [[nodiscard]] constexpr reference operator[](eytzinger::unordered_index<I> idx) const {
+    [[nodiscard]] constexpr reference operator[](unordered_index<I> idx) const {
         return { keys_[idx.index_], values_[idx.index_] };
     }
 
     // Access by sorted rank (complexity depends on LayoutPolicy)
     template <std::integral I>
-    [[nodiscard]] constexpr reference operator[](eytzinger::ordered_index<I> idx) const {
+    [[nodiscard]] constexpr reference operator[](ordered_index<I> idx) const {
         std::size_t phys_idx = policy_type::sorted_rank_to_index(static_cast<std::size_t>(idx.index_), keys_.size());
         return { keys_[phys_idx], values_[phys_idx] };
     }
@@ -262,25 +264,25 @@ public:
     [[nodiscard]] constexpr const_iterator cend() const noexcept { return end(); }
 
     [[nodiscard]] constexpr const_reverse_iterator rbegin() const noexcept
-      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+      requires std::bidirectional_iterator<const_reverse_iterator>
     {
       return const_reverse_iterator { end() };
     }
 
     [[nodiscard]] constexpr const_reverse_iterator rend() const noexcept
-      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+      requires std::bidirectional_iterator<const_reverse_iterator>
     {
       return const_reverse_iterator { begin() };
     }
 
     [[nodiscard]] constexpr const_reverse_iterator crbegin() const noexcept
-      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+      requires std::bidirectional_iterator<const_reverse_iterator>
     {
       return rbegin();
     }
 
     [[nodiscard]] constexpr const_reverse_iterator crend() const noexcept
-      requires eytzinger::BidirectionalLayoutPolicy<LayoutPolicy, std::ranges::iterator_t<const key_storage_type>, Compare>
+      requires std::bidirectional_iterator<const_reverse_iterator>
     {
       return rend();
     }
@@ -301,5 +303,7 @@ private:
         values_.resize(new_size);
     }
 };
+
+}
 
 #endif // LAYOUT_MAP_HPP

@@ -5,6 +5,11 @@
 #include <iterator>
 
 #include "utilities.hpp"
+#include "vault/flat_map/concepts.hpp"
+
+// clang-format off
+
+namespace eytzinger {
 
 /**
  * @brief Generic bidirectional iterator for policy-based layout maps.
@@ -12,6 +17,7 @@
  * * Traverses via Container::policy_type::next_index / prev_index
  */
 template <typename Container>
+  requires ForwardLayoutPolicy<layout_policy_t<Container>>
 class layout_iterator {
 public:
     using iterator_category = std::bidirectional_iterator_tag;
@@ -37,7 +43,7 @@ public:
         : container_(std::addressof(container)), index_(index) {}
 
     [[nodiscard]] constexpr reference operator*() const noexcept {
-        return (*container_)[eytzinger::unordered_index<std::ptrdiff_t>{index_}];
+        return (*container_)[unordered_index<std::ptrdiff_t>{index_}];
     }
 
     [[nodiscard]] constexpr pointer operator->() const noexcept {
@@ -49,20 +55,34 @@ public:
         return *this;
     }
 
-    constexpr layout_iterator& operator--() noexcept {
+    constexpr layout_iterator& operator--() noexcept
+        requires BidirectionalLayoutPolicy<layout_policy_t<Container>>
+    {
         index_ = policy_type::prev_index(index_, container_->size());
         return *this;
     }
 
-    constexpr layout_iterator operator++(int) noexcept { auto temp = *this; ++(*this); return temp; }
-    constexpr layout_iterator operator--(int) noexcept { auto temp = *this; --(*this); return temp; }
+    constexpr layout_iterator operator++(int) noexcept {
+        auto temp = *this; ++(*this); return temp;
+    }
+
+    constexpr layout_iterator operator--(int) noexcept
+        requires BidirectionalLayoutPolicy<layout_policy_t<Container>>
+    {
+        auto temp = *this; --(*this); return temp;
+    }
+
     constexpr bool operator==(const layout_iterator& other) const noexcept = default;
 
-    [[nodiscard]] constexpr std::ptrdiff_t get_index() const noexcept { return index_; }
+    [[nodiscard]] constexpr std::ptrdiff_t get_index() const noexcept {
+        return index_;
+    }
 
 private:
     Container* container_;
     std::ptrdiff_t index_;
 };
+
+} // namespace eytzinger
 
 #endif // LAYOUT_ITERATOR_HPP

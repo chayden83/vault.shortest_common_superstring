@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <concepts>
 
+// clang-format off
+
 namespace eytzinger {
 
 /**
@@ -26,6 +28,14 @@ struct ordered_index {
     I index_ = {};
     [[nodiscard]] constexpr operator I() const noexcept { return index_; }
 };
+
+template <typename T>
+struct layout_policy {
+    using type = typename T::policy_type;
+};
+
+template<typename T>
+using layout_policy_t = typename layout_policy<T>::type;
 
 } // namespace eytzinger
 

@@ -252,9 +252,9 @@ TEMPLATE_TEST_CASE("Layout Policy: Upper Bound", "[layout][search]",
 }
 
 // Map Wrappers to Test
-using SortedMap = sorted_map<int, int>;
-using EytzingerMap = eytzinger_map<int, int>;
-using BTreeMap = btree_map<int, int>;
+using SortedMap = eytzinger::sorted_map<int, int>;
+using EytzingerMap = eytzinger::eytzinger_map<int, int>;
+using BTreeMap = eytzinger::btree_map<int, int>;
 
 TEMPLATE_TEST_CASE("Layout Map: Interface", "[map][interface]",
                    SortedMap, EytzingerMap, BTreeMap) {
