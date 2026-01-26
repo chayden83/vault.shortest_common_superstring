@@ -1,40 +1,67 @@
+---
+Language: Cpp
 BasedOnStyle: LLVM
-IndentWidth: 2
-ColumnLimit: 80
 
-# --- 1. Brace Wrapping (The Hybrid "Linux" Style) ---
+# --- Indentation & Alignment ---
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 80
+PointerAlignment: Left
+
+# --- Vertical Alignment ---
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignConsecutiveBitFields: true
+
+# --- Vertical Spacing ---
+# This inserts the blank line between functions you asked for
+SeparateDefinitionBlocks: Always
+# This allows you to manually place blank lines inside functions without them being deleted
+KeepEmptyLinesAtTheStartOfBlocks: true
+MaxEmptyLinesToKeep: 1
+EmptyLineBeforeAccessModifier: Always
+
+# --- Imports & Namespaces ---
+SortIncludes: CaseSensitive
+FixNamespaceComments: true
+NamespaceIndentation: All
+
+# --- Brace Style ---
 BreakBeforeBraces: Custom
 BraceWrapping:
-  # This moves the brace to a new line for Constructors and Functions
+  # This moves the Constructor brace to a new line
   AfterFunction: true
-  
-  # These keep the brace on the same line (Egyptian) for logic
+  # These keep logic braces (if/for) on the same line
   AfterControlStatement: false
   AfterClass: false
   AfterEnum: false
   AfterNamespace: false
   AfterStruct: false
   AfterUnion: false
-  AfterExternBlock: false
-  BeforeCatch: false
   BeforeElse: false
+  BeforeCatch: false
   SplitEmptyFunction: false
 
-# --- 2. Constructor Initialization ---
-# Forces the colon and commas to the left
+# --- Logic Blocks ---
+InsertBraces: true
+RemoveBracesLLVM: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# --- Constructor Initializers ---
 BreakConstructorInitializers: BeforeComma
-# Indent the initializers by 4 spaces (2 + 2) relative to the constructor
 ConstructorInitializerIndentWidth: 4
-# Force one initializer per line
 PackConstructorInitializers: Never
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
 
-# --- 3. Arguments and Parameters ---
+# --- Short Functions ---
+# Allows simple destructors to sit on one line
+AllowShortFunctionsOnASingleLine: All
+
+# --- Arguments ---
 AlignAfterOpenBracket: BlockIndent
 ContinuationIndentWidth: 4
 BinPackArguments: false
 BinPackParameters: false
-
-# --- 4. Function Rules ---
-# Prevents short functions from collapsing to one line
-AllowShortFunctionsOnASingleLine: None
