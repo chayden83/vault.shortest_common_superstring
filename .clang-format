@@ -1,1 +1,40 @@
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80
 
+# --- 1. Brace Wrapping (The Hybrid "Linux" Style) ---
+BreakBeforeBraces: Custom
+BraceWrapping:
+  # This moves the brace to a new line for Constructors and Functions
+  AfterFunction: true
+  
+  # These keep the brace on the same line (Egyptian) for logic
+  AfterControlStatement: false
+  AfterClass: false
+  AfterEnum: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  SplitEmptyFunction: false
+
+# --- 2. Constructor Initialization ---
+# Forces the colon and commas to the left
+BreakConstructorInitializers: BeforeComma
+# Indent the initializers by 4 spaces (2 + 2) relative to the constructor
+ConstructorInitializerIndentWidth: 4
+# Force one initializer per line
+PackConstructorInitializers: Never
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+
+# --- 3. Arguments and Parameters ---
+AlignAfterOpenBracket: BlockIndent
+ContinuationIndentWidth: 4
+BinPackArguments: false
+BinPackParameters: false
+
+# --- 4. Function Rules ---
+# Prevents short functions from collapsing to one line
+AllowShortFunctionsOnASingleLine: None
