@@ -3,177 +3,114 @@
 #include <algorithm>
 #include <memory>
 #include <numeric>
-#include <random>
 #include <vector>
 
-// Include your library headers
 #include <vault/frozen_vector/frozen_vector.hpp>
 #include <vault/frozen_vector/frozen_vector_builder.hpp>
+#include <vault/frozen_vector/local_shared_storage_policy.hpp>
 #include <vault/frozen_vector/shared_storage_policy.hpp>
+#include <vault/frozen_vector/unique_storage_policy.hpp>
 
 using namespace frozen;
 
 // ============================================================================
-// BENCHMARK 1: Linear Iteration (Read Performance)
-// Purpose: Detect if shared_ptr dereferencing adds overhead vs std::vector
-// ptrs.
+// CONFIGURATION
 // ============================================================================
 
-static void BM_StdVector_Iterate(benchmark::State &state)
-{
-  // Setup (Outside timing loop)
-  size_t N = state.range(0);
-  std::vector<int> v(N);
-  std::iota(v.begin(), v.end(), 0);
-
-  for (auto _ : state) {
-    long long sum = 0;
-    for (auto x : v) {
-      sum += x;
-    }
-    benchmark::DoNotOptimize(sum);
-  }
-  state.SetItemsProcessed(state.iterations() * N);
-}
-
-static void BM_FrozenVector_Iterate(benchmark::State &state)
-{
-  size_t N = state.range(0);
-  frozen_vector_builder<int> builder(N);
-  std::iota(builder.begin(), builder.end(), 0);
-  auto v = std::move(builder).freeze();
-
-  for (auto _ : state) {
-    long long sum = 0;
-    for (auto x : v) {
-      sum += x;
-    }
-    benchmark::DoNotOptimize(sum);
-  }
-  state.SetItemsProcessed(state.iterations() * N);
-}
+// Define types for easier usage
+using StdVec = std::vector<int>;
+using AtomicVec = frozen_vector_builder<int, shared_storage_policy<int>>;
+using UniqueVec = frozen_vector_builder<int, unique_storage_policy<int>>;
+using LocalVec = frozen_vector_builder<int, local_shared_storage_policy<int>>;
 
 // ============================================================================
-// BENCHMARK 2: Random Access
-// Purpose: Test operator[] overhead and cache locality.
-// ============================================================================
-
-static void BM_StdVector_RandomAccess(benchmark::State &state)
-{
-  size_t N = state.range(0);
-  std::vector<int> v(N);
-  std::iota(v.begin(), v.end(), 0);
-
-  // Pre-calculate indices to avoid benchmarking the RNG
-  std::vector<size_t> indices(1024);
-  std::mt19937 gen(42);
-  std::uniform_int_distribution<size_t> dist(0, N - 1);
-  for (auto &i : indices)
-    i = dist(gen);
-
-  for (auto _ : state) {
-    long long sum = 0;
-    for (auto idx : indices) {
-      sum += v[idx];
-    }
-    benchmark::DoNotOptimize(sum);
-  }
-}
-
-static void BM_FrozenVector_RandomAccess(benchmark::State &state)
-{
-  size_t N = state.range(0);
-  frozen_vector_builder<int> builder(N);
-  std::iota(builder.begin(), builder.end(), 0);
-  auto v = std::move(builder).freeze();
-
-  std::vector<size_t> indices(1024);
-  std::mt19937 gen(42);
-  std::uniform_int_distribution<size_t> dist(0, N - 1);
-  for (auto &i : indices)
-    i = dist(gen);
-
-  for (auto _ : state) {
-    long long sum = 0;
-    for (auto idx : indices) {
-      sum += v[idx];
-    }
-    benchmark::DoNotOptimize(sum);
-  }
-}
-
-// ============================================================================
-// BENCHMARK 3: Copying (The Key Differentiator)
-// Purpose: Compare Deep Copy (std::vector) vs Shallow Copy (frozen_vector).
+// BENCHMARK: Copying (The Key Differentiator)
 // ============================================================================
 
 static void BM_StdVector_Copy(benchmark::State &state)
 {
   size_t N = state.range(0);
-  std::vector<int> src(N);
-
+  StdVec src(N);
   for (auto _ : state) {
-    // Measures allocation + element-wise copy
-    std::vector<int> copy = src;
+    auto copy = src;
     benchmark::DoNotOptimize(copy.data());
   }
 }
 
-static void BM_FrozenVector_Copy(benchmark::State &state)
+static void BM_AtomicShared_Copy(benchmark::State &state)
 {
   size_t N = state.range(0);
-  frozen_vector_builder<int> builder(N);
+  AtomicVec builder(N);
   auto src = std::move(builder).freeze();
-
   for (auto _ : state) {
-    // Measures atomic reference count increment
+    auto copy = src;
+    benchmark::DoNotOptimize(copy.data());
+  }
+}
+
+static void BM_LocalShared_Copy(benchmark::State &state)
+{
+  size_t N = state.range(0);
+  LocalVec builder(N);
+  // Explicitly freeze to local const handle
+  auto src = std::move(builder).freeze<local_shared_ptr<const int[]>>();
+  for (auto _ : state) {
     auto copy = src;
     benchmark::DoNotOptimize(copy.data());
   }
 }
 
 // ============================================================================
-// BENCHMARK 4: Construction (Allocation)
-// Purpose: Compare allocate_shared_for_overwrite vs std::vector allocation.
+// BENCHMARK: Construction (Allocation Overhead)
 // ============================================================================
 
 static void BM_StdVector_Construct(benchmark::State &state)
 {
   size_t N = state.range(0);
   for (auto _ : state) {
-    // Note: std::vector<int>(N) performs zero-initialization!
-    std::vector<int> v(N);
+    StdVec v(N);
     benchmark::DoNotOptimize(v.data());
   }
 }
 
-static void BM_FrozenVectorBuilder_Construct(benchmark::State &state)
+static void BM_AtomicShared_Construct(benchmark::State &state)
 {
   size_t N = state.range(0);
   for (auto _ : state) {
-    // Note: frozen_vector uses default initialization (no memset to 0)
-    // This is strictly faster for POD types.
-    frozen_vector_builder<int> v(N);
+    AtomicVec v(N);
+    benchmark::DoNotOptimize(v.data());
+  }
+}
+
+static void BM_Unique_Construct(benchmark::State &state)
+{
+  size_t N = state.range(0);
+  for (auto _ : state) {
+    UniqueVec v(N);
+    benchmark::DoNotOptimize(v.data());
+  }
+}
+
+static void BM_LocalShared_Construct(benchmark::State &state)
+{
+  size_t N = state.range(0);
+  for (auto _ : state) {
+    LocalVec v(N);
     benchmark::DoNotOptimize(v.data());
   }
 }
 
 // ============================================================================
-// CONFIGURATION
+// REGISTER BENCHMARKS
 // ============================================================================
 
-// Register Benchmarks
-// Ranges: 1KB, 256KB, 1MB elements to test L1/L2/RAM behaviors
-BENCHMARK(BM_StdVector_Iterate)->Range(1024, 1024 * 1024);
-BENCHMARK(BM_FrozenVector_Iterate)->Range(1024, 1024 * 1024);
-
-BENCHMARK(BM_StdVector_RandomAccess)->Range(1024, 1024 * 1024);
-BENCHMARK(BM_FrozenVector_RandomAccess)->Range(1024, 1024 * 1024);
-
 BENCHMARK(BM_StdVector_Copy)->Range(1024, 1024 * 1024);
-BENCHMARK(BM_FrozenVector_Copy)->Range(1024, 1024 * 1024);
+BENCHMARK(BM_AtomicShared_Copy)->Range(1024, 1024 * 1024);
+BENCHMARK(BM_LocalShared_Copy)->Range(1024, 1024 * 1024);
 
 BENCHMARK(BM_StdVector_Construct)->Range(1024, 1024 * 1024);
-BENCHMARK(BM_FrozenVectorBuilder_Construct)->Range(1024, 1024 * 1024);
+BENCHMARK(BM_AtomicShared_Construct)->Range(1024, 1024 * 1024);
+BENCHMARK(BM_Unique_Construct)->Range(1024, 1024 * 1024);
+BENCHMARK(BM_LocalShared_Construct)->Range(1024, 1024 * 1024);
 
 BENCHMARK_MAIN();
