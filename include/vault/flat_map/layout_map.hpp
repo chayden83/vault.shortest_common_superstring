@@ -38,12 +38,16 @@ namespace eytzinger {
       template <typename, typename> typename KeyContainer   = std::vector,
       template <typename, typename> typename ValueContainer = std::vector>
     requires OrderedForwardLayoutPolicy<
-        LayoutPolicy,
-        std::ranges::iterator_t<const KeyContainer<
-            K,
-            typename std::allocator_traits<Allocator>::template rebind_alloc<
-                K>>>,
-        Compare>
+                 LayoutPolicy,
+                 std::ranges::iterator_t<const KeyContainer<
+                     K,
+                     typename std::allocator_traits<
+                         Allocator>::template rebind_alloc<K>>>,
+                 Compare> &&
+             std::ranges::random_access_range<ValueContainer<
+                 V,
+                 typename std::allocator_traits<
+                     Allocator>::template rebind_alloc<V>>>
   class layout_map {
   public:
     using key_type        = K;
