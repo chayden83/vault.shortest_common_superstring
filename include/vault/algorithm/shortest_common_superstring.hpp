@@ -5,28 +5,28 @@
 
 #include <print>
 
-#include <ranges>
-#include <vector>
-#include <utility>
 #include <algorithm>
 #include <functional>
+#include <ranges>
+#include <utility>
+#include <vector>
 
 #include <boost/multi_index_container.hpp>
 
-#include <boost/multi_index/member.hpp>
 #include <boost/multi_index/hashed_index.hpp>
+#include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 
 #include <range/v3/range/conversion.hpp>
 
-#include <range/v3/view/zip.hpp>
-#include <range/v3/view/indirect.hpp>
 #include <range/v3/view/addressof.hpp>
+#include <range/v3/view/indirect.hpp>
 #include <range/v3/view/transform.hpp>
+#include <range/v3/view/zip.hpp>
 
+#include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
 #include <vault/algorithm/knuth_morris_pratt_overlap.hpp>
 #include <vault/algorithm/knuth_morris_pratt_searcher.hpp>
-#include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
 
 // clang-format off
 

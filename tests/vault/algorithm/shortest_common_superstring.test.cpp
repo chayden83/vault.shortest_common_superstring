@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <gtest/gtest.h>
 #include <gmock/gmock-matchers.h>
+#include <gtest/gtest.h>
 
+#include <algorithm>
+#include <iterator>
 #include <list>
 #include <string>
-#include <vector>
-#include <iterator>
-#include <algorithm>
 #include <string_view>
+#include <vector>
 
 #include <vault/algorithm/internal.hpp>
 

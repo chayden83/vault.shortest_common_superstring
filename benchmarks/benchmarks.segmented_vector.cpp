@@ -24,7 +24,7 @@ using ValueType =
 // 1. Pure Append Benchmark (Push Back)
 // -----------------------------------------------------------------------------
 
-template <typename Container> static void BM_PushBack(benchmark::State &state)
+template <typename Container> static void BM_PushBack(benchmark::State& state)
 {
   for (auto _ : state) {
     Container c;
@@ -61,10 +61,10 @@ BENCHMARK_TEMPLATE(BM_PushBack, std::vector<ValueType>)
 // -----------------------------------------------------------------------------
 
 template <typename Container>
-static void BM_RandomAccess(benchmark::State &state)
+static void BM_RandomAccess(benchmark::State& state)
 {
   // Setup container
-  size_t N = state.range(0);
+  size_t    N = state.range(0);
   Container c;
   for (size_t i = 0; i < N; ++i) {
     c.push_back(i);
@@ -72,11 +72,12 @@ static void BM_RandomAccess(benchmark::State &state)
 
   // Generate random indices beforehand to strictly measure access time, not RNG
   // time
-  std::vector<size_t> indices(10000); // 10k batch
-  std::mt19937 rng(12345);
+  std::vector<size_t>                   indices(10000); // 10k batch
+  std::mt19937                          rng(12345);
   std::uniform_int_distribution<size_t> dist(0, N - 1);
-  for (auto &idx : indices)
+  for (auto& idx : indices) {
     idx = dist(rng);
+  }
 
   size_t batch_idx = 0;
 
@@ -114,19 +115,20 @@ BENCHMARK_TEMPLATE(BM_RandomAccess, std::vector<ValueType>)
 // -----------------------------------------------------------------------------
 
 template <typename Container>
-static void BM_MixedReadWrite(benchmark::State &state)
+static void BM_MixedReadWrite(benchmark::State& state)
 {
-  size_t current_size = 0;
-  size_t max_size = state.range(0); // e.g., 100,000
-  long read_percentage = state.range(1);
+  size_t current_size    = 0;
+  size_t max_size        = state.range(0); // e.g., 100,000
+  long   read_percentage = state.range(1);
 
   // Pre-fill a bit so we aren't reading empty
   Container c;
-  for (int i = 0; i < 1000; ++i)
+  for (int i = 0; i < 1000; ++i) {
     c.push_back(i);
+  }
   current_size = 1000;
 
-  std::mt19937 rng(12345);
+  std::mt19937                        rng(12345);
   std::uniform_int_distribution<long> op_dist(0, 99);
   std::uniform_int_distribution<size_t>
       idx_dist; // distribution changes as size grows
@@ -136,13 +138,13 @@ static void BM_MixedReadWrite(benchmark::State &state)
     // Re-generate distribution range based on current size
     // (Expensive, so we pause timing, though realistic workload might not)
     idx_dist = std::uniform_int_distribution<size_t>(0, current_size - 1);
-    long op = op_dist(rng);
+    long op  = op_dist(rng);
     state.ResumeTiming();
 
     if (op < read_percentage) {
       // READ Operation
       size_t idx = idx_dist(rng);
-      auto val = c[idx];
+      auto   val = c[idx];
       benchmark::DoNotOptimize(val);
     } else {
       // WRITE (Append) Operation
@@ -154,7 +156,7 @@ static void BM_MixedReadWrite(benchmark::State &state)
 
 // Define the arguments: Size fixed at 100k. Vary Read %: 0, 10, 50, 90, 99,
 // 100.
-static void CustomArguments(benchmark::internal::Benchmark *b)
+static void CustomArguments(benchmark::internal::Benchmark* b)
 {
   // Check ratios at 100k elements
   int N = 100000;
@@ -179,7 +181,7 @@ BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::vector<ValueType>)
 using PmrSegmentedVector =
     segmented_vector<size_t, std::pmr::polymorphic_allocator<size_t>>;
 
-static void BM_PushBack_Monotonic(benchmark::State &state)
+static void BM_PushBack_Monotonic(benchmark::State& state)
 {
   size_t N = state.range(0);
 
@@ -196,9 +198,8 @@ static void BM_PushBack_Monotonic(benchmark::State &state)
   for (auto _ : state) {
     // Construct a monotonic resource over the pre-allocated buffer.
     // This is extremely fast (just pointer initialization).
-    std::pmr::monotonic_buffer_resource pool(
-        buffer.data(), buffer.size(), std::pmr::null_memory_resource()
-    );
+    std::pmr::monotonic_buffer_resource
+        pool(buffer.data(), buffer.size(), std::pmr::null_memory_resource());
 
     // Create vector using the pool
     PmrSegmentedVector sv(&pool);
@@ -224,9 +225,9 @@ BENCHMARK(BM_PushBack_Monotonic)
 // 4. Iteration Benchmark (Traverse All Elements)
 // -----------------------------------------------------------------------------
 
-template <typename Container> static void BM_Iteration(benchmark::State &state)
+template <typename Container> static void BM_Iteration(benchmark::State& state)
 {
-  size_t N = state.range(0);
+  size_t    N = state.range(0);
   Container c;
   // Fill container
   for (size_t i = 0; i < N; ++i) {
@@ -237,7 +238,7 @@ template <typename Container> static void BM_Iteration(benchmark::State &state)
     // Use a volatile sink to ensure the loop isn't optimized away,
     // but keep the operation simple (addition) to expose iterator overhead.
     size_t sum = 0;
-    for (const auto &val : c) {
+    for (const auto& val : c) {
       sum += val;
     }
     benchmark::DoNotOptimize(sum);
@@ -255,12 +256,13 @@ BENCHMARK_TEMPLATE(BM_Iteration, std::deque<size_t>)->Range(1 << 12, 1 << 20);
 BENCHMARK_TEMPLATE(BM_Iteration, std::vector<size_t>)->Range(1 << 12, 1 << 20);
 
 template <typename Container>
-static void BM_ForEachSegment(benchmark::State &state)
+static void BM_ForEachSegment(benchmark::State& state)
 {
-  size_t N = state.range(0);
+  size_t    N = state.range(0);
   Container c;
-  for (size_t i = 0; i < N; ++i)
+  for (size_t i = 0; i < N; ++i) {
     c.push_back(i);
+  }
 
   for (auto _ : state) {
     size_t sum = 0;

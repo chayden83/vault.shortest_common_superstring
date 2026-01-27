@@ -3,12 +3,12 @@
 #ifndef VAULT_AMAC_HPP
 #define VAULT_AMAC_HPP
 
-#include <ranges>
-#include <cstdint>
-#include <utility>
-#include <iterator>
 #include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <iterator>
+#include <ranges>
+#include <utility>
 
 // clang-format off
 

@@ -18,46 +18,48 @@
 struct LifecycleTracker {
   static int construction_count;
   static int destruction_count;
-  int value;
+  int        value;
 
   LifecycleTracker(int v)
       : value(v)
   {
     construction_count++;
   }
-  LifecycleTracker(const LifecycleTracker &o)
+
+  LifecycleTracker(const LifecycleTracker& o)
       : value(o.value)
   {
     construction_count++;
   }
-  LifecycleTracker(LifecycleTracker &&o) noexcept
+
+  LifecycleTracker(LifecycleTracker&& o) noexcept
       : value(o.value)
   {
     construction_count++;
   }
-  ~LifecycleTracker()
-  {
-    destruction_count++;
-  }
+
+  ~LifecycleTracker() { destruction_count++; }
 
   static void reset()
   {
     construction_count = 0;
-    destruction_count = 0;
+    destruction_count  = 0;
   }
 };
+
 int LifecycleTracker::construction_count = 0;
-int LifecycleTracker::destruction_count = 0;
+int LifecycleTracker::destruction_count  = 0;
 
 // A type that throws an exception during copy construction
 struct ThrowingType {
-  int value;
+  int         value;
   static bool should_throw;
 
   ThrowingType(int v)
       : value(v)
   {}
-  ThrowingType(const ThrowingType &other)
+
+  ThrowingType(const ThrowingType& other)
       : value(other.value)
   {
     if (should_throw) {
@@ -65,6 +67,7 @@ struct ThrowingType {
     }
   }
 };
+
 bool ThrowingType::should_throw = false;
 
 // -----------------------------------------------------------------------------
@@ -101,8 +104,9 @@ TEST_CASE("Basic Container Operations", "[basics]")
 
   SECTION("Clear resets size but maintains capacity")
   {
-    for (int i = 0; i < 100; ++i)
+    for (int i = 0; i < 100; ++i) {
       sv.push_back(i);
+    }
     std::size_t old_cap = sv.capacity();
 
     sv.clear();
@@ -133,8 +137,9 @@ TEST_CASE("Growth Strategy Verification", "[growth]")
 
   // 1. Push 8 elements (Fill Block 0)
   // Indices: 0-7
-  for (int i = 0; i < 8; ++i)
+  for (int i = 0; i < 8; ++i) {
     sv.push_back(i);
+  }
   REQUIRE(sv.capacity() == 8);
 
   // 2. Push 9th element (Allocates Block 1, size 8)
@@ -146,8 +151,9 @@ TEST_CASE("Growth Strategy Verification", "[growth]")
   // Previous count: 9. Need to reach 16.
   // Indices: 9-15 (7 elements)
   // FIX: Loop starts at 9, not 10.
-  for (int i = 9; i < 16; ++i)
+  for (int i = 9; i < 16; ++i) {
     sv.push_back(i);
+  }
   REQUIRE(sv.size() == 16);
   REQUIRE(sv.capacity() == 16);
 
@@ -158,8 +164,9 @@ TEST_CASE("Growth Strategy Verification", "[growth]")
   REQUIRE(sv.capacity() == 32); // 16 + 16
 
   // 5. Push until 32 elements (Fill Block 2)
-  for (int i = 17; i < 32; ++i)
+  for (int i = 17; i < 32; ++i) {
     sv.push_back(i);
+  }
   REQUIRE(sv.capacity() == 32);
 
   // 6. Push 33rd element (Allocates Block 3, size 32)
@@ -173,7 +180,7 @@ TEST_CASE("Reference Stability", "[stability]")
 
   // Fill first block
   sv.push_back(100);
-  int *ptr_to_first = &sv[0];
+  int* ptr_to_first = &sv[0];
 
   // Force multiple reallocations / new blocks
   for (int i = 0; i < 1000; ++i) {
@@ -188,8 +195,9 @@ TEST_CASE("Reference Stability", "[stability]")
 TEST_CASE("Iterator Compliance", "[iterator]")
 {
   segmented_vector<int> sv;
-  for (int i = 0; i < 100; ++i)
+  for (int i = 0; i < 100; ++i) {
     sv.push_back(i);
+  }
 
   SECTION("Random Access Traits")
   {
@@ -257,8 +265,8 @@ TEST_CASE("Object Semantics (Copy/Move)", "[semantics]")
 
   SECTION("Move Constructor")
   {
-    std::string *original_ptr = &original[0];
-    segmented_vector<std::string> moved = std::move(original);
+    std::string*                  original_ptr = &original[0];
+    segmented_vector<std::string> moved        = std::move(original);
 
     REQUIRE(moved.size() == 2);
     REQUIRE(original.size() == 0); // Moved-from state
@@ -295,7 +303,7 @@ TEST_CASE("Exception Safety (Strong Guarantee)", "[exception]")
   sv.emplace_back(10);
   sv.emplace_back(20);
   size_t initial_size = sv.size();
-  size_t initial_cap = sv.capacity();
+  size_t initial_cap  = sv.capacity();
 
   ThrowingType::should_throw = true;
 
@@ -342,38 +350,39 @@ template <typename T> struct TrackingAllocator {
   static int deallocations;
 
   TrackingAllocator() = default;
-  template <typename U> TrackingAllocator(const TrackingAllocator<U> &)
-  {}
 
-  T *allocate(std::size_t n)
+  template <typename U> TrackingAllocator(const TrackingAllocator<U>&) {}
+
+  T* allocate(std::size_t n)
   {
     allocations++;
     return std::allocator<T>().allocate(n);
   }
 
-  void deallocate(T *p, std::size_t n)
+  void deallocate(T* p, std::size_t n)
   {
     deallocations++;
     std::allocator<T>().deallocate(p, n);
   }
 
-  friend bool operator==(const TrackingAllocator &, const TrackingAllocator &)
+  friend bool operator==(const TrackingAllocator&, const TrackingAllocator&)
   {
     return true;
   }
-  friend bool operator!=(const TrackingAllocator &, const TrackingAllocator &)
+
+  friend bool operator!=(const TrackingAllocator&, const TrackingAllocator&)
   {
     return false;
   }
 };
 
-template <typename T> int TrackingAllocator<T>::allocations = 0;
+template <typename T> int TrackingAllocator<T>::allocations   = 0;
 template <typename T> int TrackingAllocator<T>::deallocations = 0;
 
 TEST_CASE("Allocator Awareness", "[allocator]")
 {
-  using Alloc = TrackingAllocator<int>;
-  Alloc::allocations = 0;
+  using Alloc          = TrackingAllocator<int>;
+  Alloc::allocations   = 0;
   Alloc::deallocations = 0;
 
   {

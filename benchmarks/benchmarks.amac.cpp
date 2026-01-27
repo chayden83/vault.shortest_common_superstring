@@ -4,11 +4,11 @@
 
 #include <iostream>
 
+#include <algorithm>
+#include <cassert>
+#include <functional>
 #include <random>
 #include <vector>
-#include <cassert>
-#include <algorithm>
-#include <functional>
 
 #include <range/v3/action/sort.hpp>
 

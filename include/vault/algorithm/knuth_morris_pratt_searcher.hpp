@@ -3,10 +3,10 @@
 #ifndef VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 #define VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_SEARCHER_HPP
 
-#include <ranges>
-#include <vector>
 #include <concepts>
 #include <iterator>
+#include <ranges>
+#include <vector>
 
 #include <vault/algorithm/knuth_morris_pratt_failure_function.hpp>
 

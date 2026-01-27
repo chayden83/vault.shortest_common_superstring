@@ -3,10 +3,10 @@
 #ifndef VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_FAILURE_FUNCTION_HPP
 #define VAULT_ALGORITHM_KNUTH_MORRIS_PRATT_FAILURE_FUNCTION_HPP
 
-#include <ranges>
-#include <vector>
 #include <concepts>
 #include <iterator>
+#include <ranges>
+#include <vector>
 
 // clang-format off
 
