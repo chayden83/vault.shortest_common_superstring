@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert> // Added for assertions
 #include <functional>
 #include <iterator>
 #include <ranges>
@@ -54,8 +55,14 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::size_t
       operator()(std::size_t rank, std::size_t n) noexcept
       {
+        assert(rank < n && "Rank out of bounds");
+
         std::size_t i = 0;
         while (true) {
+          assert(
+              i < n && "Traversal index out of bounds - possible infinite loop"
+          );
+
           std::size_t l_sz = count_nodes((i << 1) + 1, n);
           if (rank == l_sz) {
             return i;
@@ -74,6 +81,8 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::size_t
       operator()(std::size_t i, std::size_t n) noexcept
       {
+        assert(i < n && "Index out of bounds");
+
         std::size_t r = count_nodes((i << 1) + 1, n);
         while (i > 0) {
           if (i % 2 == 0) {
@@ -108,6 +117,7 @@ namespace eytzinger {
         fill_in_order(temp, source_iter, 2 * k + 1, n);
 
         // 2. Visit Root (k)
+        assert(k < temp.size() && "Permutation index out of bounds");
         temp[k] = std::move(*source_iter);
         ++source_iter;
 
@@ -133,6 +143,12 @@ namespace eytzinger {
 
         I current_source = first;
         fill_in_order(temp, current_source, 0, n);
+
+        assert(
+            std::distance(first, current_source) ==
+                static_cast<std::ptrdiff_t>(n) &&
+            "Not all elements were consumed during permutation"
+        );
 
         std::ranges::move(temp, first);
       }
@@ -169,6 +185,11 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t
       operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
+        assert(
+            i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz) &&
+            "Iterator index out of bounds"
+        );
+
         std::ptrdiff_t n           = static_cast<std::ptrdiff_t>(n_sz);
         auto           right_child = (i << 1) + 2;
         if (right_child < n) {
@@ -192,8 +213,16 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t
       operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
+        assert(
+            i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz) &&
+            "Iterator index out of bounds"
+        );
+
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
         if (i == -1) {
+          if (n == 0) {
+            return -1;
+          }
           i = 0;
           while ((i << 1) + 2 < n) {
             i = (i << 1) + 2;
@@ -234,7 +263,9 @@ namespace eytzinger {
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
-        std::size_t i    = 0;
+        assert(base != nullptr && "Dereferencing null pointer in range");
+
+        std::size_t i = 0;
         while (i < n) {
           const std::size_t future_i = ((i + 1) << L) - 1;
           EYTZINGER_PREFETCH(&base[future_i]);
@@ -281,7 +312,9 @@ namespace eytzinger {
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
-        std::size_t i    = 0;
+        assert(base != nullptr && "Dereferencing null pointer in range");
+
+        std::size_t i = 0;
         while (i < n) {
           const std::size_t future_i = ((i + 1) << L) - 1;
           EYTZINGER_PREFETCH(&base[future_i]);
