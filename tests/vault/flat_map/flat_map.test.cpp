@@ -384,7 +384,8 @@ template <
     typename K,
     typename V,
     typename Policy,
-    template <typename, typename> typename KeyCont>
+    template <typename, typename> typename KeyCont,
+    template <typename, typename> typename ValueCont = std::vector>
 concept CanInstantiateMap = requires {
   typename eytzinger::layout_map<
       K,
@@ -392,7 +393,8 @@ concept CanInstantiateMap = requires {
       std::less<K>,
       Policy,
       std::allocator<std::pair<const K, V>>,
-      KeyCont>;
+      KeyCont,
+      ValueCont>;
 };
 
 TEST_CASE(
@@ -408,6 +410,10 @@ TEST_CASE(
   CHECK(CanInstantiateMap<int, int, BTree, std::vector>);
   CHECK(CanInstantiateMap<int, int, Sorted, std::vector>);
 
+  CHECK(CanInstantiateMap<int, int, Eytzinger, std::vector, std::deque>);
+  CHECK(CanInstantiateMap<int, int, BTree, std::vector, std::deque>);
+  CHECK(CanInstantiateMap<int, int, Sorted, std::vector, std::deque>);
+
   // 2. Deque (Random Access, NOT Contiguous)
   // Should FAIL for Eytzinger/BTree (if your trait requires
   // contiguous_iterator)
@@ -417,4 +423,5 @@ TEST_CASE(
   // Should PASS for Sorted (std::ranges::lower_bound works on random access
   // iterators)
   CHECK(CanInstantiateMap<int, int, Sorted, std::deque>);
+  CHECK(CanInstantiateMap<int, int, Sorted, std::deque, std::deque>);
 }
