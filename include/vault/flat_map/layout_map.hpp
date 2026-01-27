@@ -2,6 +2,7 @@
 #define LAYOUT_MAP_HPP
 
 #include <algorithm>
+#include <cassert> // Added for assertions
 #include <concepts>
 #include <initializer_list>
 #include <iterator>
@@ -95,7 +96,9 @@ namespace eytzinger {
         : keys_(key_allocator_type(alloc))
         , values_(value_allocator_type(alloc))
         , compare_(comp)
-    {}
+    {
+      assert(keys_.empty() && values_.empty());
+    }
 
     [[nodiscard]] constexpr explicit layout_map(const Allocator& alloc)
         : layout_map(Compare(), alloc)
@@ -110,7 +113,11 @@ namespace eytzinger {
         : keys_(other.keys_, key_allocator_type(alloc))
         , values_(other.values_, value_allocator_type(alloc))
         , compare_(other.compare_)
-    {}
+    {
+      assert(
+          keys_.size() == values_.size() && "Inconsistent copy construction"
+      );
+    }
 
     [[nodiscard]] constexpr layout_map(
         layout_map&& other, const Allocator& alloc
@@ -118,7 +125,11 @@ namespace eytzinger {
         : keys_(std::move(other.keys_), key_allocator_type(alloc))
         , values_(std::move(other.values_), value_allocator_type(alloc))
         , compare_(std::move(other.compare_))
-    {}
+    {
+      assert(
+          keys_.size() == values_.size() && "Inconsistent move construction"
+      );
+    }
 
     template <std::input_iterator It>
     [[nodiscard]] constexpr layout_map(
@@ -135,8 +146,10 @@ namespace eytzinger {
         keys_.push_back(first->first);
         values_.push_back(first->second);
       }
+      assert(keys_.size() == values_.size());
       sort_and_unique_zipped();
       policy_type::permute(std::views::zip(keys_, values_));
+      assert(keys_.size() == values_.size());
     }
 
     template <std::input_iterator It>
@@ -175,6 +188,8 @@ namespace eytzinger {
         keys_.push_back(k);
         values_.push_back(v);
       }
+      assert(keys_.size() == values_.size());
+      // Input assumes sorted/unique, but layout permutation is still required
       policy_type::permute(std::views::zip(keys_, values_));
     }
 
@@ -196,8 +211,14 @@ namespace eytzinger {
         , values_(std::move(v_cont), value_allocator_type(alloc))
         , compare_(comp)
     {
+      if (keys_.size() != values_.size()) {
+        throw std::invalid_argument(
+            "layout_map: key and value containers must have same size"
+        );
+      }
       sort_and_unique_zipped();
       policy_type::permute(std::views::zip(keys_, values_));
+      assert(keys_.size() == values_.size());
     }
 
     [[nodiscard]] constexpr layout_map(
@@ -228,6 +249,10 @@ namespace eytzinger {
     template <std::integral I>
     [[nodiscard]] constexpr reference operator[](unordered_index<I> idx) const
     {
+      assert(
+          idx.index_ >= 0 && static_cast<size_t>(idx.index_) < keys_.size() &&
+          "Index out of bounds"
+      );
       return {keys_[idx.index_], values_[idx.index_]};
     }
 
@@ -235,9 +260,14 @@ namespace eytzinger {
     template <std::integral I>
     [[nodiscard]] constexpr reference operator[](ordered_index<I> idx) const
     {
+      assert(
+          idx.index_ >= 0 && static_cast<size_t>(idx.index_) < keys_.size() &&
+          "Rank out of bounds"
+      );
       std::size_t phys_idx = policy_type::sorted_rank_to_index(
           static_cast<std::size_t>(idx.index_), keys_.size()
       );
+      assert(phys_idx < keys_.size());
       return {keys_[phys_idx], values_[phys_idx]};
     }
 
@@ -251,12 +281,14 @@ namespace eytzinger {
     [[nodiscard]] constexpr const value_storage_type&
     unordered_values() const noexcept
     {
+      assert(keys_.size() == values_.size());
       return values_;
     }
 
     [[nodiscard]] constexpr auto unordered_items() const noexcept
         -> decltype(std::views::zip(keys_, values_))
     {
+      assert(keys_.size() == values_.size());
       return std::views::zip(keys_, values_);
     }
 
@@ -363,11 +395,13 @@ namespace eytzinger {
     // --- Capacity and Iterators ---
     [[nodiscard]] constexpr size_type size() const noexcept
     {
+      assert(keys_.size() == values_.size());
       return keys_.size();
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept
     {
+      assert(keys_.size() == values_.size());
       return keys_.empty();
     }
 
@@ -377,6 +411,7 @@ namespace eytzinger {
         return end();
       }
       std::size_t idx = policy_type::sorted_rank_to_index(0, keys_.size());
+      assert(idx < keys_.size());
       return const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
     }
 
@@ -422,6 +457,7 @@ namespace eytzinger {
   private:
     constexpr void sort_and_unique_zipped()
     {
+      assert(keys_.size() == values_.size());
       auto z = std::views::zip(keys_, values_);
       std::ranges::sort(z, [this](const auto& a, const auto& b) {
         return compare_(std::get<0>(a), std::get<0>(b));
@@ -436,6 +472,7 @@ namespace eytzinger {
           static_cast<size_type>(std::ranges::distance(z.begin(), first_erase));
       keys_.resize(new_size);
       values_.resize(new_size);
+      assert(keys_.size() == values_.size());
     }
   };
 

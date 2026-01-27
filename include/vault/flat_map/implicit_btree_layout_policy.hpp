@@ -2,11 +2,13 @@
 #define IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 
 #include <algorithm>
+#include <cassert> // Added for assertions
 #include <concepts>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <ranges>
+#include <stdexcept>
 #include <vector>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -125,6 +127,7 @@ namespace eytzinger {
     [[nodiscard]] static constexpr std::size_t
     lower_bound(const T* block, const T& key, Comp comp, Proj proj)
     {
+      assert(block != nullptr && "Block pointer must not be null");
       std::size_t i = 0;
       for (; i < B; ++i) {
         if (!std::invoke(comp, std::invoke(proj, block[i]), key)) {
@@ -138,6 +141,7 @@ namespace eytzinger {
     [[nodiscard]] static constexpr std::size_t
     upper_bound(const T* block, const T& key, Comp comp, Proj proj)
     {
+      assert(block != nullptr && "Block pointer must not be null");
       std::size_t i = 0;
       for (; i < B; ++i) {
         if (std::invoke(comp, key, std::invoke(proj, block[i]))) {
@@ -152,6 +156,7 @@ namespace eytzinger {
         const T* block, std::size_t n, const T& key, Comp comp, Proj proj
     )
     {
+      assert(block != nullptr || n == 0);
       std::size_t i = 0;
       for (; i < n; ++i) {
         if (!std::invoke(comp, std::invoke(proj, block[i]), key)) {
@@ -166,6 +171,7 @@ namespace eytzinger {
         const T* block, std::size_t n, const T& key, Comp comp, Proj proj
     )
     {
+      assert(block != nullptr || n == 0);
       std::size_t i = 0;
       for (; i < n; ++i) {
         if (std::invoke(comp, key, std::invoke(proj, block[i]))) {
@@ -204,6 +210,10 @@ namespace eytzinger {
         const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj       \
     )                                                                          \
     {                                                                          \
+      assert(                                                                  \
+          (reinterpret_cast<uintptr_t>(block) % alignof(TYPE##_t) == 0) &&     \
+          "Block pointer should be aligned for SIMD"                           \
+      );                                                                       \
       if constexpr (std::is_same_v<Proj, std::identity>) {                     \
         return detail::simd_lb_##TYPE##_##SUFFIX(block, key);                  \
       } else {                                                                 \
@@ -217,6 +227,10 @@ namespace eytzinger {
         const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj       \
     )                                                                          \
     {                                                                          \
+      assert(                                                                  \
+          (reinterpret_cast<uintptr_t>(block) % alignof(TYPE##_t) == 0) &&     \
+          "Block pointer should be aligned for SIMD"                           \
+      );                                                                       \
       if constexpr (std::is_same_v<Proj, std::identity>) {                     \
         return detail::simd_ub_##TYPE##_##SUFFIX(block, key);                  \
       } else {                                                                 \
@@ -253,6 +267,12 @@ namespace eytzinger {
   // --- Main Layout Policy ---
 
   template <std::size_t B = 16> struct implicit_btree_layout_policy {
+    static_assert(B >= 2, "Block size B must be at least 2");
+    static_assert(
+        (B % 2 == 0),
+        "Block size should be even for proper alignment/node sizing"
+    );
+
     static constexpr inline const auto UID_V001 = 15922480214965706541uLL;
 
     // --- Private Helper Implementations (Generic Logic) ---
@@ -263,6 +283,7 @@ namespace eytzinger {
         const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj
     )
     {
+      assert(base != nullptr || n == 0);
       std::size_t k          = 0;
       std::size_t result_idx = n;
 
@@ -271,6 +292,7 @@ namespace eytzinger {
         if (block_start >= n) {
           break;
         }
+        assert(k < n && "Runaway index detection");
 
         std::size_t child_start = detail::btree_child_block_index(k, 0, B) * B;
         LAYOUT_PREFETCH(&base[child_start]);
@@ -309,6 +331,7 @@ namespace eytzinger {
         const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj
     )
     {
+      assert(base != nullptr || n == 0);
       std::size_t k          = 0;
       std::size_t result_idx = n;
 
@@ -317,6 +340,7 @@ namespace eytzinger {
         if (block_start >= n) {
           break;
         }
+        assert(k < n && "Runaway index detection");
 
         std::size_t child_start = detail::btree_child_block_index(k, 0, B) * B;
         LAYOUT_PREFETCH(&base[child_start]);
@@ -352,6 +376,7 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::size_t
       operator()(std::size_t rank, std::size_t n)
       {
+        assert(rank < n && "Rank out of bounds");
         return detail::btree_sorted_rank_to_index(rank, n, B);
       }
     };
@@ -360,6 +385,7 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::size_t
       operator()(std::size_t index, std::size_t n)
       {
+        assert(index < n && "Index out of bounds");
         return detail::btree_index_to_sorted_rank(index, n, B);
       }
     };
@@ -368,6 +394,7 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t
       operator()(std::ptrdiff_t i, std::size_t n_sz)
       {
+        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
         return detail::btree_next_index(i, n_sz, B);
       }
     };
@@ -376,6 +403,7 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t
       operator()(std::ptrdiff_t i, std::size_t n_sz)
       {
+        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
         return detail::btree_prev_index(i, n_sz, B);
       }
     };
@@ -399,6 +427,12 @@ namespace eytzinger {
         temp.resize(n);
         I current_source = first;
         fill_in_order(temp, current_source, 0, n);
+
+        assert(
+            std::distance(first, current_source) ==
+                static_cast<std::ptrdiff_t>(n) &&
+            "Not all elements consumed"
+        );
         std::ranges::move(temp, first);
       }
 
@@ -429,6 +463,10 @@ namespace eytzinger {
           if (i < B) {
             std::size_t key_idx = block_start + i;
             if (key_idx < n) {
+              assert(
+                  key_idx < temp.size() &&
+                  "Permutation target index out of bounds"
+              );
               temp[key_idx] = *source_iter;
               ++source_iter;
             }
@@ -448,6 +486,8 @@ namespace eytzinger {
         if (n >= size) {
           throw std::out_of_range("eytzinger index out of range");
         }
+        // Assert redundant with exception but good for debug
+        assert(n < size);
         return *(first + sorted_rank_to_index(n, size));
       }
 
@@ -455,7 +495,7 @@ namespace eytzinger {
       [[nodiscard]] constexpr std::ranges::range_reference_t<R>
       operator()(R&& range, std::size_t n) const
       {
-        return (*this)(std::ranges::begin(range), std::ranges::end(range));
+        return (*this)(std::ranges::begin(range), std::ranges::end(range), n);
       }
     };
 
@@ -477,6 +517,7 @@ namespace eytzinger {
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
+        assert(base != nullptr && "Search base pointer is null");
 
 #ifdef LAYOUT_USE_AVX2
         if constexpr (B == 8 && std::is_same_v<T, uint64_t> &&
@@ -535,6 +576,7 @@ namespace eytzinger {
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
+        assert(base != nullptr && "Search base pointer is null");
 
 #ifdef LAYOUT_USE_AVX2
         if constexpr (B == 8 && std::is_same_v<T, uint64_t> &&
