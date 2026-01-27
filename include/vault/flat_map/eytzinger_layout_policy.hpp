@@ -25,6 +25,10 @@ namespace eytzinger {
   template <int L = 6> struct eytzinger_layout_policy {
     static constexpr inline const auto UID_V001 = 16427278603008041617uLL;
 
+    template <typename I> struct is_compatible_key_iterator {
+      static constexpr bool value = std::contiguous_iterator<I>;
+    };
+
   private:
     // Robust calculation of subtree size rooted at i (0-based index)
     [[nodiscard]] static constexpr std::size_t

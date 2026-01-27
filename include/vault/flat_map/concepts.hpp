@@ -8,7 +8,8 @@ namespace eytzinger {
 
   template <typename P, typename I, typename C>
   concept OrderedLayoutPolicy =
-      std::random_access_iterator<I> && std::copy_constructible<P> &&
+      P::template is_compatible_key_iterator<I>::value &&
+      std::copy_constructible<P> &&
       requires(
           I                           first,
           I                           last,
@@ -23,6 +24,7 @@ namespace eytzinger {
         {
           P::sorted_rank_to_index(rank, n)
         } -> std::convertible_to<std::size_t>;
+
         { P::index_to_sorted_rank(idx, n) } -> std::convertible_to<std::size_t>;
 
         // 2. Permutation (Reordering data)

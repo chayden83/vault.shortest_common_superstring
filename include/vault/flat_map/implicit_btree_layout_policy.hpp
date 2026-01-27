@@ -275,6 +275,10 @@ namespace eytzinger {
 
     static constexpr inline const auto UID_V001 = 15922480214965706541uLL;
 
+    template <typename I> struct is_compatible_key_iterator {
+      static constexpr bool value = std::contiguous_iterator<I>;
+    };
+
     // --- Private Helper Implementations (Generic Logic) ---
 
   private:
