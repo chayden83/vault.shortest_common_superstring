@@ -490,4 +490,80 @@ REGISTER_BATCH_BENCHMARKS(
 REGISTER_BATCH_BENCHMARKS(
   "BTree", eytzinger::implicit_btree_layout_policy<16>, "String", std::string)
 
+// --- Baseline (Single-at-a-time) Benchmark Function ---
+
+template <typename LayoutPolicy, typename KeyT>
+static void BM_Batch_Lookup_BASELINE(benchmark::State& state)
+{
+  const size_t n           = state.range(0);
+  const size_t num_needles = 2048; // Same as batch tests
+
+  auto                              keys = generate_random_data<KeyT>(n);
+  std::vector<std::pair<KeyT, int>> pairs;
+  pairs.reserve(keys.size());
+  for (const auto& k : keys) {
+    pairs.emplace_back(k, 0);
+  }
+
+  using MapType = layout_map<KeyT, int, std::less<KeyT>, LayoutPolicy>;
+  MapType map(pairs.begin(), pairs.end());
+
+  auto needles = generate_random_data<KeyT>(num_needles);
+
+  using NeedleIter = typename std::vector<KeyT>::const_iterator;
+  using MapIter    = typename MapType::const_iterator;
+  using ResultPair = std::pair<NeedleIter, MapIter>;
+
+  std::vector<ResultPair> results;
+  results.reserve(num_needles);
+
+  for (auto _ : state) {
+    results.clear();
+    // The Baseline: Serial lookups in a loop
+    for (auto it = needles.cbegin(); it != needles.cend(); ++it) {
+      results.emplace_back(it, map.find(*it));
+    }
+    benchmark::DoNotOptimize(results.data());
+  }
+
+  state.SetItemsProcessed(state.iterations() * num_needles);
+}
+
+// --- Fixed Registration Macros ---
+
+// Register the baseline for a specific Layout + Type
+#define REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, KeyName, KeyType) \
+  BENCHMARK_TEMPLATE(BM_Batch_Lookup_BASELINE, LayoutType, KeyType)            \
+  BATCH_ARGS->Name(                                                            \
+    LayoutName "/" KeyName "/SerialBaseline"); // <--- Added semicolon here
+
+// Register baseline for all integral types
+#define REGISTER_ALL_BASELINES(LayoutName, LayoutType)                         \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "int8", int8_t)         \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "uint8", uint8_t)       \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "int16", int16_t)       \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "uint16", uint16_t)     \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "uint32", uint32_t)     \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "int64", int64_t)       \
+  REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, "uint64", uint64_t)
+
+// --- Benchmarks Registration ---
+
+// 1. Sorted Baseline
+REGISTER_ALL_BASELINES("Sorted", eytzinger::sorted_layout_policy)
+
+// 2. Eytzinger Baseline
+REGISTER_ALL_BASELINES("Eytzinger", eytzinger::eytzinger_layout_policy<6>)
+
+// 3. B-Tree Baseline
+REGISTER_ALL_BASELINES("BTree", eytzinger::implicit_btree_layout_policy<16>)
+
+// 4. String Baselines
+REGISTER_BASELINE_BENCHMARKS(
+  "Sorted", eytzinger::sorted_layout_policy, "String", std::string)
+REGISTER_BASELINE_BENCHMARKS(
+  "Eytzinger", eytzinger::eytzinger_layout_policy<6>, "String", std::string)
+REGISTER_BASELINE_BENCHMARKS(
+  "BTree", eytzinger::implicit_btree_layout_policy<16>, "String", std::string)
+
 BENCHMARK_MAIN();
