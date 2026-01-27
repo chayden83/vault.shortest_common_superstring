@@ -1,39 +1,38 @@
 ---
 Language: Cpp
+# 1. Base Style (Reset)
 BasedOnStyle: LLVM
 
-# --- Indentation & Alignment ---
+# 2. General Settings
 IndentWidth: 2
 TabWidth: 2
 UseTab: Never
 ColumnLimit: 80
 PointerAlignment: Left
 
-# --- Vertical Alignment ---
+# 3. String Handling (The Fix)
+# Forces multi-line strings to drop to a new line immediately
+AlwaysBreakBeforeMultilineStrings: true
+# Allows strings to be broken at all
+BreakStringLiterals: true
+
+# 4. Vertical Alignment
 AlignConsecutiveAssignments: true
 AlignConsecutiveDeclarations: true
-AlignConsecutiveBitFields: true
+# (Safely omitted BitFields)
 
-# --- Vertical Spacing ---
-# This inserts the blank line between functions you asked for
+# 5. Vertical Spacing
 SeparateDefinitionBlocks: Always
-# This allows you to manually place blank lines inside functions without them being deleted
-KeepEmptyLinesAtTheStartOfBlocks: true
-MaxEmptyLinesToKeep: 1
 EmptyLineBeforeAccessModifier: Always
-
-# --- Imports & Namespaces ---
 SortIncludes: CaseSensitive
 FixNamespaceComments: true
 NamespaceIndentation: All
 
-# --- Brace Style ---
+# 6. Brace Wrapping
 BreakBeforeBraces: Custom
 BraceWrapping:
-  # This moves the Constructor brace to a new line
-  AfterFunction: true
-  # These keep logic braces (if/for) on the same line
-  AfterControlStatement: false
+  AfterFunction: true           # New line for functions
+  AfterControlStatement: false  # Same line for logic
   AfterClass: false
   AfterEnum: false
   AfterNamespace: false
@@ -43,25 +42,35 @@ BraceWrapping:
   BeforeCatch: false
   SplitEmptyFunction: false
 
-# --- Logic Blocks ---
+# 7. Logic Control Blocks
 InsertBraces: true
 RemoveBracesLLVM: false
 AllowShortBlocksOnASingleLine: Never
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 
-# --- Constructor Initializers ---
+# 8. Constructor Initializers
 BreakConstructorInitializers: BeforeComma
 ConstructorInitializerIndentWidth: 4
 PackConstructorInitializers: Never
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
 
-# --- Short Functions ---
-# Allows simple destructors to sit on one line
+# 9. Short Functions
 AllowShortFunctionsOnASingleLine: All
 
-# --- Arguments ---
+# 10. Arguments & Parameters
 AlignAfterOpenBracket: BlockIndent
 ContinuationIndentWidth: 4
 BinPackArguments: false
 BinPackParameters: false
+
+# 11. Penalties (Tuned for Strings & Method Chains)
+# 1. Cheap to break strings (Standard was 1000 -> Now 10)
+PenaltyBreakString: 10
+# 2. Cheap to break after '='
+PenaltyBreakAssignment: 10
+# 3. Expensive to break inside function calls
+PenaltyBreakBeforeFirstCallParameter: 200
+# 4. Global limits
+PenaltyExcessCharacter: 1000000
+PenaltyReturnTypeOnItsOwnLine: 60
