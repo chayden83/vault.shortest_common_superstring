@@ -2,7 +2,9 @@
 #include <bit>
 #include <cassert>
 #include <compare>
+#include <concepts>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
@@ -13,10 +15,12 @@
  * @brief segmented_vector
  * A C++23 container with stable references, stable iterators, and fast random
  * access.
- * * * Final Optimization: Implied Size
- * The 'm_size' member has been removed to reduce 'push_back' instruction count.
- * Size is now calculated on-demand using the distance between 'm_push_cursor'
- * and the start of the current block.
+ * * Invariants Enforced:
+ * 1. InitialCapacity is always a power of 2.
+ * 2. m_size_prefix is always the sum of capacities of all blocks prior to
+ * m_current_block_idx.
+ * 3. m_push_cursor is always within [m_current_block_begin, m_push_limit].
+ * 4. m_capacity is the sum of all allocated block sizes.
  */
 template <
     typename T,
@@ -25,9 +29,23 @@ template <
         std::size_t,
         (sizeof(T) > 4096) ? 1 : std::bit_floor(4096 / sizeof(T))>>
 class segmented_vector {
+  // -------------------------------------------------------------------------
+  // Compile-Time Assertions
+  // -------------------------------------------------------------------------
+  static_assert(
+      std::is_object_v<T>,
+      "segmented_vector cannot hold references or void. Use "
+      "std::reference_wrapper for references."
+  );
+
   static_assert(
       std::has_single_bit(InitialCapacity::value),
-      "InitialCapacity must be a power of 2."
+      "InitialCapacity must be a power of 2 for fast bitwise indexing."
+  );
+
+  static_assert(
+      std::is_same_v<typename std::allocator_traits<Allocator>::value_type, T>,
+      "Allocator::value_type must match the container's value_type T."
   );
 
   static constexpr std::size_t k_initial_cap = InitialCapacity::value;
@@ -59,24 +77,27 @@ private:
   [[no_unique_address]] Allocator m_allocator;
   Spine                           m_spine;
 
-  // Implied Size Tracking
-  // m_size is removed. We track how many elements are in blocks BEFORE the
-  // current one.
   size_type m_size_prefix = 0;
   size_type m_capacity    = 0;
 
-  // Cursor Optimization
-  T* m_push_cursor              = nullptr;
-  T* m_push_limit               = nullptr;
-  T* m_current_block_begin      = nullptr; // Needed to calc size() from cursor
-  size_type m_current_block_idx = 0;
+  T*        m_push_cursor         = nullptr;
+  T*        m_push_limit          = nullptr;
+  T*        m_current_block_begin = nullptr;
+  size_type m_current_block_idx   = 0;
 
   // -------------------------------------------------------------------------
-  // Optimized Indexing Logic
+  // Internal Helpers
   // -------------------------------------------------------------------------
+
   [[nodiscard]] [[gnu::always_inline]] inline std::pair<size_type, size_type>
   get_location(size_type index) const noexcept
   {
+    // Assert invariants for indexing logic
+    assert(
+        index < capacity() &&
+        "Index calculation out of bounds of allocated capacity"
+    );
+
     const size_type scaled_index = index >> k_initial_shift;
     const size_type k            = std::bit_width(scaled_index);
 
@@ -85,6 +106,10 @@ private:
                                        << k_initial_shift;
     const size_type mask        = 0 - static_cast<size_type>(scaled_index != 0);
     const size_type block_start = calculated_start & mask;
+
+    // Post-calculation check
+    assert(k < m_spine.size() && "Calculated block index exceeds spine size");
+    assert(m_spine[k] != nullptr && "Calculated block is null");
 
     return {k, index ^ block_start};
   }
@@ -95,6 +120,13 @@ private:
     if (block_idx == 0) {
       return k_initial_cap;
     }
+
+    // Check for potential overflow in debug mode
+    assert(
+        block_idx < 64 &&
+        "Block index too large, capacity would overflow "
+        "size_t"
+    );
     return k_initial_cap << (block_idx - 1);
   }
 
@@ -107,6 +139,7 @@ private:
       m_push_limit          = nullptr;
       m_current_block_begin = nullptr;
     } else {
+      assert(m_spine[0] != nullptr && "Spine is non-empty but Block 0 is null");
       m_push_cursor         = m_spine[0];
       m_current_block_begin = m_spine[0];
       m_push_limit          = m_spine[0] + get_block_capacity(0);
@@ -122,12 +155,17 @@ public:
   ) noexcept(std::is_nothrow_default_constructible_v<Allocator>)
       : m_allocator()
       , m_spine(m_allocator)
-  {}
+  {
+    assert(empty());
+    assert(capacity() == 0);
+  }
 
   [[nodiscard]] explicit segmented_vector(const Allocator& alloc)
       : m_allocator(alloc)
       , m_spine(alloc)
-  {}
+  {
+    assert(empty());
+  }
 
   [[nodiscard]] segmented_vector(const segmented_vector& other)
       : m_allocator(
@@ -143,6 +181,8 @@ public:
       deallocate_all_blocks();
       throw;
     }
+
+    assert(size() == other.size());
   }
 
   [[nodiscard]] segmented_vector(
@@ -158,6 +198,8 @@ public:
       deallocate_all_blocks();
       throw;
     }
+
+    assert(size() == other.size());
   }
 
   [[nodiscard]] segmented_vector(segmented_vector&& other) noexcept
@@ -170,11 +212,14 @@ public:
       , m_current_block_begin(other.m_current_block_begin)
       , m_current_block_idx(other.m_current_block_idx)
   {
+
     other.m_size_prefix         = 0;
     other.m_capacity            = 0;
     other.m_push_cursor         = nullptr;
     other.m_push_limit          = nullptr;
     other.m_current_block_begin = nullptr;
+
+    assert(other.empty());
   }
 
   [[nodiscard]] segmented_vector(
@@ -291,19 +336,26 @@ public:
     if (!m_push_cursor) {
       return 0;
     }
-    // Size = (Elements in prev blocks) + (Elements in current block)
+
+    // Assert invariants related to size calculation
+    assert(m_current_block_begin != nullptr);
+    assert(m_push_cursor >= m_current_block_begin);
+    assert(m_push_cursor <= m_push_limit);
+
     return m_size_prefix +
            static_cast<size_type>(m_push_cursor - m_current_block_begin);
   }
 
   [[nodiscard]] reference operator[](size_type index) noexcept
   {
+    assert(index < size() && "operator[] index out of bounds");
     auto [k, off] = get_location(index);
     return *(m_spine[k] + off);
   }
 
   [[nodiscard]] const_reference operator[](size_type index) const noexcept
   {
+    assert(index < size() && "operator[] index out of bounds");
     auto [k, off] = get_location(index);
     return *(m_spine[k] + off);
   }
@@ -324,14 +376,28 @@ public:
     return (*this)[index];
   }
 
-  [[nodiscard]] reference front() noexcept { return (*this)[0]; }
+  [[nodiscard]] reference front() noexcept
+  {
+    assert(!empty() && "front() called on empty container");
+    return (*this)[0];
+  }
 
-  [[nodiscard]] const_reference front() const noexcept { return (*this)[0]; }
+  [[nodiscard]] const_reference front() const noexcept
+  {
+    assert(!empty() && "front() called on empty container");
+    return (*this)[0];
+  }
 
-  [[nodiscard]] reference back() noexcept { return *(m_push_cursor - 1); }
+  [[nodiscard]] reference back() noexcept
+  {
+    assert(!empty() && "back() called on empty container");
+    assert(m_push_cursor > m_current_block_begin || m_size_prefix > 0);
+    return *(m_push_cursor - 1);
+  }
 
   [[nodiscard]] const_reference back() const noexcept
   {
+    assert(!empty() && "back() called on empty container");
     return *(m_push_cursor - 1);
   }
 
@@ -351,12 +417,14 @@ public:
       auto [k, off] = get_location(i - 1);
       AllocTraits::destroy(m_allocator, m_spine[k] + off);
     }
-    // Capacity preserved. Reset cursors to start of Block 0.
+
     reset_cursors();
+    assert(size() == 0);
+    // Note: Capacity preserved
   }
 
   // -------------------------------------------------------------------------
-  // Hyper-Optimized Push Back
+  // Push / Emplace
   // -------------------------------------------------------------------------
   void push_back(const T& value) { emplace_back(value); }
 
@@ -364,11 +432,11 @@ public:
 
   template <typename... Args> reference emplace_back(Args&&... args)
   {
-    // FAST PATH:
-    // 1. Branch
-    // 2. Construct
-    // 3. Increment Cursor
-    // (No size increment, no size load/store)
+    assert(
+        (m_push_cursor == nullptr && m_capacity == 0) ||
+        (m_push_cursor != nullptr && m_push_cursor <= m_push_limit)
+    );
+
     if (m_push_cursor != m_push_limit) [[likely]] {
       AllocTraits::construct(
           m_allocator, m_push_cursor, std::forward<Args>(args)...
@@ -381,59 +449,20 @@ public:
     return emplace_back_slow(std::forward<Args>(args)...);
   }
 
-  // -------------------------------------------------------------------------
-  // High-Performance Block Iteration
-  // -------------------------------------------------------------------------
-
-  // Applies func(const T& element) to every element.
-  // loops over the contiguous segments directly, enabling
-  // SIMD/Auto-vectorization.
-  template <typename Func> void for_each_segment(Func&& func) const
-  {
-    if (empty()) {
-      return;
-    }
-
-    // 1. Process fully filled blocks
-    // The last block might be partial, so we handle it separately or carefully.
-    // Actually, we know the size of every block.
-
-    // Block 0
-    if (!m_spine.empty()) {
-      size_type count = (m_current_block_idx == 0)
-                            ? static_cast<size_type>(m_push_cursor - m_spine[0])
-                            : get_block_capacity(0);
-      T*        ptr   = m_spine[0];
-      for (size_type i = 0; i < count; ++i) {
-        func(ptr[i]);
-      }
-    }
-
-    // Blocks 1 to k
-    for (size_type k = 1; k <= m_current_block_idx; ++k) {
-      T* ptr = m_spine[k];
-      // If this is the current (last) block, calculate used size
-      size_type capacity = get_block_capacity(k);
-      size_type count    = (k == m_current_block_idx)
-                               ? static_cast<size_type>(m_push_cursor - ptr)
-                               : capacity;
-
-      // This inner loop over raw pointers will be Auto-Vectorized by the
-      // compiler
-      for (size_type i = 0; i < count; ++i) {
-        func(ptr[i]);
-      }
-    }
-  }
-
 private:
   template <typename... Args>
   [[gnu::noinline]] reference emplace_back_slow(Args&&... args)
   {
     size_type current_sz = size();
+
+    // Assert we are actually at the limit
+    assert(m_push_cursor == m_push_limit);
+    assert(current_sz <= m_capacity);
+
     if (current_sz < m_capacity) {
-      // Next block already exists. Hop to it.
-      // Commit size of the block we just finished to prefix
+      // Next block exists
+      assert(m_current_block_idx + 1 < m_spine.size());
+
       if (m_current_block_begin) {
         m_size_prefix += get_block_capacity(m_current_block_idx);
       }
@@ -444,8 +473,9 @@ private:
       m_push_limit = m_push_cursor + get_block_capacity(m_current_block_idx);
     } else {
       grow();
-      // grow updates cursors and size prefix
     }
+
+    assert(m_push_cursor < m_push_limit);
 
     AllocTraits::construct(
         m_allocator, m_push_cursor, std::forward<Args>(args)...
@@ -457,14 +487,18 @@ private:
 
   void grow()
   {
-    // Before growing, ensure prefix is updated for full blocks up to now
     if (m_push_cursor && m_push_cursor == m_push_limit) {
       m_size_prefix += get_block_capacity(m_current_block_idx);
     }
 
     size_type next_idx  = m_spine.size();
     size_type next_size = get_block_capacity(next_idx);
-    BlockPtr  new_block = AllocTraits::allocate(m_allocator, next_size);
+
+    // Assert we aren't overflowing max_size
+    assert(m_capacity + next_size > m_capacity && "Capacity overflow");
+
+    BlockPtr new_block = AllocTraits::allocate(m_allocator, next_size);
+    assert(new_block != nullptr);
 
     try {
       m_spine.push_back(new_block);
@@ -478,12 +512,16 @@ private:
     m_current_block_begin = new_block;
     m_push_cursor         = new_block;
     m_push_limit          = new_block + next_size;
+
+    assert(m_push_cursor != m_push_limit);
   }
 
   void deallocate_all_blocks()
   {
     for (size_type i = 0; i < m_spine.size(); ++i) {
-      AllocTraits::deallocate(m_allocator, m_spine[i], get_block_capacity(i));
+      if (m_spine[i]) {
+        AllocTraits::deallocate(m_allocator, m_spine[i], get_block_capacity(i));
+      }
     }
     m_spine.clear();
     m_capacity            = 0;
@@ -507,6 +545,40 @@ private:
   }
 
 public:
+  // -------------------------------------------------------------------------
+  // High-Performance Block Iteration
+  // -------------------------------------------------------------------------
+  template <typename Func> void for_each_segment(Func&& func) const
+  {
+    if (empty()) {
+      return;
+    }
+
+    // Block 0
+    if (!m_spine.empty()) {
+      size_type count = (m_current_block_idx == 0)
+                            ? static_cast<size_type>(m_push_cursor - m_spine[0])
+                            : get_block_capacity(0);
+      T*        ptr   = m_spine[0];
+      for (size_type i = 0; i < count; ++i) {
+        func(ptr[i]);
+      }
+    }
+
+    // Blocks 1 to k
+    for (size_type k = 1; k <= m_current_block_idx; ++k) {
+      T*        ptr      = m_spine[k];
+      size_type capacity = get_block_capacity(k);
+      size_type count    = (k == m_current_block_idx)
+                               ? static_cast<size_type>(m_push_cursor - ptr)
+                               : capacity;
+
+      for (size_type i = 0; i < count; ++i) {
+        func(ptr[i]);
+      }
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Iterator Factories
   // -------------------------------------------------------------------------
@@ -588,7 +660,7 @@ public:
   }
 
   // -------------------------------------------------------------------------
-  // Iterator Implementation
+  // Iterator Implementation (Cached)
   // -------------------------------------------------------------------------
   template <bool IsConst> class iterator_impl {
     friend class segmented_vector;
@@ -607,7 +679,8 @@ public:
         m_block_end_ptr = nullptr;
         return;
       }
-      auto [k, off]   = m_cont->get_location(m_global_index);
+      auto [k, off] = m_cont->get_location(m_global_index);
+      assert(k < m_cont->m_spine.size());
       T* block_start  = m_cont->m_spine[k];
       m_current_ptr   = block_start + off;
       m_block_end_ptr = block_start + m_cont->get_block_capacity(k);
@@ -643,17 +716,32 @@ public:
       update_cache();
     }
 
-    [[nodiscard]] reference operator*() const { return *m_current_ptr; }
+    [[nodiscard]] reference operator*() const
+    {
+      assert(
+          m_current_ptr != nullptr && "Cannot dereference end/null iterator"
+      );
+      return *m_current_ptr;
+    }
 
-    [[nodiscard]] pointer operator->() const { return m_current_ptr; }
+    [[nodiscard]] pointer operator->() const
+    {
+      assert(
+          m_current_ptr != nullptr && "Cannot dereference end/null iterator"
+      );
+      return m_current_ptr;
+    }
 
     [[nodiscard]] reference operator[](difference_type n) const
     {
+      assert(m_cont != nullptr);
+      // bounds check handled by container
       return (*m_cont)[m_global_index + n];
     }
 
     iterator_impl& operator++()
     {
+      assert(m_current_ptr != nullptr && "Cannot increment end/null iterator");
       ++m_global_index;
       ++m_current_ptr;
       if (m_current_ptr == m_block_end_ptr) [[unlikely]] {
@@ -671,9 +759,7 @@ public:
 
     iterator_impl& operator--()
     {
-      if (m_global_index == 0) {
-        return *this;
-      }
+      assert(m_global_index > 0 && "Cannot decrement begin iterator");
       --m_global_index;
       update_cache();
       return *this;
@@ -688,6 +774,14 @@ public:
 
     iterator_impl& operator+=(difference_type n)
     {
+      if (n == 0) {
+        return *this;
+      }
+      if (n < 0) {
+        return *this -= (-n);
+      }
+      // Assert we don't go past end? Random access iterators allow one past
+      // end.
       m_global_index += n;
       update_cache();
       return *this;
@@ -695,6 +789,16 @@ public:
 
     iterator_impl& operator-=(difference_type n)
     {
+      if (n == 0) {
+        return *this;
+      }
+      if (n < 0) {
+        return *this += (-n);
+      }
+      assert(
+          static_cast<size_type>(n) <= m_global_index &&
+          "Iterator moved before begin"
+      );
       m_global_index -= n;
       update_cache();
       return *this;
@@ -721,6 +825,10 @@ public:
     [[nodiscard]] friend difference_type
     operator-(const iterator_impl& lhs, const iterator_impl& rhs)
     {
+      assert(
+          lhs.m_cont == rhs.m_cont &&
+          "Cannot compare iterators from different containers"
+      );
       return static_cast<difference_type>(lhs.m_global_index) -
              static_cast<difference_type>(rhs.m_global_index);
     }
@@ -728,12 +836,20 @@ public:
     [[nodiscard]] friend bool
     operator==(const iterator_impl& lhs, const iterator_impl& rhs)
     {
+      assert(
+          lhs.m_cont == rhs.m_cont &&
+          "Cannot compare iterators from different containers"
+      );
       return lhs.m_global_index == rhs.m_global_index;
     }
 
     [[nodiscard]] friend std::strong_ordering
     operator<=>(const iterator_impl& lhs, const iterator_impl& rhs)
     {
+      assert(
+          lhs.m_cont == rhs.m_cont &&
+          "Cannot compare iterators from different containers"
+      );
       return lhs.m_global_index <=> rhs.m_global_index;
     }
   };
