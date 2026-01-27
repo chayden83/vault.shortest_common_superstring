@@ -347,21 +347,13 @@ namespace eytzinger {
 
     // --- AMAC Batch Interface ---
 
-    // Generic Job Adapter to deduce types automatically
-    template <typename Job, typename NeedleIter> struct batch_job_adapter {
-      Job        impl;
-      NeedleIter needle_it;
-
-      const void* init() { return impl.init(); }
-
-      const void* step() { return impl.step(); }
-    };
-
     template <uint8_t          BatchSize = 16,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
-        std::pair<std::ranges::iterator_t<const Needles>, const_iterator>>
+        std::pair<
+          std::ranges::iterator_t<const std::remove_reference_t<Needles>>,
+          const_iterator>>
     void batch_lower_bound(Needles&& needles, OutputIt output) const
     {
       if (empty()) {
@@ -373,14 +365,36 @@ namespace eytzinger {
         return;
       }
 
-      auto factory = [this](const auto&, auto needle_it) {
-        auto job = policy_type::batch_lower_bound.make_job(
-          keys_.cbegin(), keys_.size(), *needle_it, compare_);
-        return batch_job_adapter<decltype(job), decltype(needle_it)>{
-          std::move(job), needle_it};
+      using NeedleIter =
+        std::ranges::iterator_t<const std::remove_reference_t<Needles>>;
+
+      struct Job {
+        decltype(policy_type::batch_lower_bound.make_job(
+          std::declval<const key_storage_type&>().cbegin(),
+          0,
+          std::declval<key_type>(),
+          std::declval<Compare>())) impl;
+        NeedleIter                  needle_it;
+
+        Job(const layout_map& map, NeedleIter it)
+            : impl(policy_type::batch_lower_bound.make_job(
+                map.keys_.cbegin(), map.keys_.size(), *it, map.compare_))
+            , needle_it(it)
+        {}
+
+        Job(Job&&)            = default;
+        Job& operator=(Job&&) = default;
+
+        const void* init() { return impl.init(); }
+
+        const void* step() { return impl.step(); }
       };
 
-      auto reporter = [this, &output](auto&& job) {
+      auto factory = [](const layout_map& map, NeedleIter it) {
+        return Job(map, it);
+      };
+
+      auto reporter = [this, &output](Job&& job) {
         auto           key_it = job.impl.result();
         const_iterator result_it;
         if (key_it == keys_.end()) {
@@ -399,7 +413,9 @@ namespace eytzinger {
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
-        std::pair<std::ranges::iterator_t<const Needles>, const_iterator>>
+        std::pair<
+          std::ranges::iterator_t<const std::remove_reference_t<Needles>>,
+          const_iterator>>
     void batch_upper_bound(Needles&& needles, OutputIt output) const
     {
       if (empty()) {
@@ -411,14 +427,36 @@ namespace eytzinger {
         return;
       }
 
-      auto factory = [this](const auto&, auto needle_it) {
-        auto job = policy_type::batch_upper_bound.make_job(
-          keys_.cbegin(), keys_.size(), *needle_it, compare_);
-        return batch_job_adapter<decltype(job), decltype(needle_it)>{
-          std::move(job), needle_it};
+      using NeedleIter =
+        std::ranges::iterator_t<const std::remove_reference_t<Needles>>;
+
+      struct Job {
+        decltype(policy_type::batch_upper_bound.make_job(
+          std::declval<const key_storage_type&>().cbegin(),
+          0,
+          std::declval<key_type>(),
+          std::declval<Compare>())) impl;
+        NeedleIter                  needle_it;
+
+        Job(const layout_map& map, NeedleIter it)
+            : impl(policy_type::batch_upper_bound.make_job(
+                map.keys_.cbegin(), map.keys_.size(), *it, map.compare_))
+            , needle_it(it)
+        {}
+
+        Job(Job&&)            = default;
+        Job& operator=(Job&&) = default;
+
+        const void* init() { return impl.init(); }
+
+        const void* step() { return impl.step(); }
       };
 
-      auto reporter = [this, &output](auto&& job) {
+      auto factory = [](const layout_map& map, NeedleIter it) {
+        return Job(map, it);
+      };
+
+      auto reporter = [this, &output](Job&& job) {
         auto           key_it = job.impl.result();
         const_iterator result_it;
         if (key_it == keys_.end()) {
@@ -437,7 +475,9 @@ namespace eytzinger {
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
-        std::pair<std::ranges::iterator_t<const Needles>, const_iterator>>
+        std::pair<
+          std::ranges::iterator_t<const std::remove_reference_t<Needles>>,
+          const_iterator>>
     void batch_find(Needles&& needles, OutputIt output) const
     {
       if (empty()) {
@@ -449,14 +489,36 @@ namespace eytzinger {
         return;
       }
 
-      auto factory = [this](const auto&, auto needle_it) {
-        auto job = policy_type::batch_lower_bound.make_job(
-          keys_.cbegin(), keys_.size(), *needle_it, compare_);
-        return batch_job_adapter<decltype(job), decltype(needle_it)>{
-          std::move(job), needle_it};
+      using NeedleIter =
+        std::ranges::iterator_t<const std::remove_reference_t<Needles>>;
+
+      struct Job {
+        decltype(policy_type::batch_lower_bound.make_job(
+          std::declval<const key_storage_type&>().cbegin(),
+          0,
+          std::declval<key_type>(),
+          std::declval<Compare>())) impl;
+        NeedleIter                  needle_it;
+
+        Job(const layout_map& map, NeedleIter it)
+            : impl(policy_type::batch_lower_bound.make_job(
+                map.keys_.cbegin(), map.keys_.size(), *it, map.compare_))
+            , needle_it(it)
+        {}
+
+        Job(Job&&)            = default;
+        Job& operator=(Job&&) = default;
+
+        const void* init() { return impl.init(); }
+
+        const void* step() { return impl.step(); }
       };
 
-      auto reporter = [this, &output](auto&& job) {
+      auto factory = [](const layout_map& map, NeedleIter it) {
+        return Job(map, it);
+      };
+
+      auto reporter = [this, &output](Job&& job) {
         auto           key_it    = job.impl.result();
         const_iterator result_it = end();
 

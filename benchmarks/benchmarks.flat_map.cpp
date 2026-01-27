@@ -16,15 +16,15 @@ using namespace eytzinger;
 // Define aliases for int-based maps
 template <typename K, typename V>
 using implicit_btree_map =
-    layout_map<K, V, std::less<K>, eytzinger::implicit_btree_layout_policy<16>>;
+  layout_map<K, V, std::less<K>, eytzinger::implicit_btree_layout_policy<16>>;
 
 // Helper to generate random ints
 std::vector<int> generate_random_ints(size_t n)
 {
-  std::vector<int> data(n);
-  std::mt19937     rng(42);
-  std::uniform_int_distribution<int>
-      dist(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
+  std::vector<int>                   data(n);
+  std::mt19937                       rng(42);
+  std::uniform_int_distribution<int> dist(
+    std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
 
   for (size_t i = 0; i < n; ++i) {
     data[i] = dist(rng);
@@ -39,9 +39,9 @@ std::vector<std::string> generate_random_strings(size_t n, size_t len = 32)
   data.reserve(n);
   std::mt19937      rng(42);
   static const char charset[] =
-      "0123456789"
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "abcdefghijklmnopqrstuvwxyz";
+    "0123456789"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz";
   std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
 
   for (size_t i = 0; i < n; ++i) {
@@ -257,46 +257,237 @@ static void BM_Construction(benchmark::State& state)
 // --- INTEGER BENCHMARKS ---
 
 // 1. Sorted Map
-BENCHMARK_TEMPLATE(BM_Lookup_Random, sorted_map, int)       BENCH_ARGS_INT->Name("Int/Sorted/Lookup");
-BENCHMARK_TEMPLATE(BM_Iteration,     sorted_map, int)       BENCH_ARGS_INT->Name("Int/Sorted/Iterate");
-BENCHMARK_TEMPLATE(BM_Construction,  sorted_map, int)       BENCH_ARGS_INT->Name("Int/Sorted/Construct");
+BENCHMARK_TEMPLATE(BM_Lookup_Random, sorted_map, int)
+BENCH_ARGS_INT->Name("Int/Sorted/Lookup");
+BENCHMARK_TEMPLATE(BM_Iteration, sorted_map, int)
+BENCH_ARGS_INT->Name("Int/Sorted/Iterate");
+BENCHMARK_TEMPLATE(BM_Construction, sorted_map, int)
+BENCH_ARGS_INT->Name("Int/Sorted/Construct");
 
 // 2. Eytzinger Map
-BENCHMARK_TEMPLATE(BM_Lookup_Random, eytzinger_map, int)    BENCH_ARGS_INT->Name("Int/Eytzinger/Lookup");
-BENCHMARK_TEMPLATE(BM_Iteration,     eytzinger_map, int)    BENCH_ARGS_INT->Name("Int/Eytzinger/Iterate");
-BENCHMARK_TEMPLATE(BM_Construction,  eytzinger_map, int)    BENCH_ARGS_INT->Name("Int/Eytzinger/Construct");
+BENCHMARK_TEMPLATE(BM_Lookup_Random, eytzinger_map, int)
+BENCH_ARGS_INT->Name("Int/Eytzinger/Lookup");
+BENCHMARK_TEMPLATE(BM_Iteration, eytzinger_map, int)
+BENCH_ARGS_INT->Name("Int/Eytzinger/Iterate");
+BENCHMARK_TEMPLATE(BM_Construction, eytzinger_map, int)
+BENCH_ARGS_INT->Name("Int/Eytzinger/Construct");
 
 // 3. Implicit B-Tree Map
-BENCHMARK_TEMPLATE(BM_Lookup_Random, implicit_btree_map, int) BENCH_ARGS_INT->Name("Int/BTree/Lookup");
-BENCHMARK_TEMPLATE(BM_Iteration,     implicit_btree_map, int) BENCH_ARGS_INT->Name("Int/BTree/Iterate");
-BENCHMARK_TEMPLATE(BM_Construction,  implicit_btree_map, int) BENCH_ARGS_INT->Name("Int/BTree/Construct");
+BENCHMARK_TEMPLATE(BM_Lookup_Random, implicit_btree_map, int)
+BENCH_ARGS_INT->Name("Int/BTree/Lookup");
+BENCHMARK_TEMPLATE(BM_Iteration, implicit_btree_map, int)
+BENCH_ARGS_INT->Name("Int/BTree/Iterate");
+BENCHMARK_TEMPLATE(BM_Construction, implicit_btree_map, int)
+BENCH_ARGS_INT->Name("Int/BTree/Construct");
 
 // --- STRING BENCHMARKS ---
 
 // 1. Sorted Map
-BENCHMARK_TEMPLATE(BM_Lookup_Random, sorted_map, std::string)       BENCH_ARGS_STR->Name("Str/Sorted/Lookup");
-BENCHMARK_TEMPLATE(BM_Iteration,     sorted_map, std::string)       BENCH_ARGS_STR->Name("Str/Sorted/Iterate");
-BENCHMARK_TEMPLATE(BM_Construction,  sorted_map, std::string)       BENCH_ARGS_STR->Name("Str/Sorted/Construct");
+BENCHMARK_TEMPLATE(BM_Lookup_Random, sorted_map, std::string)
+BENCH_ARGS_STR->Name("Str/Sorted/Lookup");
+BENCHMARK_TEMPLATE(BM_Iteration, sorted_map, std::string)
+BENCH_ARGS_STR->Name("Str/Sorted/Iterate");
+BENCHMARK_TEMPLATE(BM_Construction, sorted_map, std::string)
+BENCH_ARGS_STR->Name("Str/Sorted/Construct");
 
 // 2. Eytzinger Map
-BENCHMARK_TEMPLATE(BM_Lookup_Random, eytzinger_map, std::string)    BENCH_ARGS_STR->Name("Str/Eytzinger/Lookup");
-BENCHMARK_TEMPLATE(BM_Iteration,     eytzinger_map, std::string)    BENCH_ARGS_STR->Name("Str/Eytzinger/Iterate");
-BENCHMARK_TEMPLATE(BM_Construction,  eytzinger_map, std::string)    BENCH_ARGS_STR->Name("Str/Eytzinger/Construct");
+BENCHMARK_TEMPLATE(BM_Lookup_Random, eytzinger_map, std::string)
+BENCH_ARGS_STR->Name("Str/Eytzinger/Lookup");
+BENCHMARK_TEMPLATE(BM_Iteration, eytzinger_map, std::string)
+BENCH_ARGS_STR->Name("Str/Eytzinger/Iterate");
+BENCHMARK_TEMPLATE(BM_Construction, eytzinger_map, std::string)
+BENCH_ARGS_STR->Name("Str/Eytzinger/Construct");
 
 // 3. Implicit B-Tree Map
-BENCHMARK_TEMPLATE(BM_Lookup_Random, btree_map, std::string)        BENCH_ARGS_STR->Name("Str/BTree/Lookup");
-BENCHMARK_TEMPLATE(BM_Iteration,     btree_map, std::string)        BENCH_ARGS_STR->Name("Str/BTree/Iterate");
-BENCHMARK_TEMPLATE(BM_Construction,  btree_map, std::string)        BENCH_ARGS_STR->Name("Str/BTree/Construct");
+BENCHMARK_TEMPLATE(BM_Lookup_Random, btree_map, std::string)
+BENCH_ARGS_STR->Name("Str/BTree/Lookup");
+BENCHMARK_TEMPLATE(BM_Iteration, btree_map, std::string)
+BENCH_ARGS_STR->Name("Str/BTree/Iterate");
+BENCHMARK_TEMPLATE(BM_Construction, btree_map, std::string)
+BENCH_ARGS_STR->Name("Str/BTree/Construct");
 
 // --- STRING VIEW ARENA BENCHMARKS (Optimized) ---
 
 // 1. Sorted Map (View)
-BENCHMARK_TEMPLATE(BM_Lookup_StringView_Arena, sorted_map)    BENCH_ARGS_STR->Name("View/Sorted/Lookup");
+BENCHMARK_TEMPLATE(BM_Lookup_StringView_Arena, sorted_map)
+BENCH_ARGS_STR->Name("View/Sorted/Lookup");
 
 // 2. Eytzinger Map (View)
-BENCHMARK_TEMPLATE(BM_Lookup_StringView_Arena, eytzinger_map) BENCH_ARGS_STR->Name("View/Eytzinger/Lookup");
+BENCHMARK_TEMPLATE(BM_Lookup_StringView_Arena, eytzinger_map)
+BENCH_ARGS_STR->Name("View/Eytzinger/Lookup");
 
 // 3. Implicit B-Tree Map (View)
-BENCHMARK_TEMPLATE(BM_Lookup_StringView_Arena, btree_map)     BENCH_ARGS_STR->Name("View/BTree/Lookup");
+BENCHMARK_TEMPLATE(BM_Lookup_StringView_Arena, btree_map)
+BENCH_ARGS_STR->Name("View/BTree/Lookup");
+
+template <typename T> std::vector<T> generate_random_data(size_t n)
+{
+  std::vector<T> data;
+  data.reserve(n);
+  std::mt19937_64 rng(42);
+
+  if constexpr (std::is_integral_v<T>) {
+    using DistType   = std::conditional_t<(sizeof(T) < 2), int16_t, T>;
+    DistType min_val = static_cast<DistType>(std::numeric_limits<T>::min());
+    DistType max_val = static_cast<DistType>(std::numeric_limits<T>::max());
+    std::uniform_int_distribution<DistType> dist(min_val, max_val);
+    for (size_t i = 0; i < n; ++i) {
+      data.push_back(static_cast<T>(dist(rng)));
+    }
+  } else if constexpr (std::is_same_v<T, std::string>) {
+    static const char charset[] =
+      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
+    for (size_t i = 0; i < n; ++i) {
+      std::string s;
+      s.reserve(32);
+      for (size_t j = 0; j < 32; ++j) {
+        s += charset[dist(rng)];
+      }
+      data.push_back(std::move(s));
+    }
+  }
+  return data;
+}
+
+// --- Benchmark Functions ---
+
+// 1. Batch Lower Bound
+template <typename LayoutPolicy, typename KeyT>
+static void BM_Batch_Lower_Bound(benchmark::State& state)
+{
+  const size_t n           = state.range(0);
+  const size_t num_needles = 2048;
+
+  auto                              keys = generate_random_data<KeyT>(n);
+  std::vector<std::pair<KeyT, int>> pairs;
+  pairs.reserve(keys.size());
+  for (const auto& k : keys) {
+    pairs.emplace_back(k, 0);
+  }
+
+  using MapType = layout_map<KeyT, int, std::less<KeyT>, LayoutPolicy>;
+  MapType map(pairs.begin(), pairs.end());
+
+  auto needles = generate_random_data<KeyT>(num_needles);
+
+  // FIX: Use const_iterator for needles to match AMAC conductor behavior
+  using NeedleIter = typename std::vector<KeyT>::const_iterator;
+  using MapIter    = typename MapType::const_iterator;
+  using ResultPair = std::pair<NeedleIter, MapIter>;
+
+  std::vector<ResultPair> results;
+  results.reserve(num_needles);
+
+  for (auto _ : state) {
+    results.clear();
+    map.template batch_lower_bound<16>(needles, std::back_inserter(results));
+    benchmark::DoNotOptimize(results.data());
+  }
+  state.SetItemsProcessed(state.iterations() * num_needles);
+}
+
+// 2. Batch Upper Bound
+template <typename LayoutPolicy, typename KeyT>
+static void BM_Batch_Upper_Bound(benchmark::State& state)
+{
+  const size_t n           = state.range(0);
+  const size_t num_needles = 2048;
+
+  auto                              keys = generate_random_data<KeyT>(n);
+  std::vector<std::pair<KeyT, int>> pairs;
+  pairs.reserve(keys.size());
+  for (const auto& k : keys) {
+    pairs.emplace_back(k, 0);
+  }
+
+  using MapType = layout_map<KeyT, int, std::less<KeyT>, LayoutPolicy>;
+  MapType map(pairs.begin(), pairs.end());
+
+  auto needles = generate_random_data<KeyT>(num_needles);
+
+  // FIX: Use const_iterator
+  using NeedleIter = typename std::vector<KeyT>::const_iterator;
+  using MapIter    = typename MapType::const_iterator;
+  using ResultPair = std::pair<NeedleIter, MapIter>;
+  std::vector<ResultPair> results;
+  results.reserve(num_needles);
+
+  for (auto _ : state) {
+    results.clear();
+    map.template batch_upper_bound<16>(needles, std::back_inserter(results));
+    benchmark::DoNotOptimize(results.data());
+  }
+  state.SetItemsProcessed(state.iterations() * num_needles);
+}
+
+// 3. Batch Find
+template <typename LayoutPolicy, typename KeyT>
+static void BM_Batch_Find(benchmark::State& state)
+{
+  const size_t n           = state.range(0);
+  const size_t num_needles = 2048;
+
+  auto                              keys = generate_random_data<KeyT>(n);
+  std::vector<std::pair<KeyT, int>> pairs;
+  pairs.reserve(keys.size());
+  for (const auto& k : keys) {
+    pairs.emplace_back(k, 0);
+  }
+
+  using MapType = layout_map<KeyT, int, std::less<KeyT>, LayoutPolicy>;
+  MapType map(pairs.begin(), pairs.end());
+
+  auto needles = generate_random_data<KeyT>(num_needles);
+
+  // FIX: Use const_iterator
+  using NeedleIter = typename std::vector<KeyT>::const_iterator;
+  using MapIter    = typename MapType::const_iterator;
+  using ResultPair = std::pair<NeedleIter, MapIter>;
+  std::vector<ResultPair> results;
+  results.reserve(num_needles);
+
+  for (auto _ : state) {
+    results.clear();
+    map.template batch_find<16>(needles, std::back_inserter(results));
+    benchmark::DoNotOptimize(results.data());
+  }
+  state.SetItemsProcessed(state.iterations() * num_needles);
+}
+
+// --- Registration Macros ---
+
+#define BATCH_ARGS                                                             \
+  ->RangeMultiplier(4)->Range(256, 1 << 20)->Unit(benchmark::kNanosecond)
+
+#define REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, KeyName, KeyType)    \
+  BENCHMARK_TEMPLATE(BM_Batch_Lower_Bound, LayoutType, KeyType)                \
+  BATCH_ARGS->Name(LayoutName "/" KeyName "/BatchLB");                         \
+  BENCHMARK_TEMPLATE(BM_Batch_Upper_Bound, LayoutType, KeyType)                \
+  BATCH_ARGS->Name(LayoutName "/" KeyName "/BatchUB");                         \
+  BENCHMARK_TEMPLATE(BM_Batch_Find, LayoutType, KeyType)                       \
+  BATCH_ARGS->Name(LayoutName "/" KeyName "/BatchFind");
+
+#define REGISTER_ALL_BATCH_TYPES(LayoutName, LayoutType)                       \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "int8", int8_t)            \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "uint8", uint8_t)          \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "int16", int16_t)          \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "uint16", uint16_t)        \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "uint32", uint32_t)        \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "int64", int64_t)          \
+  REGISTER_BATCH_BENCHMARKS(LayoutName, LayoutType, "uint64", uint64_t)
+
+// --- Register Batch Benchmarks ---
+
+REGISTER_ALL_BATCH_TYPES("Sorted", eytzinger::sorted_layout_policy)
+REGISTER_ALL_BATCH_TYPES("Eytzinger", eytzinger::eytzinger_layout_policy<6>)
+REGISTER_ALL_BATCH_TYPES("BTree", eytzinger::implicit_btree_layout_policy<16>)
+
+REGISTER_BATCH_BENCHMARKS(
+  "Sorted", eytzinger::sorted_layout_policy, "String", std::string)
+REGISTER_BATCH_BENCHMARKS(
+  "Eytzinger", eytzinger::eytzinger_layout_policy<6>, "String", std::string)
+REGISTER_BATCH_BENCHMARKS(
+  "BTree", eytzinger::implicit_btree_layout_policy<16>, "String", std::string)
 
 BENCHMARK_MAIN();

@@ -14,8 +14,7 @@
 namespace vault::amac::concepts {
   template <typename J, typename R, typename I>
   concept job = std::ranges::range<R> && std::input_iterator<I>
-    && std::constructible_from<J, R const&, I> && std::move_constructible<J>
-    && requires(J& job) {
+    && std::move_constructible<J> && requires(J& job) {
          { job.init() } -> std::same_as<void const*>;
          { job.step() } -> std::same_as<void const*>;
        };
