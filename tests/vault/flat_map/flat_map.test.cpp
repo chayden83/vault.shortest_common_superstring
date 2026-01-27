@@ -2,7 +2,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#include <utility>
 #include <vault/flat_map/aliases.hpp>
 #include <vault/flat_map/eytzinger_layout_policy.hpp>
 #include <vault/flat_map/implicit_btree_layout_policy.hpp>
@@ -10,9 +9,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque> // Added for std::deque test
 #include <limits>
 #include <random>
 #include <set>
+#include <string>
+#include <utility>
 #include <vector>
 
 // --- Helper: Random Data Generation ---
@@ -43,6 +45,31 @@ template <typename T> struct RandomDataGenerator {
     }
 
     return std::vector<T>(unique_values.begin(), unique_values.end());
+  }
+};
+
+// Specialization for std::string
+template <> struct RandomDataGenerator<std::string> {
+  static std::vector<std::string> generate_sorted_unique(size_t n)
+  {
+    std::mt19937_64 rng(42);
+    // Characters to use in random strings (alphanumeric)
+    static const char charset[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+    std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
+
+    std::set<std::string> unique_values;
+    while (unique_values.size() < n) {
+      std::string s;
+      s.reserve(32);
+      for (int i = 0; i < 32; ++i) {
+        s += charset[dist(rng)];
+      }
+      unique_values.insert(std::move(s));
+    }
+    return std::vector<std::string>(unique_values.begin(), unique_values.end());
   }
 };
 
@@ -174,7 +201,13 @@ template <typename MapType> void test_map_random(size_t n)
   std::vector<std::pair<KeyT, ValT>> input;
   input.reserve(n);
   for (const auto& k : keys) {
-    input.emplace_back(k, static_cast<ValT>(k)); // Value == Key for simplicity
+    // For string, static_cast doesn't work directly to int, so use
+    // construct/convert
+    if constexpr (std::is_same_v<KeyT, std::string>) {
+      input.emplace_back(k, 1); // Dummy value
+    } else {
+      input.emplace_back(k, static_cast<ValT>(k));
+    }
   }
 
   // 2. Construct Map
@@ -193,10 +226,14 @@ template <typename MapType> void test_map_random(size_t n)
     auto it = map.find(k);
     REQUIRE(it != map.end());
     CHECK(it->first == k);
-    CHECK(it->second == static_cast<ValT>(k));
+    if constexpr (!std::is_same_v<KeyT, std::string>) {
+      CHECK(it->second == static_cast<ValT>(k));
+    }
 
     // At
-    CHECK(map.at(k) == static_cast<ValT>(k));
+    if constexpr (!std::is_same_v<KeyT, std::string>) {
+      CHECK(map.at(k) == static_cast<ValT>(k));
+    }
 
     // Lower Bound
     auto lb = map.lower_bound(k);
@@ -216,22 +253,24 @@ template <typename MapType> void test_map_random(size_t n)
   }
 
   // 4. Verify Lookups (Missing Keys) We try to find values "between"
-  // our random keys to test misses.
-  if (n > 1) {
-    for (size_t i = 0; i < n - 1; ++i) {
-      // Try to find a midpoint.  Note: for integers, midpoint might
-      // equal keys[i] if difference is 1.  We only test if there is a
-      // gap.
-      if (keys[i + 1] > keys[i] + 1) {
-        KeyT missing = static_cast<KeyT>(keys[i] + 1);
+  // our random keys to test misses. (Skipped for strings for simplicity)
+  if constexpr (!std::is_same_v<KeyT, std::string>) {
+    if (n > 1) {
+      for (size_t i = 0; i < n - 1; ++i) {
+        // Try to find a midpoint.  Note: for integers, midpoint might
+        // equal keys[i] if difference is 1.  We only test if there is a
+        // gap.
+        if (keys[i + 1] > keys[i] + 1) {
+          KeyT missing = static_cast<KeyT>(keys[i] + 1);
 
-        CHECK_FALSE(map.contains(missing));
-        CHECK(map.find(missing) == map.end());
+          CHECK_FALSE(map.contains(missing));
+          CHECK(map.find(missing) == map.end());
 
-        // LB of missing should be keys[i+1]
-        auto lb = map.lower_bound(missing);
-        REQUIRE(lb != map.end());
-        CHECK(lb->first == keys[i + 1]);
+          // LB of missing should be keys[i+1]
+          auto lb = map.lower_bound(missing);
+          REQUIRE(lb != map.end());
+          CHECK(lb->first == keys[i + 1]);
+        }
       }
     }
   }
@@ -273,5 +312,45 @@ TEMPLATE_TEST_CASE(
 {
   // Test with various sizes, including edge cases
   auto n = GENERATE(0, 1, 16, 64, 100);
+  test_map_random<TestType>(n);
+}
+
+// Separate Test Case for Strings (larger sizes)
+TEMPLATE_TEST_CASE(
+    "Layout Map: Random String Keys",
+    "[map][string]",
+    LAYOUT_MAPS_FOR_TYPE(std::string)
+)
+{
+  // Test with various sizes
+  auto n = GENERATE(0, 1, 16, 64, 100);
+  test_map_random<TestType>(n);
+}
+
+// --- Deque Compatibility Tests ---
+
+// Explicitly test std::deque as the underlying container.
+// Note: Eytzinger and B-Tree layouts are NOT tested here because they require
+// contiguous memory (pointers) for performance, which std::deque does not
+// guarantee.
+template <typename K, typename V>
+using DequeSortedMap = eytzinger::layout_map<
+    K,
+    V,
+    std::less<K>,
+    eytzinger::sorted_layout_policy,
+    std::allocator<std::pair<const K, V>>,
+    std::deque, // Use deque for Keys
+    std::deque  // Use deque for Values
+    >;
+
+TEMPLATE_TEST_CASE(
+    "Layout Map: Deque Storage",
+    "[map][deque]",
+    (DequeSortedMap<int, int>),
+    (DequeSortedMap<std::string, int>)
+)
+{
+  auto n = GENERATE(0, 1, 16, 100);
   test_map_random<TestType>(n);
 }
