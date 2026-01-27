@@ -149,7 +149,9 @@ namespace vault::amac {
 
   template <uint8_t N>
   constexpr inline auto const conductor = conductor_fn<N>{};
+} // namespace vault::amac
 
+namespace vault::amac {
   template <uint8_t N> struct lower_bound_fn {
     template <typename haystack_t, typename needles_t> class job_t {
       std::ranges::iterator_t<haystack_t const> m_haystack_first = {};

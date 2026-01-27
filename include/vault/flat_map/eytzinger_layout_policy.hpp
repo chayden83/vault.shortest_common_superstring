@@ -31,8 +31,8 @@ namespace eytzinger {
 
   private:
     // Robust calculation of subtree size rooted at i (0-based index)
-    [[nodiscard]] static constexpr std::size_t
-    count_nodes(std::size_t i, std::size_t n) noexcept
+    [[nodiscard]] static constexpr std::size_t count_nodes(
+      std::size_t i, std::size_t n) noexcept
     {
       std::size_t size = 0;
       std::size_t k = i + 1; // Convert to 1-based index for easier level math
@@ -46,8 +46,8 @@ namespace eytzinger {
       return size;
     }
 
-    [[nodiscard]] static constexpr std::size_t
-    restore_lower_bound_index(std::size_t i) noexcept
+    [[nodiscard]] static constexpr std::size_t restore_lower_bound_index(
+      std::size_t i) noexcept
     {
       std::size_t j = i + 1;
       j >>= (std::countr_one(j) + 1);
@@ -56,16 +56,15 @@ namespace eytzinger {
 
   public:
     struct sorted_rank_to_index_fn {
-      [[nodiscard]] static constexpr std::size_t
-      operator()(std::size_t rank, std::size_t n) noexcept
+      [[nodiscard]] static constexpr std::size_t operator()(
+        std::size_t rank, std::size_t n) noexcept
       {
         assert(rank < n && "Rank out of bounds");
 
         std::size_t i = 0;
         while (true) {
           assert(
-              i < n && "Traversal index out of bounds - possible infinite loop"
-          );
+            i < n && "Traversal index out of bounds - possible infinite loop");
 
           std::size_t l_sz = count_nodes((i << 1) + 1, n);
           if (rank == l_sz) {
@@ -82,8 +81,8 @@ namespace eytzinger {
     };
 
     struct index_to_sorted_rank_fn {
-      [[nodiscard]] static constexpr std::size_t
-      operator()(std::size_t i, std::size_t n) noexcept
+      [[nodiscard]] static constexpr std::size_t operator()(
+        std::size_t i, std::size_t n) noexcept
       {
         assert(i < n && "Index out of bounds");
 
@@ -110,8 +109,7 @@ namespace eytzinger {
       // at each visit.
       template <typename SrcIter, typename TempVec>
       static constexpr void fill_in_order(
-          TempVec& temp, SrcIter& source_iter, std::size_t k, std::size_t n
-      )
+        TempVec& temp, SrcIter& source_iter, std::size_t k, std::size_t n)
       {
         if (k >= n) {
           return;
@@ -149,10 +147,8 @@ namespace eytzinger {
         fill_in_order(temp, current_source, 0, n);
 
         assert(
-            std::distance(first, current_source) ==
-                static_cast<std::ptrdiff_t>(n) &&
-            "Not all elements were consumed during permutation"
-        );
+          std::distance(first, current_source) == static_cast<std::ptrdiff_t>(n)
+          && "Not all elements were consumed during permutation");
 
         std::ranges::move(temp, first);
       }
@@ -166,8 +162,8 @@ namespace eytzinger {
 
     struct get_nth_sorted_fn {
       template <std::random_access_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] static constexpr std::iter_reference_t<I>
-      operator()(I first, S last, std::size_t n)
+      [[nodiscard]] static constexpr std::iter_reference_t<I> operator()(
+        I first, S last, std::size_t n)
       {
         const auto size = static_cast<std::size_t>(std::distance(first, last));
         if (n >= size) {
@@ -180,19 +176,17 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ranges::range_reference_t<R>
       operator()(R&& range, std::size_t n)
       {
-        return
-        operator()(std::ranges::begin(range), std::ranges::end(range), n);
+        return operator()(
+          std::ranges::begin(range), std::ranges::end(range), n);
       }
     };
 
     struct next_index_fn {
-      [[nodiscard]] static constexpr std::ptrdiff_t
-      operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
+        std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        assert(
-            i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz) &&
-            "Iterator index out of bounds"
-        );
+        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz)
+          && "Iterator index out of bounds");
 
         std::ptrdiff_t n           = static_cast<std::ptrdiff_t>(n_sz);
         auto           right_child = (i << 1) + 2;
@@ -214,13 +208,11 @@ namespace eytzinger {
     };
 
     struct prev_index_fn {
-      [[nodiscard]] static constexpr std::ptrdiff_t
-      operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
+        std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        assert(
-            i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz) &&
-            "Iterator index out of bounds"
-        );
+        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz)
+          && "Iterator index out of bounds");
 
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
         if (i == -1) {
@@ -252,23 +244,20 @@ namespace eytzinger {
     };
 
     struct lower_bound_fn {
-      template <
-          std::random_access_iterator I,
-          std::sentinel_for<I>        S,
-          typename T,
-          typename Comp = std::ranges::less,
-          typename Proj = std::identity>
+      template <std::random_access_iterator I,
+        std::sentinel_for<I>                S,
+        typename T,
+        typename Comp = std::ranges::less,
+        typename Proj = std::identity>
       [[nodiscard]] static constexpr I operator()(
-          I first, S last, const T& value, Comp comp = {}, Proj proj = {}
-      )
+        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
       {
         if (first == last) {
           return last;
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
-        assert(base != nullptr && "Dereferencing null pointer in range");
-
+        assert(base != nullptr);
         std::size_t i = 0;
         while (i < n) {
           const std::size_t future_i = ((i + 1) << L) - 1;
@@ -278,46 +267,40 @@ namespace eytzinger {
         }
         std::size_t result_idx = restore_lower_bound_index(i);
         return (result_idx == static_cast<std::size_t>(-1))
-                   ? last
-                   : (first + result_idx);
+          ? last
+          : (first + result_idx);
       }
 
-      template <
-          std::ranges::random_access_range R,
-          typename T,
-          typename Comp = std::ranges::less,
-          typename Proj = std::identity>
-      [[nodiscard]] static constexpr std::ranges::iterator_t<R>
-      operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {})
+      template <std::ranges::random_access_range R,
+        typename T,
+        typename Comp = std::ranges::less,
+        typename Proj = std::identity>
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
+        R&& range, const T& value, Comp comp = {}, Proj proj = {})
       {
-        return operator()(
-            std::ranges::begin(range),
-            std::ranges::end(range),
-            value,
-            std::ref(comp),
-            std::ref(proj)
-        );
+        return operator()(std::ranges::begin(range),
+          std::ranges::end(range),
+          value,
+          std::ref(comp),
+          std::ref(proj));
       }
     };
 
     struct upper_bound_fn {
-      template <
-          std::random_access_iterator I,
-          std::sentinel_for<I>        S,
-          typename T,
-          typename Comp = std::ranges::less,
-          typename Proj = std::identity>
+      template <std::random_access_iterator I,
+        std::sentinel_for<I>                S,
+        typename T,
+        typename Comp = std::ranges::less,
+        typename Proj = std::identity>
       [[nodiscard]] static constexpr I operator()(
-          I first, S last, const T& value, Comp comp = {}, Proj proj = {}
-      )
+        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
       {
         if (first == last) {
           return last;
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
-        assert(base != nullptr && "Dereferencing null pointer in range");
-
+        assert(base != nullptr);
         std::size_t i = 0;
         while (i < n) {
           const std::size_t future_i = ((i + 1) << L) - 1;
@@ -327,25 +310,22 @@ namespace eytzinger {
         }
         std::size_t result_idx = restore_lower_bound_index(i);
         return (result_idx == static_cast<std::size_t>(-1))
-                   ? last
-                   : (first + result_idx);
+          ? last
+          : (first + result_idx);
       }
 
-      template <
-          std::ranges::random_access_range R,
-          typename T,
-          typename Comp = std::ranges::less,
-          typename Proj = std::identity>
-      [[nodiscard]] static constexpr std::ranges::iterator_t<R>
-      operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {})
+      template <std::ranges::random_access_range R,
+        typename T,
+        typename Comp = std::ranges::less,
+        typename Proj = std::identity>
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
+        R&& range, const T& value, Comp comp = {}, Proj proj = {})
       {
-        return operator()(
-            std::ranges::begin(range),
-            std::ranges::end(range),
-            value,
-            std::ref(comp),
-            std::ref(proj)
-        );
+        return operator()(std::ranges::begin(range),
+          std::ranges::end(range),
+          value,
+          std::ref(comp),
+          std::ref(proj));
       }
     };
 
