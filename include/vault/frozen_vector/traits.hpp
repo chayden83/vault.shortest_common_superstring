@@ -11,19 +11,12 @@ namespace frozen {
   // POINTER TRAITS EXTENSION
   // ============================================================================
 
-  // Concept to detect if a type has a use_count() method
   template <typename T>
   concept HasUseCount = requires(T t) {
-    { t.use_count() } -> std::integral;
+    { t.use_count() } -> std::convertible_to<long>;
   };
 
-  /**
-   * frozen::pointer_traits
-   * Extends std::pointer_traits to add 'is_reference_counted'.
-   * Inherits element_type and rebind from standard traits.
-   */
   template <typename Ptr> struct pointer_traits : std::pointer_traits<Ptr> {
-    // Default Detection: If it looks like a shared pointer, it is one.
     static constexpr bool is_reference_counted = HasUseCount<Ptr>;
   };
 
@@ -35,13 +28,17 @@ namespace frozen {
     [[nodiscard]]
     static Dest freeze(Src&& src)
     {
+      // Priority 1: Direct Move Construction (Safe)
       if constexpr (std::is_constructible_v<Dest, Src&&>) {
         return Dest(std::move(src));
-      } else {
-        auto* raw = src.get();
-        Dest  dest(raw);
-        src.release();
-        return dest;
+      }
+      // Priority 2: Manual Transfer via Raw Pointer
+      // Fix: Must release ownership from src BEFORE creating Dest to prevent
+      // double-free if Dest constructor throws (e.g. std::shared_ptr allocation
+      // failure).
+      else {
+        auto* raw = src.release();
+        return Dest(raw);
       }
     }
   };

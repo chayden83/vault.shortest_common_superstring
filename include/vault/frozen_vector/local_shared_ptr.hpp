@@ -18,19 +18,63 @@ namespace frozen {
     struct local_control_block_base {
       long ref_count{1};
       virtual ~local_control_block_base() = default;
+      virtual void release_ref()          = 0;
+    };
+
+    template <typename Ptr, typename Deleter>
+    struct local_control_block_split : local_control_block_base {
+      Ptr                           ptr;
+      [[no_unique_address]] Deleter deleter;
+
+      local_control_block_split(Ptr p, Deleter d)
+          : ptr(p)
+          , deleter(std::move(d))
+      {}
+
+      void release_ref() override
+      {
+        if (--ref_count == 0) {
+          deleter(ptr);
+          delete this;
+        }
+      }
     };
 
     template <typename T>
-    struct local_control_block : local_control_block_base {};
+    struct local_control_block_inplace : local_control_block_base {
+      std::size_t size;
+
+      local_control_block_inplace(std::size_t n)
+          : size(n)
+      {}
+
+      void release_ref() override
+      {
+        if (--ref_count == 0) {
+          using Element = std::remove_extent_t<T>;
+          if constexpr (!std::is_trivially_destructible_v<Element>) {
+            constexpr std::size_t header_size =
+                sizeof(local_control_block_inplace<T>);
+            constexpr std::size_t align = alignof(Element);
+            std::size_t           padding =
+                (header_size % align != 0) ? align - (header_size % align) : 0;
+            char*    raw_mem = reinterpret_cast<char*>(this);
+            Element* data =
+                reinterpret_cast<Element*>(raw_mem + header_size + padding);
+            for (std::size_t i = 0; i < size; ++i) {
+              data[i].~Element();
+            }
+          }
+          delete[] reinterpret_cast<char*>(this);
+        }
+      }
+    };
   } // namespace detail
 
   template <typename T, typename Alloc>
   local_shared_ptr<T>
   allocate_local_shared_for_overwrite(std::size_t n, const Alloc& alloc);
 
-  /**
-   * A non-atomic, thread-unsafe shared pointer.
-   */
   template <typename T> class local_shared_ptr {
   public:
     using element_type = std::remove_extent_t<T>;
@@ -45,40 +89,39 @@ namespace frozen {
         , cb_(nullptr)
     {}
 
-    ~local_shared_ptr() { release(); }
-
-    local_shared_ptr& operator=(std::nullptr_t) noexcept
-    {
-      release();
-      ptr_ = nullptr;
-      cb_  = nullptr;
-      return *this;
-    }
-
-    // Aliasing Constructor
-    // Shares ownership with 'owner' (increments ref count)
-    // but points to 'p' (which is usually a member or sub-object of owner's
-    // managed object)
-    template <typename U>
-    local_shared_ptr(const local_shared_ptr<U>& owner, element_type* p) noexcept
+    explicit local_shared_ptr(element_type* p)
         : ptr_(p)
-        , cb_(owner.cb_)
     {
-      if (cb_) {
-        cb_->ref_count++;
+      if (p) {
+        using Deleter = std::default_delete<T>;
+        cb_ = new detail::local_control_block_split<element_type*, Deleter>(
+            p, Deleter{}
+        );
+      } else {
+        cb_ = nullptr;
       }
     }
 
-    // Aliasing Move Constructor
-    // Takes over ownership from 'owner' (ref count unchanged)
-    // but points to 'p'. 'owner' is reset.
-    template <typename U>
-    local_shared_ptr(local_shared_ptr<U>&& owner, element_type* p) noexcept
-        : ptr_(p)
-        , cb_(owner.cb_)
+    template <typename U, typename Deleter>
+      requires std::convertible_to<U*, element_type*>
+    local_shared_ptr(std::unique_ptr<U, Deleter>&& other)
     {
-      owner.ptr_ = nullptr;
-      owner.cb_  = nullptr;
+      if (other) {
+        ptr_ = other.get();
+        cb_  = new detail::local_control_block_split<U*, Deleter>(
+            other.release(), std::move(other.get_deleter())
+        );
+      } else {
+        ptr_ = nullptr;
+        cb_  = nullptr;
+      }
+    }
+
+    ~local_shared_ptr()
+    {
+      if (cb_) {
+        cb_->release_ref();
+      }
     }
 
     local_shared_ptr(const local_shared_ptr& other) noexcept
@@ -103,37 +146,6 @@ namespace frozen {
       }
     }
 
-    local_shared_ptr& operator=(const local_shared_ptr& other) noexcept
-    {
-      if (this != &other) {
-        release();
-        ptr_ = other.ptr_;
-        cb_  = other.cb_;
-        if (cb_) {
-          cb_->ref_count++;
-        }
-      }
-      return *this;
-    }
-
-    template <typename U>
-      requires std::convertible_to<
-          typename local_shared_ptr<U>::element_type*,
-          element_type*>
-    local_shared_ptr& operator=(const local_shared_ptr<U>& other) noexcept
-    {
-      auto* new_cb = other.cb_;
-      if (new_cb) {
-        new_cb->ref_count++;
-      }
-
-      release();
-
-      ptr_ = other.ptr_;
-      cb_  = new_cb;
-      return *this;
-    }
-
     local_shared_ptr(local_shared_ptr&& other) noexcept
         : ptr_(other.ptr_)
         , cb_(other.cb_)
@@ -154,10 +166,33 @@ namespace frozen {
       other.cb_  = nullptr;
     }
 
+    local_shared_ptr& operator=(std::nullptr_t) noexcept
+    {
+      reset();
+      return *this;
+    }
+
+    local_shared_ptr& operator=(const local_shared_ptr& other) noexcept
+    {
+      if (this != &other) {
+        if (other.cb_) {
+          other.cb_->ref_count++;
+        }
+        if (cb_) {
+          cb_->release_ref();
+        }
+        ptr_ = other.ptr_;
+        cb_  = other.cb_;
+      }
+      return *this;
+    }
+
     local_shared_ptr& operator=(local_shared_ptr&& other) noexcept
     {
       if (this != &other) {
-        release();
+        if (cb_) {
+          cb_->release_ref();
+        }
         ptr_       = other.ptr_;
         cb_        = other.cb_;
         other.ptr_ = nullptr;
@@ -167,17 +202,22 @@ namespace frozen {
     }
 
     template <typename U>
-      requires std::convertible_to<
-          typename local_shared_ptr<U>::element_type*,
-          element_type*>
-    local_shared_ptr& operator=(local_shared_ptr<U>&& other) noexcept
+    local_shared_ptr(const local_shared_ptr<U>& owner, element_type* p) noexcept
+        : ptr_(p)
+        , cb_(owner.cb_)
     {
-      release();
-      ptr_       = other.ptr_;
-      cb_        = other.cb_;
-      other.ptr_ = nullptr;
-      other.cb_  = nullptr;
-      return *this;
+      if (cb_) {
+        cb_->ref_count++;
+      }
+    }
+
+    template <typename U>
+    local_shared_ptr(local_shared_ptr<U>&& owner, element_type* p) noexcept
+        : ptr_(p)
+        , cb_(owner.cb_)
+    {
+      owner.ptr_ = nullptr;
+      owner.cb_  = nullptr;
     }
 
     element_type& operator[](std::ptrdiff_t i) const noexcept
@@ -185,51 +225,66 @@ namespace frozen {
       return ptr_[i];
     }
 
+    element_type& operator*() const noexcept { return *ptr_; }
+
+    element_type* operator->() const noexcept { return ptr_; }
+
     element_type* get() const noexcept { return ptr_; }
 
     explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
     long use_count() const noexcept { return cb_ ? cb_->ref_count : 0; }
 
+    void reset()
+    {
+      if (cb_) {
+        cb_->release_ref();
+      }
+      ptr_ = nullptr;
+      cb_  = nullptr;
+    }
+
   private:
     element_type*                     ptr_;
     detail::local_control_block_base* cb_;
-
-    void release()
-    {
-      if (cb_) {
-        if (--cb_->ref_count == 0) {
-          if constexpr (!std::is_trivially_destructible_v<element_type>) {
-            // dtor logic would go here
-          }
-          delete[] reinterpret_cast<char*>(cb_);
-        }
-      }
-    }
-
     template <typename U, typename A>
     friend local_shared_ptr<U>
     allocate_local_shared_for_overwrite(std::size_t, const A&);
     template <typename U> friend class local_shared_ptr;
   };
 
-  // Factory
   template <typename T, typename Alloc>
   local_shared_ptr<T>
   allocate_local_shared_for_overwrite(std::size_t n, const Alloc&)
   {
-    using Element = std::remove_extent_t<T>;
-    constexpr std::size_t header_size =
-        sizeof(detail::local_control_block_base);
-    constexpr std::size_t align = alignof(Element);
+    using Element                     = std::remove_extent_t<T>;
+    using ControlBlock                = detail::local_control_block_inplace<T>;
+    constexpr std::size_t header_size = sizeof(ControlBlock);
+    constexpr std::size_t align       = alignof(Element);
     std::size_t           padding =
         (header_size % align != 0) ? align - (header_size % align) : 0;
-    std::size_t data_offset = header_size + padding;
-    std::size_t total_size  = data_offset + (sizeof(Element) * n);
+    std::size_t total_size = header_size + padding + (sizeof(Element) * n);
 
-    char*    mem      = new char[total_size];
-    auto*    cb       = new (mem) detail::local_control_block_base();
-    Element* data_ptr = reinterpret_cast<Element*>(mem + data_offset);
+    char* mem = new char[total_size];
+
+    struct Guard {
+      char* p;
+
+      ~Guard() { delete[] p; }
+    } guard{mem};
+
+    auto*    cb       = new (mem) ControlBlock(n);
+    Element* data_ptr = reinterpret_cast<Element*>(mem + header_size + padding);
+
+    try {
+      std::uninitialized_default_construct_n(data_ptr, n);
+    } catch (...) {
+      // FIX: Explicitly destroy the ControlBlock type, not the base class.
+      cb->~ControlBlock();
+      throw;
+    }
+
+    guard.p = nullptr;
 
     local_shared_ptr<T> ret;
     ret.cb_  = cb;
