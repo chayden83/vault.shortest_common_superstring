@@ -1,3 +1,6 @@
+#include <bit>
+#include <cassert> // Added for assertions
+#include <limits>
 #include <vault/flat_map/implicit_btree_layout_policy.hpp>
 
 #ifdef LAYOUT_USE_AVX2
@@ -14,24 +17,31 @@ namespace eytzinger::detail {
       std::size_t block_idx, std::size_t child_slot, std::size_t B
   )
   {
+    assert(B >= 2 && "Block size must be at least 2");
+    assert(child_slot <= B && "Child slot index out of bounds");
+    // Overflow check (conservative)
+    assert(block_idx < (std::numeric_limits<std::size_t>::max() / (B + 1)));
     return block_idx * (B + 1) + 1 + child_slot;
   }
 
   [[nodiscard]] static std::size_t
   parent_block_index(std::size_t block_idx, std::size_t B)
   {
+    assert(B >= 2);
     return (block_idx == 0) ? 0 : (block_idx - 1) / (B + 1);
   }
 
   [[nodiscard]] static std::size_t
   which_child(std::size_t block_idx, std::size_t B)
   {
+    assert(B >= 2);
     return (block_idx == 0) ? 0 : (block_idx - 1) % (B + 1);
   }
 
   [[nodiscard]] static std::size_t
   subtree_size(std::size_t block_idx, std::size_t n, std::size_t B)
   {
+    assert(B >= 2);
     std::size_t start_idx = block_idx * B;
     if (start_idx >= n) {
       return 0;
@@ -58,6 +68,11 @@ namespace eytzinger::detail {
       }
 
       first_block = child_block_index(first_block, 0, B);
+      // Overflow check for level capacity expansion
+      assert(
+          current_level_blocks <
+          (std::numeric_limits<std::size_t>::max() / (B + 1))
+      );
       current_level_blocks *= (B + 1);
     }
     return size;
@@ -66,6 +81,7 @@ namespace eytzinger::detail {
   [[nodiscard]] static std::ptrdiff_t
   find_max_in_subtree(std::size_t start_block, std::size_t n_sz, std::size_t B)
   {
+    assert(B >= 2);
     std::size_t curr = start_block;
     while (true) {
       bool        moved = false;
@@ -107,9 +123,13 @@ namespace eytzinger::detail {
   [[nodiscard]] std::size_t
   btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::size_t B)
   {
+    assert(B >= 2);
+    assert(rank < n && "Rank out of bounds");
     std::size_t current_block = 0;
     while (true) {
       if (current_block * B >= n) {
+        // Should not happen for valid rank < n
+        assert(false && "Traversal went out of bounds");
         return n;
       }
       for (std::size_t i = 0; i < B; ++i) {
@@ -137,6 +157,7 @@ namespace eytzinger::detail {
   [[nodiscard]] std::size_t
   btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::size_t B)
   {
+    assert(B >= 2);
     if (index >= n) {
       return n;
     }
@@ -166,6 +187,7 @@ namespace eytzinger::detail {
   [[nodiscard]] std::ptrdiff_t
   btree_next_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t B)
   {
+    assert(B >= 2);
     if (i < 0 || static_cast<std::size_t>(i) >= n_sz) {
       return -1;
     }
@@ -204,12 +226,14 @@ namespace eytzinger::detail {
   [[nodiscard]] std::ptrdiff_t
   btree_prev_index(std::ptrdiff_t i, std::size_t n_sz, std::size_t B)
   {
+    assert(B >= 2);
     if (i == -1) {
       if (n_sz == 0) {
         return -1;
       }
       return find_max_in_subtree(0, n_sz, B);
     }
+    // Index validity should ideally be checked by caller, but we cast safely
     std::size_t curr       = static_cast<std::size_t>(i);
     std::size_t block      = curr / B;
     std::size_t slot       = curr % B;
@@ -257,6 +281,10 @@ namespace eytzinger::detail {
 #define IMPL_LB_64(NAME, T, CAST, CMP_INTRIN, PRE_OP)                          \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi64x(static_cast<long long>(k)));     \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -272,6 +300,10 @@ namespace eytzinger::detail {
 #define IMPL_UB_64(NAME, T, CAST, CMP_INTRIN, PRE_OP)                          \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi64x(static_cast<long long>(k)));     \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -290,6 +322,10 @@ namespace eytzinger::detail {
 #define IMPL_LB_32(NAME, T, CAST, CMP_INTRIN, PRE_OP)                          \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi32(static_cast<int>(k)));            \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -305,6 +341,10 @@ namespace eytzinger::detail {
 #define IMPL_UB_32(NAME, T, CAST, CMP_INTRIN, PRE_OP)                          \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi32(static_cast<int>(k)));            \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -323,6 +363,10 @@ namespace eytzinger::detail {
 #define IMPL_LB_16(NAME, T, CAST, CMP_INTRIN, PRE_OP)                          \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi16(static_cast<short>(k)));          \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -341,6 +385,10 @@ namespace eytzinger::detail {
 #define IMPL_UB_16(NAME, T, CAST, CMP_INTRIN, PRE_OP)                          \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi16(static_cast<short>(k)));          \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -362,6 +410,10 @@ namespace eytzinger::detail {
 #define IMPL_LB_8(NAME, T, CAST, CMP_INTRIN, PRE_OP)                           \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi8(static_cast<char>(k)));            \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -378,6 +430,10 @@ namespace eytzinger::detail {
 #define IMPL_UB_8(NAME, T, CAST, CMP_INTRIN, PRE_OP)                           \
   [[nodiscard]] std::size_t NAME(const T* b, T k)                              \
   {                                                                            \
+    assert(b != nullptr);                                                      \
+    assert(                                                                    \
+        (reinterpret_cast<uintptr_t>(b) % alignof(T) == 0) && "SIMD align"     \
+    );                                                                         \
     __m256i kv = PRE_OP(T, _mm256_set1_epi8(static_cast<char>(k)));            \
     __m256i v0 =                                                               \
         PRE_OP(T, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));    \
@@ -477,12 +533,14 @@ namespace eytzinger::detail {
       const TYPE* base, std::size_t n, TYPE key, std::size_t B                 \
   )                                                                            \
   {                                                                            \
+    assert(base != nullptr);                                                   \
     std::size_t k          = 0;                                                \
     std::size_t result_idx = n;                                                \
     while (true) {                                                             \
       std::size_t block_start = k * B;                                         \
       if (block_start >= n)                                                    \
         break;                                                                 \
+      assert(k < n && "Runaway index");                                        \
       std::size_t child_start = child_block_index(k, 0, B) * B;                \
       if (child_start < n) {                                                   \
         _mm_prefetch(                                                          \
@@ -497,7 +555,7 @@ namespace eytzinger::detail {
       } else {                                                                 \
         std::size_t i = block_start;                                           \
         for (; i < n; ++i) {                                                   \
-          if (!(base[i] < key)) { /* !comp(elem, key) */                       \
+          if (!(base[i] < key)) {                                              \
             result_idx = i;                                                    \
             k          = child_block_index(k, i - block_start, B);             \
             goto next_level;                                                   \
@@ -513,12 +571,14 @@ namespace eytzinger::detail {
       const TYPE* base, std::size_t n, TYPE key, std::size_t B                 \
   )                                                                            \
   {                                                                            \
+    assert(base != nullptr);                                                   \
     std::size_t k          = 0;                                                \
     std::size_t result_idx = n;                                                \
     while (true) {                                                             \
       std::size_t block_start = k * B;                                         \
       if (block_start >= n)                                                    \
         break;                                                                 \
+      assert(k < n && "Runaway index");                                        \
       std::size_t child_start = child_block_index(k, 0, B) * B;                \
       if (child_start < n) {                                                   \
         _mm_prefetch(                                                          \
