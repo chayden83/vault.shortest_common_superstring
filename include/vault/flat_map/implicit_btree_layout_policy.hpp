@@ -1,8 +1,9 @@
 #ifndef IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 #define IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 
+#include "concepts.hpp"
 #include <algorithm>
-#include <cassert> // Added for assertions
+#include <cassert>
 #include <concepts>
 #include <functional>
 #include <iterator>
@@ -577,6 +578,118 @@ namespace eytzinger {
 
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
+
+    // --- AMAC Batch Support ---
+
+    template <typename I, typename T, typename Comp, search_bound Bound>
+    struct search_job {
+      using ValT = std::iter_value_t<I>;
+      const ValT* base;
+      I           begin_it;
+      std::size_t n;
+      T           key;
+      Comp        comp;
+      std::size_t k = 0; // Current block index
+      std::size_t result_idx;
+
+      [[nodiscard]] search_job(I first, std::size_t size, T kv, Comp c)
+          : base(std::to_address(first))
+          , begin_it(first)
+          , n(size)
+          , key(std::move(kv))
+          , comp(c)
+          , result_idx(size)
+      {}
+
+      [[nodiscard]] const void* init()
+      {
+        if (n == 0) {
+          return nullptr;
+        }
+        // Prefetch root block (k=0)
+        return reinterpret_cast<const void*>(base);
+      }
+
+      [[nodiscard]] const void* step()
+      {
+        std::size_t block_start = k * B;
+        if (block_start >= n) {
+          return nullptr;
+        }
+
+        // Search current block (data is already loaded by init/previous step)
+        if (block_start + B <= n) {
+          // Full Block
+          std::size_t idx_in_block = [&] {
+            if constexpr (Bound == search_bound::upper) {
+              return block_searcher<ValT, Comp, B>::upper_bound(
+                base + block_start, key, comp, std::identity{});
+            } else {
+              return block_searcher<ValT, Comp, B>::lower_bound(
+                base + block_start, key, comp, std::identity{});
+            }
+          }();
+
+          if (idx_in_block < B) {
+            result_idx = block_start + idx_in_block;
+          }
+          k = detail::btree_child_block_index(k, idx_in_block, B);
+        } else {
+          // Tail Block
+          std::size_t count       = n - block_start;
+          std::size_t idx_in_tail = [&] {
+            if constexpr (Bound == search_bound::upper) {
+              return scalar_block_searcher::upper_bound_n(
+                base + block_start, count, key, comp, std::identity{});
+            } else {
+              return scalar_block_searcher::lower_bound_n(
+                base + block_start, count, key, comp, std::identity{});
+            }
+          }();
+
+          if (idx_in_tail < count) {
+            result_idx = block_start + idx_in_tail;
+            k          = detail::btree_child_block_index(k, idx_in_tail, B);
+          } else {
+            k = detail::btree_child_block_index(k, count, B);
+          }
+        }
+
+        if (k * B >= n) {
+          return nullptr; // No more children
+        }
+
+        return reinterpret_cast<const void*>(base + (k * B));
+      }
+
+      [[nodiscard]] I result() const
+      {
+        return (result_idx == n) ? (begin_it + n) : (begin_it + result_idx);
+      }
+    };
+
+    struct batch_lower_bound_fn {
+      template <typename I, typename T, typename Comp>
+      [[nodiscard]] static auto make_job(
+        I first, std::size_t n, T key, Comp comp)
+      {
+        return search_job<I, T, Comp, search_bound::lower>(
+          first, n, std::move(key), comp);
+      }
+    };
+
+    struct batch_upper_bound_fn {
+      template <typename I, typename T, typename Comp>
+      [[nodiscard]] static auto make_job(
+        I first, std::size_t n, T key, Comp comp)
+      {
+        return search_job<I, T, Comp, search_bound::upper>(
+          first, n, std::move(key), comp);
+      }
+    };
+
+    static constexpr inline batch_lower_bound_fn batch_lower_bound{};
+    static constexpr inline batch_upper_bound_fn batch_upper_bound{};
   };
 
 } // namespace eytzinger

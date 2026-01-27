@@ -55,9 +55,9 @@ template <> struct RandomDataGenerator<std::string> {
     std::mt19937_64 rng(42);
     // Characters to use in random strings (alphanumeric)
     static const char charset[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
+      "0123456789"
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz";
     std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
 
     std::set<std::string> unique_values;
@@ -153,27 +153,23 @@ using Eytzinger           = eytzinger::eytzinger_layout_policy<6>;
 using ImplicitBTree_Tiny  = eytzinger::implicit_btree_layout_policy<2>;
 using ImplicitBTree_Large = eytzinger::implicit_btree_layout_policy<8>;
 
-TEMPLATE_TEST_CASE(
-    "Layout Policy: Index Mapping",
-    "[layout][mapping]",
-    Sorted,
-    Eytzinger,
-    ImplicitBTree_Tiny,
-    ImplicitBTree_Large
-)
+TEMPLATE_TEST_CASE("Layout Policy: Index Mapping",
+  "[layout][mapping]",
+  Sorted,
+  Eytzinger,
+  ImplicitBTree_Tiny,
+  ImplicitBTree_Large)
 {
   auto n = GENERATE(0, 1, 2, 3, 7, 8, 15, 16, 20, 31, 32, 100);
   test_layout_permutations<TestType>(n);
 }
 
-TEMPLATE_TEST_CASE(
-    "Layout Policy: Traversal",
-    "[layout][traversal]",
-    Sorted,
-    Eytzinger,
-    ImplicitBTree_Tiny,
-    ImplicitBTree_Large
-)
+TEMPLATE_TEST_CASE("Layout Policy: Traversal",
+  "[layout][traversal]",
+  Sorted,
+  Eytzinger,
+  ImplicitBTree_Tiny,
+  ImplicitBTree_Large)
 {
   auto n = GENERATE(1, 2, 3, 7, 8, 15, 16, 20, 64);
   test_traversal_logic<TestType>(n);
@@ -278,14 +274,9 @@ template <typename MapType> void test_map_random(size_t n)
   // 5. Verify that iterating the layout map produces the keys in
   // sorted order.
   CHECK(
-      std::ranges::equal(
-          keys,
-          map,
-          {},
-          {},
-          [](auto const& p) -> decltype(auto) { return p.first; }
-      )
-  );
+    std::ranges::equal(keys, map, {}, {}, [](auto const& p) -> decltype(auto) {
+      return p.first;
+    }));
 }
 
 // --- Test Case Generation ---
@@ -293,22 +284,20 @@ template <typename MapType> void test_map_random(size_t n)
 // Helper macro to define all 3 layouts for a specific key type
 #define LAYOUT_MAPS_FOR_TYPE(KeyType)                                          \
   (eytzinger::sorted_map<KeyType, int>),                                       \
-      (eytzinger::eytzinger_map<KeyType, int>),                                \
-      (eytzinger::btree_map<KeyType, int>)
+    (eytzinger::eytzinger_map<KeyType, int>),                                  \
+    (eytzinger::btree_map<KeyType, int>)
 
 // Test all layouts with all requested integer types
-TEMPLATE_TEST_CASE(
-    "Layout Map: Random Keys Integration",
-    "[map][random]",
-    LAYOUT_MAPS_FOR_TYPE(int8_t),
-    LAYOUT_MAPS_FOR_TYPE(uint8_t),
-    LAYOUT_MAPS_FOR_TYPE(int16_t),
-    LAYOUT_MAPS_FOR_TYPE(uint16_t),
-    LAYOUT_MAPS_FOR_TYPE(int32_t),
-    LAYOUT_MAPS_FOR_TYPE(uint32_t),
-    LAYOUT_MAPS_FOR_TYPE(int64_t),
-    LAYOUT_MAPS_FOR_TYPE(uint64_t)
-)
+TEMPLATE_TEST_CASE("Layout Map: Random Keys Integration",
+  "[map][random]",
+  LAYOUT_MAPS_FOR_TYPE(int8_t),
+  LAYOUT_MAPS_FOR_TYPE(uint8_t),
+  LAYOUT_MAPS_FOR_TYPE(int16_t),
+  LAYOUT_MAPS_FOR_TYPE(uint16_t),
+  LAYOUT_MAPS_FOR_TYPE(int32_t),
+  LAYOUT_MAPS_FOR_TYPE(uint32_t),
+  LAYOUT_MAPS_FOR_TYPE(int64_t),
+  LAYOUT_MAPS_FOR_TYPE(uint64_t))
 {
   // Test with various sizes, including edge cases
   auto n = GENERATE(0, 1, 16, 64, 100);
@@ -316,11 +305,9 @@ TEMPLATE_TEST_CASE(
 }
 
 // Separate Test Case for Strings (larger sizes)
-TEMPLATE_TEST_CASE(
-    "Layout Map: Random String Keys",
-    "[map][string]",
-    LAYOUT_MAPS_FOR_TYPE(std::string)
-)
+TEMPLATE_TEST_CASE("Layout Map: Random String Keys",
+  "[map][string]",
+  LAYOUT_MAPS_FOR_TYPE(std::string))
 {
   // Test with various sizes
   auto n = GENERATE(0, 1, 16, 64, 100);
@@ -331,47 +318,42 @@ TEMPLATE_TEST_CASE(
 
 // 1. Fully Deque-based Map (Sorted Layout Only)
 template <typename K, typename V>
-using DequeSortedMap = eytzinger::layout_map<
-    K,
-    V,
-    std::less<K>,
-    eytzinger::sorted_layout_policy,
-    std::allocator<std::pair<const K, V>>,
-    std::deque, // Keys: Deque
-    std::deque  // Values: Deque
-    >;
+using DequeSortedMap = eytzinger::layout_map<K,
+  V,
+  std::less<K>,
+  eytzinger::sorted_layout_policy,
+  std::allocator<std::pair<const K, V>>,
+  std::deque, // Keys: Deque
+  std::deque  // Values: Deque
+  >;
 
 // 2. Hybrid Map: Vector Keys (Contiguous) + Deque Values (Non-contiguous)
 // This is valid for Eytzinger and BTree because they only search Keys.
 template <typename K, typename V>
-using DequeValueEytzingerMap = eytzinger::layout_map<
-    K,
-    V,
-    std::less<K>,
-    eytzinger::eytzinger_layout_policy<6>,
-    std::allocator<std::pair<const K, V>>,
-    std::vector, // Keys: MUST be Vector for Eytzinger
-    std::deque   // Values: Can be Deque
-    >;
+using DequeValueEytzingerMap = eytzinger::layout_map<K,
+  V,
+  std::less<K>,
+  eytzinger::eytzinger_layout_policy<6>,
+  std::allocator<std::pair<const K, V>>,
+  std::vector, // Keys: MUST be Vector for Eytzinger
+  std::deque   // Values: Can be Deque
+  >;
 
 template <typename K, typename V>
-using DequeValueBTreeMap = eytzinger::layout_map<
-    K,
-    V,
-    std::less<K>,
-    eytzinger::implicit_btree_layout_policy<8>,
-    std::allocator<std::pair<const K, V>>,
-    std::vector, // Keys: MUST be Vector for BTree
-    std::deque   // Values: Can be Deque
-    >;
+using DequeValueBTreeMap = eytzinger::layout_map<K,
+  V,
+  std::less<K>,
+  eytzinger::implicit_btree_layout_policy<8>,
+  std::allocator<std::pair<const K, V>>,
+  std::vector, // Keys: MUST be Vector for BTree
+  std::deque   // Values: Can be Deque
+  >;
 
-TEMPLATE_TEST_CASE(
-    "Layout Map: Deque Storage Configurations",
-    "[map][deque]",
-    (DequeSortedMap<int, int>),
-    (DequeValueEytzingerMap<int, int>),
-    (DequeValueBTreeMap<int, int>)
-)
+TEMPLATE_TEST_CASE("Layout Map: Deque Storage Configurations",
+  "[map][deque]",
+  (DequeSortedMap<int, int>),
+  (DequeValueEytzingerMap<int, int>),
+  (DequeValueBTreeMap<int, int>))
 {
   auto n = GENERATE(0, 1, 16, 100);
   test_map_random<TestType>(n);
@@ -380,26 +362,23 @@ TEMPLATE_TEST_CASE(
 // --- Concept Guardrail Tests ---
 
 // Helper to check if a specific configuration is valid
-template <
-    typename K,
-    typename V,
-    typename Policy,
-    template <typename, typename> typename KeyCont,
-    template <typename, typename> typename ValueCont = std::vector>
+template <typename K,
+  typename V,
+  typename Policy,
+  template <typename, typename> typename KeyCont,
+  template <typename, typename> typename ValueCont = std::vector>
 concept CanInstantiateMap = requires {
-  typename eytzinger::layout_map<
-      K,
-      V,
-      std::less<K>,
-      Policy,
-      std::allocator<std::pair<const K, V>>,
-      KeyCont,
-      ValueCont>;
+  typename eytzinger::layout_map<K,
+    V,
+    std::less<K>,
+    Policy,
+    std::allocator<std::pair<const K, V>>,
+    KeyCont,
+    ValueCont>;
 };
 
 TEST_CASE(
-    "Layout Policy: Container Compatibility Enforcement", "[layout][concepts]"
-)
+  "Layout Policy: Container Compatibility Enforcement", "[layout][concepts]")
 {
   using Eytzinger = eytzinger::eytzinger_layout_policy<6>;
   using BTree     = eytzinger::implicit_btree_layout_policy<8>;
@@ -424,4 +403,108 @@ TEST_CASE(
   // iterators)
   CHECK(CanInstantiateMap<int, int, Sorted, std::deque>);
   CHECK(CanInstantiateMap<int, int, Sorted, std::deque, std::deque>);
+}
+
+// --- Batch Lookup Tests ---
+
+template <typename MapType>
+void test_batch_operations(size_t n_haystack, size_t n_needles)
+{
+  using KeyT = typename MapType::key_type;
+  using ValT = typename MapType::mapped_type;
+
+  // 1. Prepare Haystack (The Map)
+  std::vector<KeyT> keys =
+    RandomDataGenerator<KeyT>::generate_sorted_unique(n_haystack);
+
+  // Construct pairs
+  std::vector<std::pair<KeyT, ValT>> input;
+  input.reserve(keys.size());
+  for (const auto& k : keys) {
+    if constexpr (std::is_same_v<KeyT, std::string>) {
+      input.emplace_back(k, 1);
+    } else {
+      input.emplace_back(k, static_cast<ValT>(k));
+    }
+  }
+
+  MapType map(input.begin(), input.end());
+
+  // 2. Prepare Needles (Search Keys)
+  std::vector<KeyT> needles =
+    RandomDataGenerator<KeyT>::generate_sorted_unique(n_needles);
+
+  if (!keys.empty()) {
+    needles.push_back(keys.front());
+    needles.push_back(keys.back());
+    needles.push_back(keys[keys.size() / 2]);
+
+    if constexpr (std::is_integral_v<KeyT>) {
+      if (keys.front() > std::numeric_limits<KeyT>::min()) {
+        needles.push_back(keys.front() - 1);
+      }
+      if (keys.back() < std::numeric_limits<KeyT>::max()) {
+        needles.push_back(keys.back() + 1);
+      }
+    }
+  }
+
+  std::mt19937 g(42);
+  std::shuffle(needles.begin(), needles.end(), g);
+
+  // Define result type specifically to match the iterator const-ness
+  using NeedleIter = typename std::vector<KeyT>::iterator;
+  using ResultType = std::pair<NeedleIter, typename MapType::const_iterator>;
+
+  // 3. Test Batch Lower Bound
+  {
+    std::vector<ResultType> results;
+    results.reserve(needles.size());
+
+    map.template batch_lower_bound<16>(needles, std::back_inserter(results));
+
+    CHECK(results.size() == needles.size());
+
+    for (auto& [needle_it, result_it] : results) {
+      CHECK(needle_it >= needles.begin());
+      CHECK(needle_it < needles.end());
+
+      auto expected = map.lower_bound(*needle_it);
+      CHECK(result_it == expected);
+    }
+  }
+
+  // 4. Test Batch Upper Bound
+  {
+    std::vector<ResultType> results;
+    results.reserve(needles.size());
+
+    map.template batch_upper_bound<16>(needles, std::back_inserter(results));
+
+    CHECK(results.size() == needles.size());
+
+    for (auto& [needle_it, result_it] : results) {
+      auto expected = map.upper_bound(*needle_it);
+      CHECK(result_it == expected);
+    }
+  }
+
+  // 5. Test Batch Find
+  {
+    std::vector<ResultType> results;
+    results.reserve(needles.size());
+
+    map.template batch_find<16>(needles, std::back_inserter(results));
+
+    CHECK(results.size() == needles.size());
+
+    for (auto& [needle_it, result_it] : results) {
+      auto expected = map.find(*needle_it);
+      CHECK(result_it == expected);
+
+      if (result_it != map.end()) {
+        CHECK(result_it->first == *needle_it);
+      }
+    }
+  }
 }

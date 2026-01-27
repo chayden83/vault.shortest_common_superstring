@@ -1,9 +1,10 @@
 #ifndef EYTZINGER_LAYOUT_POLICY_HPP
 #define EYTZINGER_LAYOUT_POLICY_HPP
 
+#include "concepts.hpp"
 #include <algorithm>
 #include <bit>
-#include <cassert> // Added for assertions
+#include <cassert>
 #include <functional>
 #include <iterator>
 #include <ranges>
@@ -30,13 +31,12 @@ namespace eytzinger {
     };
 
   private:
-    // Robust calculation of subtree size rooted at i (0-based index)
     [[nodiscard]] static constexpr std::size_t count_nodes(
       std::size_t i, std::size_t n) noexcept
     {
       std::size_t size = 0;
-      std::size_t k = i + 1; // Convert to 1-based index for easier level math
-      std::size_t p = 1;     // Capacity of current level
+      std::size_t k    = i + 1;
+      std::size_t p    = 1;
 
       while (k <= n) {
         size += std::min(p, n - k + 1);
@@ -60,12 +60,9 @@ namespace eytzinger {
         std::size_t rank, std::size_t n) noexcept
       {
         assert(rank < n && "Rank out of bounds");
-
         std::size_t i = 0;
         while (true) {
-          assert(
-            i < n && "Traversal index out of bounds - possible infinite loop");
-
+          assert(i < n && "Traversal index out of bounds");
           std::size_t l_sz = count_nodes((i << 1) + 1, n);
           if (rank == l_sz) {
             return i;
@@ -85,7 +82,6 @@ namespace eytzinger {
         std::size_t i, std::size_t n) noexcept
       {
         assert(i < n && "Index out of bounds");
-
         std::size_t r = count_nodes((i << 1) + 1, n);
         while (i > 0) {
           if (i % 2 == 0) {
@@ -103,10 +99,6 @@ namespace eytzinger {
 
     struct permute_fn {
     private:
-      // Recursive In-Order Fill
-      // Visits indices k in the order: Left Subtree -> Root -> Right Subtree
-      // Since input is sorted, we simply pull the next element from source_iter
-      // at each visit.
       template <typename SrcIter, typename TempVec>
       static constexpr void fill_in_order(
         TempVec& temp, SrcIter& source_iter, std::size_t k, std::size_t n)
@@ -114,16 +106,10 @@ namespace eytzinger {
         if (k >= n) {
           return;
         }
-
-        // 1. Recurse Left (2*k + 1)
         fill_in_order(temp, source_iter, 2 * k + 1, n);
-
-        // 2. Visit Root (k)
-        assert(k < temp.size() && "Permutation index out of bounds");
+        assert(k < temp.size());
         temp[k] = std::move(*source_iter);
         ++source_iter;
-
-        // 3. Recurse Right (2*k + 2)
         fill_in_order(temp, source_iter, 2 * k + 2, n);
       }
 
@@ -135,21 +121,13 @@ namespace eytzinger {
         if (n <= 1) {
           return;
         }
-
-        // Use iter_value_t to handle proxy iterators correctly (strips
-        // references)
         using ValueT = std::iter_value_t<I>;
-
         std::vector<ValueT> temp;
         temp.resize(n);
-
         I current_source = first;
         fill_in_order(temp, current_source, 0, n);
-
-        assert(
-          std::distance(first, current_source) == static_cast<std::ptrdiff_t>(n)
-          && "Not all elements were consumed during permutation");
-
+        assert(std::distance(first, current_source)
+          == static_cast<std::ptrdiff_t>(n));
         std::ranges::move(temp, first);
       }
 
@@ -169,6 +147,7 @@ namespace eytzinger {
         if (n >= size) {
           throw std::out_of_range("eytzinger index out of range");
         }
+        assert(n < size);
         return *(first + sorted_rank_to_index(n, size));
       }
 
@@ -185,9 +164,7 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz)
-          && "Iterator index out of bounds");
-
+        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
         std::ptrdiff_t n           = static_cast<std::ptrdiff_t>(n_sz);
         auto           right_child = (i << 1) + 2;
         if (right_child < n) {
@@ -211,9 +188,7 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz)
-          && "Iterator index out of bounds");
-
+        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
         if (i == -1) {
           if (n == 0) {
@@ -329,12 +304,94 @@ namespace eytzinger {
       }
     };
 
-    static constexpr inline permute_fn        permute{};
-    static constexpr inline get_nth_sorted_fn get_nth_sorted{};
-    static constexpr inline next_index_fn     next_index{};
-    static constexpr inline prev_index_fn     prev_index{};
-    static constexpr inline lower_bound_fn    lower_bound{};
-    static constexpr inline upper_bound_fn    upper_bound{};
+    // --- AMAC Batch Support ---
+
+    template <typename I, typename T, typename Comp, search_bound Bound>
+    struct search_job {
+      using ValT = std::iter_value_t<I>;
+      const ValT* base;
+      I           begin_it;
+      std::size_t n;
+      T           key;
+      Comp        comp;
+      std::size_t i = 0;
+
+      [[nodiscard]] search_job(I first, std::size_t size, T k, Comp c)
+          : base(std::to_address(first))
+          , begin_it(first)
+          , n(size)
+          , key(std::move(k))
+          , comp(c)
+      {}
+
+      [[nodiscard]] const void* init()
+      {
+        if (n == 0) {
+          return nullptr;
+        }
+        // Prefetch first element (root)
+        return reinterpret_cast<const void*>(base);
+      }
+
+      [[nodiscard]] const void* step()
+      {
+        // Use IIFE for const-initialization
+        bool const go_right = [&] {
+          if constexpr (Bound == search_bound::upper) {
+            return !std::invoke(comp, key, base[i]);
+          } else {
+            return std::invoke(comp, base[i], key);
+          }
+        }();
+
+        i = (i << 1) + 1 + static_cast<std::size_t>(go_right);
+
+        if (i >= n) {
+          return nullptr; // Done
+        }
+
+        // Calculate prefetch address for NEXT iteration
+        const std::size_t future_i = ((i + 1) << L) - 1;
+        return reinterpret_cast<const void*>(base + future_i);
+      }
+
+      [[nodiscard]] I result() const
+      {
+        std::size_t result_idx = restore_lower_bound_index(i);
+        return (result_idx == static_cast<std::size_t>(-1))
+          ? (begin_it + n)
+          : (begin_it + result_idx);
+      }
+    };
+
+    struct batch_lower_bound_fn {
+      template <typename I, typename T, typename Comp>
+      [[nodiscard]] static auto make_job(
+        I first, std::size_t n, T key, Comp comp)
+      {
+        return search_job<I, T, Comp, search_bound::lower>(
+          first, n, std::move(key), comp);
+      }
+    };
+
+    struct batch_upper_bound_fn {
+      template <typename I, typename T, typename Comp>
+      [[nodiscard]] static auto make_job(
+        I first, std::size_t n, T key, Comp comp)
+      {
+        return search_job<I, T, Comp, search_bound::upper>(
+          first, n, std::move(key), comp);
+      }
+    };
+
+    static constexpr inline permute_fn           permute{};
+    static constexpr inline get_nth_sorted_fn    get_nth_sorted{};
+    static constexpr inline next_index_fn        next_index{};
+    static constexpr inline prev_index_fn        prev_index{};
+    static constexpr inline lower_bound_fn       lower_bound{};
+    static constexpr inline upper_bound_fn       upper_bound{};
+    static constexpr inline batch_lower_bound_fn batch_lower_bound{};
+    static constexpr inline batch_upper_bound_fn batch_upper_bound{};
   };
 
 } // namespace eytzinger

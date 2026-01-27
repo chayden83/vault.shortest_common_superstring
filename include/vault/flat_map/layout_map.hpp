@@ -69,13 +69,11 @@ namespace eytzinger {
     [[no_unique_address]] Compare compare_;
 
   public:
-    // --- Allocator Access ---
     [[nodiscard]] constexpr allocator_type get_allocator() const noexcept
     {
       return allocator_type(keys_.get_allocator());
     }
 
-    // --- Constructors ---
     [[nodiscard]] constexpr layout_map()
         : layout_map(Compare(), Allocator())
     {}
@@ -193,12 +191,15 @@ namespace eytzinger {
       assert(keys_.size() == values_.size());
     }
 
-    [[nodiscard]] constexpr layout_map(std::in_place_t tag,
-      key_storage_type&&                               k_cont,
-      value_storage_type&&                             v_cont,
-      const Allocator&                                 alloc)
-        : layout_map(
-            tag, std::move(k_cont), std::move(v_cont), Compare(), alloc)
+    [[nodiscard]] constexpr layout_map(std::in_place_t,
+      key_storage_type&&   k_cont,
+      value_storage_type&& v_cont,
+      const Allocator&     alloc)
+        : layout_map(std::in_place,
+            std::move(k_cont),
+            std::move(v_cont),
+            Compare(),
+            alloc)
     {}
 
     constexpr layout_map& operator=(const layout_map&)     = default;
@@ -211,7 +212,6 @@ namespace eytzinger {
       return *this;
     }
 
-    // --- Access ---
     template <std::integral I>
     [[nodiscard]] constexpr reference operator[](unordered_index<I> idx) const
     {
@@ -271,7 +271,6 @@ namespace eytzinger {
         Iter(values_, -1));
     }
 
-    // --- Standard Lookup ---
     template <typename K0 = key_type>
     [[nodiscard]] constexpr const_iterator lower_bound(
       const K0& key) const noexcept
@@ -348,6 +347,16 @@ namespace eytzinger {
 
     // --- AMAC Batch Interface ---
 
+    // Generic Job Adapter to deduce types automatically
+    template <typename Job, typename NeedleIter> struct batch_job_adapter {
+      Job        impl;
+      NeedleIter needle_it;
+
+      const void* init() { return impl.init(); }
+
+      const void* step() { return impl.step(); }
+    };
+
     template <uint8_t          BatchSize = 16,
       std::ranges::input_range Needles,
       typename OutputIt>
@@ -364,31 +373,20 @@ namespace eytzinger {
         return;
       }
 
-      struct JobAdapter {
-        decltype(policy_type::batch_lower_bound.make_job(keys_.begin(),
-          keys_.size(),
-          *std::ranges::begin(needles),
-          compare_))                           impl;
-        std::ranges::iterator_t<const Needles> needle_it;
-
-        const void* init() { return impl.init(); }
-
-        const void* step() { return impl.step(); }
-      };
-
       auto factory = [this](const auto&, auto needle_it) {
-        return JobAdapter{policy_type::batch_lower_bound.make_job(
-                            keys_.begin(), keys_.size(), *needle_it, compare_),
-          needle_it};
+        auto job = policy_type::batch_lower_bound.make_job(
+          keys_.cbegin(), keys_.size(), *needle_it, compare_);
+        return batch_job_adapter<decltype(job), decltype(needle_it)>{
+          std::move(job), needle_it};
       };
 
-      auto reporter = [this, &output](JobAdapter&& job) {
+      auto reporter = [this, &output](auto&& job) {
         auto           key_it = job.impl.result();
         const_iterator result_it;
         if (key_it == keys_.end()) {
           result_it = end();
         } else {
-          auto idx  = std::distance(keys_.begin(), key_it);
+          auto idx  = std::distance(keys_.cbegin(), key_it);
           result_it = const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
         }
         *output++ = {job.needle_it, result_it};
@@ -413,31 +411,20 @@ namespace eytzinger {
         return;
       }
 
-      struct JobAdapter {
-        decltype(policy_type::batch_upper_bound.make_job(keys_.begin(),
-          keys_.size(),
-          *std::ranges::begin(needles),
-          compare_))                           impl;
-        std::ranges::iterator_t<const Needles> needle_it;
-
-        const void* init() { return impl.init(); }
-
-        const void* step() { return impl.step(); }
-      };
-
       auto factory = [this](const auto&, auto needle_it) {
-        return JobAdapter{policy_type::batch_upper_bound.make_job(
-                            keys_.begin(), keys_.size(), *needle_it, compare_),
-          needle_it};
+        auto job = policy_type::batch_upper_bound.make_job(
+          keys_.cbegin(), keys_.size(), *needle_it, compare_);
+        return batch_job_adapter<decltype(job), decltype(needle_it)>{
+          std::move(job), needle_it};
       };
 
-      auto reporter = [this, &output](JobAdapter&& job) {
+      auto reporter = [this, &output](auto&& job) {
         auto           key_it = job.impl.result();
         const_iterator result_it;
         if (key_it == keys_.end()) {
           result_it = end();
         } else {
-          auto idx  = std::distance(keys_.begin(), key_it);
+          auto idx  = std::distance(keys_.cbegin(), key_it);
           result_it = const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
         }
         *output++ = {job.needle_it, result_it};
@@ -462,34 +449,20 @@ namespace eytzinger {
         return;
       }
 
-      struct JobAdapter {
-        decltype(policy_type::batch_lower_bound.make_job(keys_.begin(),
-          keys_.size(),
-          *std::ranges::begin(needles),
-          compare_))                           impl;
-        std::ranges::iterator_t<const Needles> needle_it;
-
-        const void* init() { return impl.init(); }
-
-        const void* step() { return impl.step(); }
-      };
-
       auto factory = [this](const auto&, auto needle_it) {
-        return JobAdapter{policy_type::batch_lower_bound.make_job(
-                            keys_.begin(), keys_.size(), *needle_it, compare_),
-          needle_it};
+        auto job = policy_type::batch_lower_bound.make_job(
+          keys_.cbegin(), keys_.size(), *needle_it, compare_);
+        return batch_job_adapter<decltype(job), decltype(needle_it)>{
+          std::move(job), needle_it};
       };
 
-      auto reporter = [this, &output](JobAdapter&& job) {
+      auto reporter = [this, &output](auto&& job) {
         auto           key_it    = job.impl.result();
         const_iterator result_it = end();
 
         if (key_it != keys_.end()) {
-          // We found a LB. Check for equivalence: !comp(key, val).
-          // LB ensures !comp(val, key) is false (val >= key).
-          // If !comp(key, val) is also true, then val == key.
           if (!compare_(*job.needle_it, *key_it)) {
-            auto idx  = std::distance(keys_.begin(), key_it);
+            auto idx  = std::distance(keys_.cbegin(), key_it);
             result_it = const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
           }
         }
