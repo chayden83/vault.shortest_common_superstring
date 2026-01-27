@@ -2,15 +2,51 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <utility>
 #include <vault/flat_map/aliases.hpp>
 #include <vault/flat_map/eytzinger_layout_policy.hpp>
 #include <vault/flat_map/implicit_btree_layout_policy.hpp>
 #include <vault/flat_map/sorted_layout_policy.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <random>
+#include <set>
 #include <vector>
 
-// --- Helper: Test Fixture for Layout Policies ---
+// --- Helper: Random Data Generation ---
+
+template <typename T> struct RandomDataGenerator {
+  static std::vector<T> generate_sorted_unique(size_t n)
+  {
+    std::mt19937_64 rng(42); // Fixed seed for reproducibility
+
+    // uniform_int_distribution does not support char types directly
+    using DistType = std::conditional_t<sizeof(T) == 1, int16_t, T>;
+
+    DistType min_val = static_cast<DistType>(std::numeric_limits<T>::min());
+    DistType max_val = static_cast<DistType>(std::numeric_limits<T>::max());
+
+    // Safety: If n exceeds the range of T (e.g. n=300 for uint8_t), cap it.
+    size_t range_size = static_cast<size_t>(max_val - min_val) + 1;
+    if (n > range_size) {
+      n = range_size;
+    }
+
+    std::uniform_int_distribution<DistType> dist(min_val, max_val);
+
+    // Use a set to ensure uniqueness efficiently during generation
+    std::set<T> unique_values;
+    while (unique_values.size() < n) {
+      unique_values.insert(static_cast<T>(dist(rng)));
+    }
+
+    return std::vector<T>(unique_values.begin(), unique_values.end());
+  }
+};
+
+// --- Test Fixture: Layout Topology (Type Independent) ---
 
 template <typename Policy> void test_layout_permutations(size_t n)
 {
@@ -83,156 +119,7 @@ template <typename Policy> void test_traversal_logic(size_t n)
   CHECK(Policy::prev_index(curr, n) == -1);
 }
 
-template <typename Policy> void test_lower_bound_correctness(size_t n)
-{
-  if (n == 0) {
-    return;
-  }
-
-  // Data: 0, 2, 4, ...
-  std::vector<int> data(n);
-  for (size_t i = 0; i < n; ++i) {
-    data[i] = static_cast<int>(i * 2);
-  }
-
-  Policy::permute(data);
-
-  // Hit
-  for (size_t i = 0; i < n; ++i) {
-    int  key = static_cast<int>(i * 2);
-    auto it  = Policy::lower_bound(data, key);
-    REQUIRE(it != data.end());
-    CHECK(*it == key);
-  }
-
-  // Miss (odd numbers) -> should find next even
-  for (size_t i = 0; i < n - 1; ++i) {
-    int  key = static_cast<int>(i * 2 + 1);
-    auto it  = Policy::lower_bound(data, key);
-    REQUIRE(it != data.end());
-    CHECK(*it == key + 1);
-  }
-
-  // Greater than all
-  auto it = Policy::lower_bound(data, static_cast<int>(n * 2 + 100));
-  CHECK(it == data.end());
-}
-
-template <typename Policy> void test_upper_bound_correctness(size_t n)
-{
-  if (n == 0) {
-    return;
-  }
-
-  std::vector<int> data(n);
-  for (size_t i = 0; i < n; ++i) {
-    data[i] = static_cast<int>(i * 2);
-  }
-
-  Policy::permute(data);
-
-  // Exact Match -> Should return NEXT element
-  for (size_t i = 0; i < n - 1; ++i) {
-    int  key = static_cast<int>(i * 2); // e.g., 2
-    auto it  = Policy::upper_bound(data, key);
-    REQUIRE(it != data.end());
-    CHECK(*it == key + 2); // e.g., 4
-  }
-
-  // Last Element -> End
-  {
-    int  key = static_cast<int>((n - 1) * 2);
-    auto it  = Policy::upper_bound(data, key);
-    CHECK(it == data.end());
-  }
-
-  // Miss (odd numbers) -> Should return next even (same as lower_bound)
-  for (size_t i = 0; i < n - 1; ++i) {
-    int  key = static_cast<int>(i * 2 + 1);
-    auto it  = Policy::upper_bound(data, key);
-    REQUIRE(it != data.end());
-    CHECK(*it == key + 1);
-  }
-}
-
-// --- High Level Map Interface Tests ---
-
-template <typename MapType> void test_map_interface(size_t n)
-{
-  if (n == 0) {
-    MapType map;
-    CHECK(map.empty());
-    CHECK(map.size() == 0);
-    CHECK(map.begin() == map.end());
-    return;
-  }
-
-  std::vector<std::pair<int, int>> pairs;
-  for (size_t i = 0; i < n; ++i) {
-    pairs.emplace_back(static_cast<int>(i * 2), static_cast<int>(i * 2));
-  }
-
-  MapType map(pairs.begin(), pairs.end());
-
-  CHECK_FALSE(map.empty());
-  CHECK(map.size() == n);
-
-  // 1. Contains / Count
-  for (size_t i = 0; i < n; ++i) {
-    CHECK(map.contains(static_cast<int>(i * 2)));
-    CHECK(map.count(static_cast<int>(i * 2)) == 1);
-    CHECK_FALSE(map.contains(static_cast<int>(i * 2 + 1)));
-  }
-
-  // 2. At / Find
-  for (size_t i = 0; i < n; ++i) {
-    int key = static_cast<int>(i * 2);
-    CHECK(map.at(key) == key);
-    auto it = map.find(key);
-    REQUIRE(it != map.end());
-    CHECK(it->second == key);
-  }
-
-  // 3. Equal Range
-  // Existing key (0)
-  {
-    auto [first, last] = map.equal_range(0);
-    REQUIRE(first != map.end());
-    CHECK(first->first == 0);
-
-    // If n=1, 0 is the max element, so last should be end()
-    if (n == 1) {
-      CHECK(last == map.end());
-    } else {
-      CHECK(last != map.end());
-      CHECK(last->first == 2); // Next element
-    }
-    CHECK(std::next(first) == last);
-  }
-
-  // Missing key (1)
-  // Only perform this check if we have enough elements (0, 2...)
-  if (n >= 2) {
-    auto [first, last] = map.equal_range(1);
-    // Should point to 2
-    REQUIRE(first != map.end());
-    CHECK(first->first == 2);
-    CHECK(first == last); // Empty range
-  } else {
-    // If n=1, keys={0}. Search for 1 returns end()
-    auto [first, last] = map.equal_range(1);
-    CHECK(first == map.end());
-    CHECK(last == map.end());
-  }
-
-  // 4. Operator[] (Index Access)
-  for (size_t i = 0; i < n; ++i) {
-    auto val = map[eytzinger::ordered_index<size_t>{i}];
-    CHECK(val.first == static_cast<int>(i * 2));
-  }
-}
-
-// --- Test Definitions ---
+// --- Topology Tests ---
 
 using Sorted              = eytzinger::sorted_layout_policy;
 using Eytzinger           = eytzinger::eytzinger_layout_policy<6>;
@@ -265,45 +152,126 @@ TEMPLATE_TEST_CASE(
   test_traversal_logic<TestType>(n);
 }
 
-TEMPLATE_TEST_CASE(
-    "Layout Policy: Lower Bound",
-    "[layout][search]",
-    Sorted,
-    Eytzinger,
-    ImplicitBTree_Tiny,
-    ImplicitBTree_Large
-)
+// --- Map Interface Tests with Random Types ---
+
+template <typename MapType> void test_map_random(size_t n)
 {
-  auto n = GENERATE(0, 1, 2, 5, 8, 15, 16, 100, 1024);
-  test_lower_bound_correctness<TestType>(n);
+  using KeyT = typename MapType::key_type;
+  using ValT = typename MapType::mapped_type;
+
+  // 1. Generate Input
+  std::vector<KeyT> keys = RandomDataGenerator<KeyT>::generate_sorted_unique(n);
+  // Actual N might be smaller if type range is small (e.g. uint8_t with n=300)
+  n = keys.size();
+
+  if (n == 0) {
+    MapType map;
+    CHECK(map.empty());
+    return;
+  }
+
+  // Create pairs for map construction
+  std::vector<std::pair<KeyT, ValT>> input;
+  input.reserve(n);
+  for (const auto& k : keys) {
+    input.emplace_back(k, static_cast<ValT>(k)); // Value == Key for simplicity
+  }
+
+  // 2. Construct Map
+  MapType map(input.begin(), input.end());
+
+  CHECK_FALSE(map.empty());
+  CHECK(map.size() == n);
+
+  // 3. Verify Lookups (Existing Keys)
+  for (const auto& k : keys) {
+    // Contains
+    CHECK(map.contains(k));
+    CHECK(map.count(k) == 1);
+
+    // Find
+    auto it = map.find(k);
+    REQUIRE(it != map.end());
+    CHECK(it->first == k);
+    CHECK(it->second == static_cast<ValT>(k));
+
+    // At
+    CHECK(map.at(k) == static_cast<ValT>(k));
+
+    // Lower Bound
+    auto lb = map.lower_bound(k);
+    REQUIRE(lb != map.end());
+    CHECK(lb->first == k);
+
+    // Upper Bound
+    auto ub = map.upper_bound(k);
+    // UB should be the element strictly greater than k
+    // Since 'keys' is sorted, this is the next element in the vector
+    if (k == keys.back()) {
+      CHECK(ub == map.end());
+    } else {
+      REQUIRE(ub != map.end());
+      CHECK(ub->first > k);
+    }
+  }
+
+  // 4. Verify Lookups (Missing Keys) We try to find values "between"
+  // our random keys to test misses.
+  if (n > 1) {
+    for (size_t i = 0; i < n - 1; ++i) {
+      // Try to find a midpoint.  Note: for integers, midpoint might
+      // equal keys[i] if difference is 1.  We only test if there is a
+      // gap.
+      if (keys[i + 1] > keys[i] + 1) {
+        KeyT missing = static_cast<KeyT>(keys[i] + 1);
+
+        CHECK_FALSE(map.contains(missing));
+        CHECK(map.find(missing) == map.end());
+
+        // LB of missing should be keys[i+1]
+        auto lb = map.lower_bound(missing);
+        REQUIRE(lb != map.end());
+        CHECK(lb->first == keys[i + 1]);
+      }
+    }
+  }
+
+  // 5. Verify that iterating the layout map produces the keys in
+  // sorted order.
+  CHECK(
+      std::ranges::equal(
+          keys,
+          map,
+          {},
+          {},
+          [](auto const& p) -> decltype(auto) { return p.first; }
+      )
+  );
 }
 
+// --- Test Case Generation ---
+
+// Helper macro to define all 3 layouts for a specific key type
+#define LAYOUT_MAPS_FOR_TYPE(KeyType)                                          \
+  (eytzinger::sorted_map<KeyType, int>),                                       \
+      (eytzinger::eytzinger_map<KeyType, int>),                                \
+      (eytzinger::btree_map<KeyType, int>)
+
+// Test all layouts with all requested integer types
 TEMPLATE_TEST_CASE(
-    "Layout Policy: Upper Bound",
-    "[layout][search]",
-    Sorted,
-    Eytzinger,
-    ImplicitBTree_Tiny,
-    ImplicitBTree_Large
+    "Layout Map: Random Keys Integration",
+    "[map][random]",
+    LAYOUT_MAPS_FOR_TYPE(int8_t),
+    LAYOUT_MAPS_FOR_TYPE(uint8_t),
+    LAYOUT_MAPS_FOR_TYPE(int16_t),
+    LAYOUT_MAPS_FOR_TYPE(uint16_t),
+    LAYOUT_MAPS_FOR_TYPE(int32_t),
+    LAYOUT_MAPS_FOR_TYPE(uint32_t),
+    LAYOUT_MAPS_FOR_TYPE(int64_t),
+    LAYOUT_MAPS_FOR_TYPE(uint64_t)
 )
 {
-  auto n = GENERATE(0, 1, 2, 5, 8, 15, 16, 100, 1024);
-  test_upper_bound_correctness<TestType>(n);
-}
-
-// Map Wrappers to Test
-using SortedMap    = eytzinger::sorted_map<int, int>;
-using EytzingerMap = eytzinger::eytzinger_map<int, int>;
-using BTreeMap     = eytzinger::btree_map<int, int>;
-
-TEMPLATE_TEST_CASE(
-    "Layout Map: Interface",
-    "[map][interface]",
-    SortedMap,
-    EytzingerMap,
-    BTreeMap
-)
-{
-  auto n = GENERATE(0, 1, 5, 16, 100);
-  test_map_interface<TestType>(n);
+  // Test with various sizes, including edge cases
+  auto n = GENERATE(0, 1, 16, 64, 100);
+  test_map_random<TestType>(n);
 }

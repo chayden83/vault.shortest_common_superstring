@@ -44,6 +44,8 @@ namespace eytzinger {
 
     using pointer = proxy_pointer;
 
+    constexpr layout_iterator() = default;
+
     constexpr layout_iterator(
         Container& container, std::ptrdiff_t index
     ) noexcept
@@ -126,8 +128,8 @@ namespace eytzinger {
     }
 
   private:
-    Container*     container_;
-    std::ptrdiff_t index_;
+    Container*     container_ = nullptr;
+    std::ptrdiff_t index_     = -1;
   };
 
 } // namespace eytzinger

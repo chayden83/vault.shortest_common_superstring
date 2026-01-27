@@ -405,19 +405,19 @@ namespace eytzinger {
       return keys_.empty();
     }
 
-    [[nodiscard]] constexpr const_iterator begin() const noexcept
+    [[nodiscard]] constexpr const_iterator begin(this auto& self) noexcept
     {
-      if (keys_.empty()) {
-        return end();
+      if (self.keys_.empty()) {
+        return self.end();
       }
-      std::size_t idx = policy_type::sorted_rank_to_index(0, keys_.size());
-      assert(idx < keys_.size());
-      return const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
+      std::size_t idx = policy_type::sorted_rank_to_index(0, self.keys_.size());
+      assert(idx < self.keys_.size());
+      return const_iterator(self, static_cast<std::ptrdiff_t>(idx));
     }
 
-    [[nodiscard]] constexpr const_iterator end() const noexcept
+    [[nodiscard]] constexpr const_iterator end(this auto& self) noexcept
     {
-      return const_iterator(*this, -1);
+      return const_iterator(self, -1);
     }
 
     [[nodiscard]] constexpr const_iterator cbegin() const noexcept
@@ -430,16 +430,18 @@ namespace eytzinger {
       return end();
     }
 
-    [[nodiscard]] constexpr const_reverse_iterator rbegin() const noexcept
+    [[nodiscard]] constexpr const_reverse_iterator
+    rbegin(this auto& self) noexcept
       requires std::bidirectional_iterator<const_reverse_iterator>
     {
-      return const_reverse_iterator{end()};
+      return const_reverse_iterator{self.end()};
     }
 
-    [[nodiscard]] constexpr const_reverse_iterator rend() const noexcept
+    [[nodiscard]] constexpr const_reverse_iterator
+    rend(this auto& self) noexcept
       requires std::bidirectional_iterator<const_reverse_iterator>
     {
-      return const_reverse_iterator{begin()};
+      return const_reverse_iterator{self.begin()};
     }
 
     [[nodiscard]] constexpr const_reverse_iterator crbegin() const noexcept
