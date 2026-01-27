@@ -108,8 +108,8 @@ namespace vault::algorithm {
       // the latency between consecutive steps on the same job in
       // order to give the the prefetch instruction the greatest
       // possible opportunity to complete.
-      active_jobs_last = std::stable_partition
-	(active_jobs_first, active_jobs_last, is_active);
+      active_jobs_last = std::remove_if
+	(active_jobs_first, active_jobs_last, std::not_fn(is_active));
 
       while(active_jobs_last != jobs_first) {
 	active_jobs_last = std::stable_partition
