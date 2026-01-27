@@ -376,3 +376,45 @@ TEMPLATE_TEST_CASE(
   auto n = GENERATE(0, 1, 16, 100);
   test_map_random<TestType>(n);
 }
+
+// --- Concept Guardrail Tests ---
+
+// Helper to check if a specific configuration is valid
+template <
+    typename K,
+    typename V,
+    typename Policy,
+    template <typename, typename> typename KeyCont>
+concept CanInstantiateMap = requires {
+  typename eytzinger::layout_map<
+      K,
+      V,
+      std::less<K>,
+      Policy,
+      std::allocator<std::pair<const K, V>>,
+      KeyCont>;
+};
+
+TEST_CASE(
+    "Layout Policy: Container Compatibility Enforcement", "[layout][concepts]"
+)
+{
+  using Eytzinger = eytzinger::eytzinger_layout_policy<6>;
+  using BTree     = eytzinger::implicit_btree_layout_policy<8>;
+  using Sorted    = eytzinger::sorted_layout_policy;
+
+  // 1. Vector (Contiguous) should work for ALL policies
+  CHECK(CanInstantiateMap<int, int, Eytzinger, std::vector>);
+  CHECK(CanInstantiateMap<int, int, BTree, std::vector>);
+  CHECK(CanInstantiateMap<int, int, Sorted, std::vector>);
+
+  // 2. Deque (Random Access, NOT Contiguous)
+  // Should FAIL for Eytzinger/BTree (if your trait requires
+  // contiguous_iterator)
+  CHECK_FALSE(CanInstantiateMap<int, int, Eytzinger, std::deque>);
+  CHECK_FALSE(CanInstantiateMap<int, int, BTree, std::deque>);
+
+  // Should PASS for Sorted (std::ranges::lower_bound works on random access
+  // iterators)
+  CHECK(CanInstantiateMap<int, int, Sorted, std::deque>);
+}
