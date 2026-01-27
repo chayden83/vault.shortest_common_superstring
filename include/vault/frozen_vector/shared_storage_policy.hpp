@@ -2,6 +2,7 @@
 #define FROZEN_SHARED_STORAGE_POLICY_HPP
 
 #include <algorithm>
+#include <cassert>
 #include <memory>
 
 namespace frozen {
@@ -16,10 +17,11 @@ namespace frozen {
       if (n == 0) {
         return mutable_handle_type();
       }
-      return std::allocate_shared_for_overwrite<T[]>(a, n);
+      auto ptr = std::allocate_shared_for_overwrite<T[]>(a, n);
+      assert(ptr != nullptr && "Allocation returned null");
+      return ptr;
     }
 
-    // ADDED: Copy method for builder deep-copy support
     template <typename Alloc>
     [[nodiscard]]
     static mutable_handle_type
@@ -29,6 +31,7 @@ namespace frozen {
         return mutable_handle_type();
       }
       auto new_data = allocate(n, a);
+      assert(new_data && "Allocation failed in copy");
       std::copy(src.get(), src.get() + n, new_data.get());
       return new_data;
     }

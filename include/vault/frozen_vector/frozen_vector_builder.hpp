@@ -2,6 +2,7 @@
 #define FROZEN_FROZEN_VECTOR_BUILDER_HPP
 
 #include <algorithm>
+#include <cassert>
 #include <compare>
 #include <concepts>
 #include <iterator>
@@ -56,10 +57,17 @@ namespace frozen {
         , size_(count)
         , capacity_(count)
     {
+
       data_ = ptr_policy::allocate(count, allocator_);
       if (data_) {
         std::fill_n(data_.get(), count, T());
+      } else {
+        // If count > 0, allocate should have returned a valid pointer or
+        // thrown. If we are here and data_ is null, count must be 0 (or policy
+        // failure).
+        assert(count == 0 && "Allocation failed but didn't throw");
       }
+      check_invariants();
     }
 
     // Conditional Copy Constructor
@@ -76,9 +84,12 @@ namespace frozen {
         , size_(other.size_)
         , capacity_(other.size_)
     {
+      other.check_invariants();
       if (other.size_ > 0) {
         data_ = ptr_policy::copy(other.data_, other.size_, allocator_);
+        assert(data_ && "Copy policy returned null for non-empty vector");
       }
+      check_invariants();
     }
 
     // Conditional Copy Assignment
@@ -88,6 +99,9 @@ namespace frozen {
           typename ptr_policy::mutable_handle_type,
           alloc>
     {
+      other.check_invariants();
+      check_invariants();
+
       if (this != &other) {
         if constexpr (std::allocator_traits<allocator_type>::
                           propagate_on_container_copy_assignment::value) {
@@ -100,11 +114,13 @@ namespace frozen {
         }
 
         if (capacity_ >= other.size_) {
+          assert(data_ && "Capacity exists but data is null");
           std::copy(other.begin(), other.end(), begin());
           size_ = other.size_;
         } else {
           if (other.size_ > 0) {
             data_ = ptr_policy::copy(other.data_, other.size_, allocator_);
+            assert(data_ && "Copy allocation failed");
           } else {
             data_ = nullptr;
           }
@@ -112,6 +128,7 @@ namespace frozen {
           capacity_ = other.size_;
         }
       }
+      check_invariants();
       return *this;
     }
 
@@ -125,6 +142,8 @@ namespace frozen {
     {
       other.size_     = 0;
       other.capacity_ = 0;
+      check_invariants();
+      other.check_invariants();
     }
 
     // Allocator-Extended Move Constructor
@@ -136,6 +155,9 @@ namespace frozen {
         , size_(0)
         , capacity_(0)
     {
+
+      other.check_invariants();
+
       if (allocator_ == other.allocator_) {
         data_           = std::move(other.data_);
         size_           = other.size_;
@@ -145,16 +167,22 @@ namespace frozen {
       } else {
         if (other.size_ > 0) {
           data_ = ptr_policy::allocate(other.size_, allocator_);
+          assert(data_ && "Allocation failed during extended move");
           std::move(other.begin(), other.end(), data_.get());
           size_     = other.size_;
           capacity_ = other.size_;
         }
         other.clear();
       }
+      check_invariants();
+      other.check_invariants();
     }
 
     frozen_vector_builder& operator=(frozen_vector_builder&& other) noexcept
     {
+      check_invariants();
+      other.check_invariants();
+
       if (this != &other) {
         if constexpr (std::allocator_traits<allocator_type>::
                           propagate_on_container_move_assignment::value) {
@@ -166,6 +194,9 @@ namespace frozen {
         other.size_     = 0;
         other.capacity_ = 0;
       }
+
+      check_invariants();
+      other.check_invariants();
       return *this;
     }
 
@@ -175,10 +206,6 @@ namespace frozen {
     {
       return allocator_;
     }
-
-    // ========================================================================
-    // FREEZE METHODS
-    // ========================================================================
 
     using DefaultConstHandle = std::conditional_t<
         frozen::pointer_traits<
@@ -193,6 +220,7 @@ namespace frozen {
     [[nodiscard]]
     frozen_vector<T, ConstHandle> freeze() &&
     {
+      check_invariants();
       using traits =
           freeze_traits<typename ptr_policy::mutable_handle_type, ConstHandle>;
 
@@ -204,16 +232,17 @@ namespace frozen {
         size_type final_size = size_;
         size_                = 0;
         capacity_            = 0;
+        check_invariants();
 
         return frozen_vector<T, ConstHandle>(std::move(frozen_ptr), final_size);
       } catch (...) {
-        data_ = std::move(local_data);
+        data_ = std::move(local_data); // Restore state on failure
+        check_invariants();
         throw;
       }
     }
 
     // 2. Template Template Freeze Overload
-    // Usage: std::move(builder).freeze<local_shared_ptr>()
     template <template <typename> typename HandleTemplate>
     [[nodiscard]]
     auto freeze() &&
@@ -241,6 +270,7 @@ namespace frozen {
           push_back(std::forward<decltype(elem)>(elem));
         }
       }
+      check_invariants();
     }
 
     void shrink_to_fit()
@@ -248,11 +278,13 @@ namespace frozen {
       if (size_ < capacity_) {
         auto new_data = ptr_policy::allocate(size_, allocator_);
         if (size_ > 0) {
+          assert(data_ && "Data null but size > 0");
           std::move(begin(), end(), new_data.get());
         }
         data_     = std::move(new_data);
         capacity_ = size_;
       }
+      check_invariants();
     }
 
     void push_back(const T& value)
@@ -260,6 +292,7 @@ namespace frozen {
       ensure_capacity(size_ + 1);
       data_[size_] = value;
       ++size_;
+      check_invariants();
     }
 
     void push_back(T&& value)
@@ -267,20 +300,25 @@ namespace frozen {
       ensure_capacity(size_ + 1);
       data_[size_] = std::move(value);
       ++size_;
+      check_invariants();
     }
 
     template <typename... Args> reference emplace_back(Args&&... args)
     {
       ensure_capacity(size_ + 1);
       data_[size_] = T(std::forward<Args>(args)...);
-      return data_[size_++];
+      auto& ref    = data_[size_++];
+      check_invariants();
+      return ref;
     }
 
     void pop_back()
     {
+      assert(size_ > 0 && "pop_back on empty builder");
       if (size_ > 0) {
         --size_;
       }
+      check_invariants();
     }
 
     void reserve(size_type new_cap)
@@ -288,6 +326,7 @@ namespace frozen {
       if (new_cap > capacity_) {
         reallocate(new_cap);
       }
+      check_invariants();
     }
 
     void resize(size_type count)
@@ -296,17 +335,30 @@ namespace frozen {
         if (count > capacity_) {
           reserve(count);
         }
+        assert(data_ && "Capacity increased but data is null");
         std::fill(begin() + size_, begin() + count, T());
       }
       size_ = count;
+      check_invariants();
     }
 
-    void clear() noexcept { size_ = 0; }
+    void clear() noexcept
+    {
+      size_ = 0;
+      check_invariants();
+    }
 
-    [[nodiscard]] reference operator[](size_type pos) { return data_[pos]; }
+    [[nodiscard]] reference operator[](size_type pos)
+    {
+      assert(pos < size_ && "Index out of bounds");
+      assert(data_ && "Data is null");
+      return data_[pos];
+    }
 
     [[nodiscard]] const_reference operator[](size_type pos) const
     {
+      assert(pos < size_ && "Index out of bounds");
+      assert(data_ && "Data is null");
       return data_[pos];
     }
 
@@ -315,6 +367,7 @@ namespace frozen {
       if (pos >= size_) {
         throw std::out_of_range("frozen_vector_builder::at");
       }
+      assert(data_ && "Data is null");
       return data_[pos];
     }
 
@@ -323,16 +376,33 @@ namespace frozen {
       if (pos >= size_) {
         throw std::out_of_range("frozen_vector_builder::at");
       }
+      assert(data_ && "Data is null");
       return data_[pos];
     }
 
-    [[nodiscard]] reference front() { return data_[0]; }
+    [[nodiscard]] reference front()
+    {
+      assert(!empty());
+      return data_[0];
+    }
 
-    [[nodiscard]] const_reference front() const { return data_[0]; }
+    [[nodiscard]] const_reference front() const
+    {
+      assert(!empty());
+      return data_[0];
+    }
 
-    [[nodiscard]] reference back() { return data_[size_ - 1]; }
+    [[nodiscard]] reference back()
+    {
+      assert(!empty());
+      return data_[size_ - 1];
+    }
 
-    [[nodiscard]] const_reference back() const { return data_[size_ - 1]; }
+    [[nodiscard]] const_reference back() const
+    {
+      assert(!empty());
+      return data_[size_ - 1];
+    }
 
     [[nodiscard]] pointer data() noexcept { return data_.get(); }
 
@@ -416,6 +486,19 @@ namespace frozen {
     size_type                                size_;
     size_type                                capacity_;
 
+    void check_invariants() const
+    {
+      assert(size_ <= capacity_ && "Size cannot exceed capacity");
+      if (capacity_ > 0) {
+        // Note: In some policies (unique_ptr) with 0 capacity, data_ might be
+        // null. But if capacity > 0, we generally expect valid memory.
+        // Exceptions: Some policies might lazily allocate, but standard vector
+        // semantics imply validity. For now, assume if capacity > 0, data must
+        // be valid.
+        assert(data_ && "Data is null despite non-zero capacity");
+      }
+    }
+
     void ensure_capacity(size_type min_cap)
     {
       if (min_cap > capacity_) [[unlikely]] {
@@ -429,6 +512,9 @@ namespace frozen {
 
     void reallocate(size_type new_cap)
     {
+      assert(
+          new_cap >= size_ && "Cannot reallocate to smaller than current size"
+      );
       auto new_data = ptr_policy::allocate(new_cap, allocator_);
       if (data_) {
         std::move(begin(), end(), new_data.get());

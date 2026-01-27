@@ -1,6 +1,7 @@
 #ifndef FROZEN_LOCAL_SHARED_PTR_HPP
 #define FROZEN_LOCAL_SHARED_PTR_HPP
 
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <memory>
@@ -29,10 +30,13 @@ namespace frozen {
       local_control_block_split(Ptr p, Deleter d)
           : ptr(p)
           , deleter(std::move(d))
-      {}
+      {
+        assert(ref_count == 1 && "New control block must have ref_count 1");
+      }
 
       void release_ref() override
       {
+        assert(ref_count > 0 && "Double free detected: ref_count is already 0");
         if (--ref_count == 0) {
           deleter(ptr);
           delete this;
@@ -46,10 +50,13 @@ namespace frozen {
 
       local_control_block_inplace(std::size_t n)
           : size(n)
-      {}
+      {
+        assert(ref_count == 1 && "New control block must have ref_count 1");
+      }
 
       void release_ref() override
       {
+        assert(ref_count > 0 && "Double free detected: ref_count is already 0");
         if (--ref_count == 0) {
           using Element = std::remove_extent_t<T>;
           if constexpr (!std::is_trivially_destructible_v<Element>) {
@@ -58,9 +65,11 @@ namespace frozen {
             constexpr std::size_t align = alignof(Element);
             std::size_t           padding =
                 (header_size % align != 0) ? align - (header_size % align) : 0;
+
             char*    raw_mem = reinterpret_cast<char*>(this);
             Element* data =
                 reinterpret_cast<Element*>(raw_mem + header_size + padding);
+
             for (std::size_t i = 0; i < size; ++i) {
               data[i].~Element();
             }
@@ -79,6 +88,7 @@ namespace frozen {
   public:
     using element_type = std::remove_extent_t<T>;
 
+    // Constructors
     constexpr local_shared_ptr() noexcept
         : ptr_(nullptr)
         , cb_(nullptr)
@@ -97,6 +107,7 @@ namespace frozen {
         cb_ = new detail::local_control_block_split<element_type*, Deleter>(
             p, Deleter{}
         );
+        assert(cb_->ref_count == 1);
       } else {
         cb_ = nullptr;
       }
@@ -108,9 +119,13 @@ namespace frozen {
     {
       if (other) {
         ptr_ = other.get();
-        cb_  = new detail::local_control_block_split<U*, Deleter>(
+        assert(
+            ptr_ != nullptr && "unique_ptr was valid but get() returned null"
+        );
+        cb_ = new detail::local_control_block_split<U*, Deleter>(
             other.release(), std::move(other.get_deleter())
         );
+        assert(cb_->ref_count == 1);
       } else {
         ptr_ = nullptr;
         cb_  = nullptr;
@@ -124,11 +139,13 @@ namespace frozen {
       }
     }
 
+    // Copy / Move
     local_shared_ptr(const local_shared_ptr& other) noexcept
         : ptr_(other.ptr_)
         , cb_(other.cb_)
     {
       if (cb_) {
+        assert(cb_->ref_count > 0 && "Copying from dead pointer");
         cb_->ref_count++;
       }
     }
@@ -142,6 +159,7 @@ namespace frozen {
         , cb_(other.cb_)
     {
       if (cb_) {
+        assert(cb_->ref_count > 0 && "Copying from dead pointer");
         cb_->ref_count++;
       }
     }
@@ -166,6 +184,7 @@ namespace frozen {
       other.cb_  = nullptr;
     }
 
+    // Assignment
     local_shared_ptr& operator=(std::nullptr_t) noexcept
     {
       reset();
@@ -176,6 +195,7 @@ namespace frozen {
     {
       if (this != &other) {
         if (other.cb_) {
+          assert(other.cb_->ref_count > 0);
           other.cb_->ref_count++;
         }
         if (cb_) {
@@ -189,6 +209,7 @@ namespace frozen {
 
     local_shared_ptr& operator=(local_shared_ptr&& other) noexcept
     {
+      assert(this != &other && "Self-move assignment is suspicious");
       if (this != &other) {
         if (cb_) {
           cb_->release_ref();
@@ -201,12 +222,14 @@ namespace frozen {
       return *this;
     }
 
+    // Aliasing
     template <typename U>
     local_shared_ptr(const local_shared_ptr<U>& owner, element_type* p) noexcept
         : ptr_(p)
         , cb_(owner.cb_)
     {
       if (cb_) {
+        assert(cb_->ref_count > 0);
         cb_->ref_count++;
       }
     }
@@ -220,20 +243,37 @@ namespace frozen {
       owner.cb_  = nullptr;
     }
 
+    // Operators
     element_type& operator[](std::ptrdiff_t i) const noexcept
     {
+      assert(ptr_ != nullptr && "Dereferencing null pointer");
       return ptr_[i];
     }
 
-    element_type& operator*() const noexcept { return *ptr_; }
+    element_type& operator*() const noexcept
+    {
+      assert(ptr_ != nullptr && "Dereferencing null pointer");
+      return *ptr_;
+    }
 
-    element_type* operator->() const noexcept { return ptr_; }
+    element_type* operator->() const noexcept
+    {
+      assert(ptr_ != nullptr && "Dereferencing null pointer");
+      return ptr_;
+    }
 
     element_type* get() const noexcept { return ptr_; }
 
     explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
-    long use_count() const noexcept { return cb_ ? cb_->ref_count : 0; }
+    long use_count() const noexcept
+    {
+      if (!cb_) {
+        return 0;
+      }
+      assert(cb_->ref_count > 0 && "Corrupted ref count");
+      return cb_->ref_count;
+    }
 
     void reset()
     {
@@ -253,12 +293,14 @@ namespace frozen {
     template <typename U> friend class local_shared_ptr;
   };
 
+  // Factory
   template <typename T, typename Alloc>
   local_shared_ptr<T>
   allocate_local_shared_for_overwrite(std::size_t n, const Alloc&)
   {
-    using Element                     = std::remove_extent_t<T>;
-    using ControlBlock                = detail::local_control_block_inplace<T>;
+    using Element      = std::remove_extent_t<T>;
+    using ControlBlock = detail::local_control_block_inplace<T>;
+
     constexpr std::size_t header_size = sizeof(ControlBlock);
     constexpr std::size_t align       = alignof(Element);
     std::size_t           padding =
@@ -279,7 +321,6 @@ namespace frozen {
     try {
       std::uninitialized_default_construct_n(data_ptr, n);
     } catch (...) {
-      // FIX: Explicitly destroy the ControlBlock type, not the base class.
       cb->~ControlBlock();
       throw;
     }
@@ -289,6 +330,10 @@ namespace frozen {
     local_shared_ptr<T> ret;
     ret.cb_  = cb;
     ret.ptr_ = data_ptr;
+
+    assert(ret.use_count() == 1);
+    assert(ret.get() != nullptr);
+
     return ret;
   }
 

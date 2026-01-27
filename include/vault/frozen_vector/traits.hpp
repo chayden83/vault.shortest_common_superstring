@@ -1,6 +1,7 @@
 #ifndef FROZEN_TRAITS_HPP
 #define FROZEN_TRAITS_HPP
 
+#include <cassert>
 #include <concepts>
 #include <memory>
 #include <type_traits>
@@ -21,23 +22,31 @@ namespace frozen {
   };
 
   // ============================================================================
-  // FREEZE TRAITS (Default Implementation)
+  // FREEZE TRAITS
   // ============================================================================
 
   template <typename Src, typename Dest> struct freeze_traits {
     [[nodiscard]]
     static Dest freeze(Src&& src)
     {
-      // Priority 1: Direct Move Construction (Safe)
+      // Compile-Time Invariants
+      static_assert(!std::is_const_v<Src>, "Source handle cannot be const");
+      static_assert(
+          !std::is_reference_v<Src>, "Source handle cannot be a reference"
+      );
+
+      // Priority 1: Direct Move Construction
       if constexpr (std::is_constructible_v<Dest, Src&&>) {
         return Dest(std::move(src));
       }
       // Priority 2: Manual Transfer via Raw Pointer
-      // Fix: Must release ownership from src BEFORE creating Dest to prevent
-      // double-free if Dest constructor throws (e.g. std::shared_ptr allocation
-      // failure).
       else {
         auto* raw = src.release();
+
+        // Runtime Invariant: If we released a pointer, we must be able to
+        // construct Dest from it Note: raw might be nullptr, which is valid for
+        // smart pointers
+
         return Dest(raw);
       }
     }

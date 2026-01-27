@@ -2,6 +2,7 @@
 #define FROZEN_FROZEN_VECTOR_HPP
 
 #include <algorithm>
+#include <cassert>
 #include <initializer_list>
 #include <iterator>
 #include <memory>
@@ -27,7 +28,6 @@ namespace frozen {
     using reverse_iterator       = std::reverse_iterator<const_iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    // ADDED: Public alias for introspection
     using handle_type = Handle;
 
     // Constructors
@@ -39,7 +39,15 @@ namespace frozen {
     frozen_vector(Handle data, size_type size) noexcept
         : data_(std::move(data))
         , size_(size)
-    {}
+    {
+      if (size_ > 0) {
+        assert(data_ && "Handle cannot be null if size > 0");
+      } else {
+        // It is valid for data_ to be non-null even if size is 0 (capacity but
+        // no size), but semantically frozen vector of size 0 usually has null
+        // handle. We won't strictly assert data_ == nullptr for size 0.
+      }
+    }
 
     // Iterators
     [[nodiscard]] const_iterator begin() const noexcept
@@ -84,6 +92,8 @@ namespace frozen {
     // Element Access
     [[nodiscard]] const_reference operator[](size_type pos) const
     {
+      assert(pos < size_ && "Index out of bounds");
+      assert(data_ && "Accessing elements of a null handle");
       return get_raw_ptr()[pos];
     }
 
@@ -92,13 +102,19 @@ namespace frozen {
       if (pos >= size_) {
         throw std::out_of_range("frozen_vector::at");
       }
+      assert(data_ && "Accessing elements of a null handle");
       return get_raw_ptr()[pos];
     }
 
-    [[nodiscard]] const_reference front() const { return get_raw_ptr()[0]; }
+    [[nodiscard]] const_reference front() const
+    {
+      assert(!empty() && "front() called on empty vector");
+      return get_raw_ptr()[0];
+    }
 
     [[nodiscard]] const_reference back() const
     {
+      assert(!empty() && "back() called on empty vector");
       return get_raw_ptr()[size_ - 1];
     }
 

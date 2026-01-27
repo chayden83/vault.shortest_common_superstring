@@ -2,14 +2,14 @@
 #define FROZEN_LOCAL_SHARED_STORAGE_POLICY_HPP
 
 #include "local_shared_ptr.hpp"
+#include <algorithm>
+#include <cassert>
 
 namespace frozen {
 
   template <typename T> struct local_shared_storage_policy {
-    // 1. Mutable Handle uses our custom ptr
     using mutable_handle_type = local_shared_ptr<T[]>;
 
-    // 2. Allocation Strategy
     template <typename Alloc>
     [[nodiscard]]
     static mutable_handle_type allocate(std::size_t n, const Alloc& a)
@@ -17,10 +17,11 @@ namespace frozen {
       if (n == 0) {
         return mutable_handle_type();
       }
-      return allocate_local_shared_for_overwrite<T[]>(n, a);
+      auto ptr = allocate_local_shared_for_overwrite<T[]>(n, a);
+      assert(ptr && "Factory returned invalid pointer");
+      return ptr;
     }
 
-    // 3. Copy Strategy (Enable deep copying of builder)
     template <typename Alloc>
     [[nodiscard]]
     static mutable_handle_type
@@ -30,6 +31,7 @@ namespace frozen {
         return mutable_handle_type();
       }
       auto new_data = allocate(n, a);
+      assert(new_data && "Allocation failure");
       std::copy(src.get(), src.get() + n, new_data.get());
       return new_data;
     }
