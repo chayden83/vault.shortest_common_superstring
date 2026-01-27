@@ -2,6 +2,7 @@
 #define SORTED_LAYOUT_POLICY_HPP
 
 #include <algorithm>
+#include <cassert> // Added for assertions
 #include <functional>
 #include <iterator>
 #include <ranges>
@@ -19,16 +20,18 @@ namespace eytzinger {
     // Identity mapping: Physical Index == Sorted Rank
     struct sorted_rank_to_index_fn {
       [[nodiscard]] static constexpr std::size_t
-      operator()(std::size_t rank, std::size_t /*n*/) noexcept
+      operator()(std::size_t rank, std::size_t n) noexcept
       {
+        assert(rank < n && "Rank out of bounds");
         return rank;
       }
     };
 
     struct index_to_sorted_rank_fn {
       [[nodiscard]] static constexpr std::size_t
-      operator()(std::size_t i, std::size_t /*n*/) noexcept
+      operator()(std::size_t i, std::size_t n) noexcept
       {
+        assert(i < n && "Index out of bounds");
         return i;
       }
     };
@@ -49,9 +52,11 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::iter_reference_t<I>
       operator()(I first, S last, std::size_t n)
       {
-        if (n >= static_cast<std::size_t>(std::distance(first, last))) {
+        const auto size = static_cast<std::size_t>(std::distance(first, last));
+        if (n >= size) {
           throw std::out_of_range("sorted_layout_policy index out of range");
         }
+        assert(n < size);
         return *(first + n);
       }
 
@@ -70,6 +75,8 @@ namespace eytzinger {
       operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
+        assert(i >= -1 && i < n && "Index out of bounds");
+
         if (i >= n - 1) {
           return -1;
         }
@@ -83,6 +90,8 @@ namespace eytzinger {
       operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
+        assert(i >= -1 && i < n && "Index out of bounds");
+
         if (i == -1) {
           return (n == 0) ? -1 : n - 1;
         }
