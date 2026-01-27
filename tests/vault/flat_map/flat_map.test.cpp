@@ -9,7 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <deque> // Added for std::deque test
+#include <deque>
 #include <limits>
 #include <random>
 #include <set>
@@ -329,10 +329,7 @@ TEMPLATE_TEST_CASE(
 
 // --- Deque Compatibility Tests ---
 
-// Explicitly test std::deque as the underlying container.
-// Note: Eytzinger and B-Tree layouts are NOT tested here because they require
-// contiguous memory (pointers) for performance, which std::deque does not
-// guarantee.
+// 1. Fully Deque-based Map (Sorted Layout Only)
 template <typename K, typename V>
 using DequeSortedMap = eytzinger::layout_map<
     K,
@@ -340,15 +337,40 @@ using DequeSortedMap = eytzinger::layout_map<
     std::less<K>,
     eytzinger::sorted_layout_policy,
     std::allocator<std::pair<const K, V>>,
-    std::deque, // Use deque for Keys
-    std::deque  // Use deque for Values
+    std::deque, // Keys: Deque
+    std::deque  // Values: Deque
+    >;
+
+// 2. Hybrid Map: Vector Keys (Contiguous) + Deque Values (Non-contiguous)
+// This is valid for Eytzinger and BTree because they only search Keys.
+template <typename K, typename V>
+using DequeValueEytzingerMap = eytzinger::layout_map<
+    K,
+    V,
+    std::less<K>,
+    eytzinger::eytzinger_layout_policy<6>,
+    std::allocator<std::pair<const K, V>>,
+    std::vector, // Keys: MUST be Vector for Eytzinger
+    std::deque   // Values: Can be Deque
+    >;
+
+template <typename K, typename V>
+using DequeValueBTreeMap = eytzinger::layout_map<
+    K,
+    V,
+    std::less<K>,
+    eytzinger::implicit_btree_layout_policy<8>,
+    std::allocator<std::pair<const K, V>>,
+    std::vector, // Keys: MUST be Vector for BTree
+    std::deque   // Values: Can be Deque
     >;
 
 TEMPLATE_TEST_CASE(
-    "Layout Map: Deque Storage",
+    "Layout Map: Deque Storage Configurations",
     "[map][deque]",
     (DequeSortedMap<int, int>),
-    (DequeSortedMap<std::string, int>)
+    (DequeValueEytzingerMap<int, int>),
+    (DequeValueBTreeMap<int, int>)
 )
 {
   auto n = GENERATE(0, 1, 16, 100);
