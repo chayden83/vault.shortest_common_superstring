@@ -9,14 +9,43 @@
 #include <functional>
 #include <iterator>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
+namespace vault::amac {
+  template <std::size_t N>
+  struct job_step_result : public std::array<void const*, N> {
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+      return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return (((*this)[Is] == nullptr) && ...);
+      }(std::make_index_sequence<N>{});
+    }
+  };
+} // namespace vault::amac
+
+template <std::size_t N>
+struct std::tuple_size<vault::amac::job_step_result<N>> {
+  static constexpr inline auto const value = std::size_t{N};
+};
+
+template <std::size_t I, std::size_t N>
+struct std::tuple_element<I, vault::amac::job_step_result<N>> {
+  using type = void const*;
+};
+
 namespace vault::amac::concepts {
+  template <typename T>
+  concept job_step_result = std::constructible_from<bool, T> &&
+    []<std::size_t... Is>(std::index_sequence<Is...>) {
+      return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
+    }(std::make_index_sequence<std::tuple_size_v<T>>{});
+
   template <typename J, typename R, typename I>
   concept job = std::ranges::range<R> && std::input_iterator<I>
     && std::move_constructible<J> && requires(J& job) {
-         { job.init() } -> std::same_as<void const*>;
-         { job.step() } -> std::same_as<void const*>;
+         { job.init() } -> job_step_result;
+         { job.step() } -> job_step_result;
        };
 
   template <typename F, typename R, typename I>
@@ -33,7 +62,16 @@ namespace vault::amac {
     return std::ranges::next(first, std::ranges::distance(first, last) / 2);
   }
 
-  template <uint8_t N> struct conductor_fn {
+  template <uint8_t N> class conductor_fn {
+    template <concepts::job_step_result J>
+    static constexpr void prefetch(J const& step_result)
+    {
+      [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (__builtin_prefetch(std::get<Is>(step_result), 0, 3), ...);
+      }(std::make_index_sequence<std::tuple_size_v<J>>{});
+    }
+
+  public:
     template <std::ranges::forward_range           haystack_t,
       std::ranges::input_range                     needles_t,
       concepts::job_factory<haystack_t,
@@ -73,8 +111,8 @@ namespace vault::amac {
         while (jobs_first != jobs_last and needles_itr != needles_end) {
           auto job = job_factory(haystack, needles_itr++);
 
-          if (auto* address = job.init()) {
-            __builtin_prefetch(address);
+          if (auto addresses = job.init()) {
+            prefetch(addresses);
             std::construct_at(jobs_first->get(), std::move(job));
             ++jobs_first;
           }
@@ -91,8 +129,8 @@ namespace vault::amac {
       auto active_jobs_last  = jobs_last;
 
       auto is_active = [&](auto& job) {
-        if (auto* next_address = job.get()->step()) {
-          return __builtin_prefetch(next_address), true;
+        if (auto addresses = job.get()->step()) {
+          return prefetch(addresses), true;
         } else {
           return std::invoke(reporter, std::move(*job.get())), false;
         }
@@ -116,8 +154,8 @@ namespace vault::amac {
         while (needles_itr != needles_end) {
           auto job = job_factory(haystack, needles_itr++);
 
-          if (auto* address = job.init()) {
-            __builtin_prefetch(address);
+          if (auto addresses = job.init()) {
+            prefetch(addresses);
             *active_jobs_first->get() = std::move(job);
             ++active_jobs_first;
             break;
@@ -166,16 +204,16 @@ namespace vault::amac {
           , m_needle_itr{needle_itr}
       {}
 
-      [[nodiscard]] void const* init() const
+      [[nodiscard]] job_step_result<1> init() const
       {
         if (m_haystack_first == m_haystack_last) {
-          return nullptr;
+          return {nullptr};
         }
 
-        return std::addressof(*bisect(m_haystack_first, m_haystack_last));
+        return {std::addressof(*bisect(m_haystack_first, m_haystack_last))};
       }
 
-      [[nodiscard]] void const* step()
+      [[nodiscard]] job_step_result<1> step()
       {
         auto haystack_middle = bisect(m_haystack_first, m_haystack_last);
 

@@ -2,6 +2,7 @@
 #define SORTED_LAYOUT_POLICY_HPP
 
 #include "concepts.hpp"
+#include "vault/algorithm/amac.hpp"
 #include <algorithm>
 #include <cassert>
 #include <functional>
@@ -163,17 +164,17 @@ namespace eytzinger {
           , current_mid_it(f)
       {}
 
-      [[nodiscard]] const void* init()
+      [[nodiscard]] vault::amac::job_step_result<1> init()
       {
         if (count == 0) {
-          return nullptr;
+          return {nullptr};
         }
         step_size      = count / 2;
         current_mid_it = first + step_size;
-        return std::to_address(current_mid_it);
+        return {std::to_address(current_mid_it)};
       }
 
-      [[nodiscard]] const void* step()
+      [[nodiscard]] vault::amac::job_step_result<1> step()
       {
         // Use IIFE for const-initialization
         bool const go_right = [&] {
@@ -192,12 +193,12 @@ namespace eytzinger {
         }
 
         if (count == 0) {
-          return nullptr;
+          return {nullptr};
         }
 
         step_size      = count / 2;
         current_mid_it = first + step_size;
-        return std::to_address(current_mid_it);
+        return {std::to_address(current_mid_it)};
       }
 
       [[nodiscard]] I result() const { return first; }

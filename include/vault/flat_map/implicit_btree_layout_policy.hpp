@@ -2,6 +2,7 @@
 #define IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 
 #include "concepts.hpp"
+#include "vault/algorithm/amac.hpp"
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -601,20 +602,20 @@ namespace eytzinger {
           , result_idx(size)
       {}
 
-      [[nodiscard]] const void* init()
+      [[nodiscard]] vault::amac::job_step_result<1> init()
       {
         if (n == 0) {
-          return nullptr;
+          return {nullptr};
         }
         // Prefetch root block (k=0)
-        return reinterpret_cast<const void*>(base);
+        return {reinterpret_cast<const void*>(base)};
       }
 
-      [[nodiscard]] const void* step()
+      [[nodiscard]] const vault::amac::job_step_result<1> step()
       {
         std::size_t block_start = k * B;
         if (block_start >= n) {
-          return nullptr;
+          return {nullptr};
         }
 
         // Search current block (data is already loaded by init/previous step)
@@ -656,10 +657,10 @@ namespace eytzinger {
         }
 
         if (k * B >= n) {
-          return nullptr; // No more children
+          return {nullptr}; // No more children
         }
 
-        return reinterpret_cast<const void*>(base + (k * B));
+        return {reinterpret_cast<const void*>(base + (k * B))};
       }
 
       [[nodiscard]] I result() const

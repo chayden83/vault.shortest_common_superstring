@@ -2,6 +2,7 @@
 #define EYTZINGER_LAYOUT_POLICY_HPP
 
 #include "concepts.hpp"
+#include "vault/algorithm/amac.hpp"
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -324,16 +325,16 @@ namespace eytzinger {
           , comp(c)
       {}
 
-      [[nodiscard]] const void* init()
+      [[nodiscard]] const vault::amac::job_step_result<1> init()
       {
         if (n == 0) {
-          return nullptr;
+          return {nullptr};
         }
         // Prefetch first element (root)
-        return reinterpret_cast<const void*>(base);
+        return {reinterpret_cast<const void*>(base)};
       }
 
-      [[nodiscard]] const void* step()
+      [[nodiscard]] const vault::amac::job_step_result<1> step()
       {
         // Use IIFE for const-initialization
         bool const go_right = [&] {
@@ -347,12 +348,12 @@ namespace eytzinger {
         i = (i << 1) + 1 + static_cast<std::size_t>(go_right);
 
         if (i >= n) {
-          return nullptr; // Done
+          return {nullptr}; // Done
         }
 
         // Calculate prefetch address for NEXT iteration
         const std::size_t future_i = ((i + 1) << L) - 1;
-        return reinterpret_cast<const void*>(base + future_i);
+        return {reinterpret_cast<const void*>(base + future_i)};
       }
 
       [[nodiscard]] I result() const

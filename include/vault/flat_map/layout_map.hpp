@@ -385,9 +385,15 @@ namespace eytzinger {
         Job(Job&&)            = default;
         Job& operator=(Job&&) = default;
 
-        const void* init() { return impl.init(); }
+        vault::amac::concepts::job_step_result auto init()
+        {
+          return impl.init();
+        }
 
-        const void* step() { return impl.step(); }
+        vault::amac::concepts::job_step_result auto step()
+        {
+          return impl.step();
+        }
       };
 
       auto factory = [](const layout_map& map, NeedleIter it) {
@@ -447,9 +453,15 @@ namespace eytzinger {
         Job(Job&&)            = default;
         Job& operator=(Job&&) = default;
 
-        const void* init() { return impl.init(); }
+        vault::amac::concepts::job_step_result auto init()
+        {
+          return impl.init();
+        }
 
-        const void* step() { return impl.step(); }
+        vault::amac::concepts::job_step_result auto step()
+        {
+          return impl.step();
+        }
       };
 
       auto factory = [](const layout_map& map, NeedleIter it) {
@@ -509,9 +521,15 @@ namespace eytzinger {
         Job(Job&&)            = default;
         Job& operator=(Job&&) = default;
 
-        const void* init() { return impl.init(); }
+        vault::amac::concepts::job_step_result auto init()
+        {
+          return impl.init();
+        }
 
-        const void* step() { return impl.step(); }
+        vault::amac::concepts::job_step_result auto step()
+        {
+          return impl.step();
+        }
       };
 
       auto factory = [](const layout_map& map, NeedleIter it) {
