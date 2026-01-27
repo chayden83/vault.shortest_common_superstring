@@ -12,8 +12,8 @@ FetchContent_Declare(googlebench
 FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
-  #amac
-  flat_map
+  amac
+  #flat_map
   #frozen_vector
   #segmented_vector
   #shortest_common_superstring

@@ -15,10 +15,6 @@ target_sources(vault.flat_map PUBLIC FILE_SET HEADERS BASE_DIRS ${PROJECT_SOURCE
   ${PROJECT_SOURCE_DIR}/include/vault/flat_map/utilities.hpp
 )
 
-target_compile_definitions(vault.flat_map PUBLIC
-  LAYOUT_USE_AVX2=1
-)
-
 vault_install_targets(
   TARGETS vault.flat_map
 )

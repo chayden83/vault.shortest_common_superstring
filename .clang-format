@@ -59,8 +59,8 @@ ConstructorInitializerAllOnOneLineOrOnePerLine: true
 AllowShortFunctionsOnASingleLine: All
 
 # 10. Arguments & Parameters
-AlignAfterOpenBracket: BlockIndent
-ContinuationIndentWidth: 4
+AlignAfterOpenBracket: DontAlign
+ContinuationIndentWidth: 2
 BinPackArguments: false
 BinPackParameters: false
 
@@ -74,3 +74,15 @@ PenaltyBreakBeforeFirstCallParameter: 200
 # 4. Global limits
 PenaltyExcessCharacter: 1000000
 PenaltyReturnTypeOnItsOwnLine: 60
+
+# Helps align the 'requires' clause body correctly
+IndentRequiresClause: true
+
+# --- Binary Operators ---
+# Moves &&, ||, +, -, etc. to the start of the next line.
+# We use 'NonAssignment' so that 'auto x =' keeps the '=' on the first line.
+BreakBeforeBinaryOperators: NonAssignment
+
+# Stops lines from trying to align vertically with the '=' or '(' above.
+# Instead, it just uses the continuation indent (4 spaces).
+AlignOperands: DontAlign
