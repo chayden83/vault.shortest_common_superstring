@@ -582,22 +582,27 @@ namespace eytzinger {
 
     // --- AMAC Batch Support ---
 
-    template <typename I, typename T, typename Comp, search_bound Bound>
+    template <typename HaystackIter,
+      typename NeedleIter,
+      typename Comp,
+      search_bound Bound>
     struct search_job {
-      using ValT = std::iter_value_t<I>;
-      const ValT* base;
-      I           begin_it;
-      std::size_t n;
-      T           key;
-      Comp        comp;
-      std::size_t k = 0; // Current block index
-      std::size_t result_idx;
+      using ValT = std::iter_value_t<HaystackIter>;
 
-      [[nodiscard]] search_job(I first, std::size_t size, T kv, Comp c)
+      const ValT*  base;
+      HaystackIter begin_it;
+      std::size_t  n;
+      NeedleIter   needle_iter; // Storing iterator
+      Comp         comp;
+      std::size_t  k = 0;
+      std::size_t  result_idx;
+
+      [[nodiscard]] search_job(
+        HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
           : base(std::to_address(first))
           , begin_it(first)
           , n(size)
-          , key(std::move(kv))
+          , needle_iter(n_iter)
           , comp(c)
           , result_idx(size)
       {}
@@ -607,7 +612,6 @@ namespace eytzinger {
         if (n == 0) {
           return {nullptr};
         }
-        // Prefetch root block (k=0)
         return {reinterpret_cast<const void*>(base)};
       }
 
@@ -618,16 +622,15 @@ namespace eytzinger {
           return {nullptr};
         }
 
-        // Search current block (data is already loaded by init/previous step)
+        // Logic mirrors the scalar generic implementation but uses *needle_iter
         if (block_start + B <= n) {
-          // Full Block
           std::size_t idx_in_block = [&] {
             if constexpr (Bound == search_bound::upper) {
               return block_searcher<ValT, Comp, B>::upper_bound(
-                base + block_start, key, comp, std::identity{});
+                base + block_start, *needle_iter, comp, std::identity{});
             } else {
               return block_searcher<ValT, Comp, B>::lower_bound(
-                base + block_start, key, comp, std::identity{});
+                base + block_start, *needle_iter, comp, std::identity{});
             }
           }();
 
@@ -636,15 +639,14 @@ namespace eytzinger {
           }
           k = detail::btree_child_block_index(k, idx_in_block, B);
         } else {
-          // Tail Block
           std::size_t count       = n - block_start;
           std::size_t idx_in_tail = [&] {
             if constexpr (Bound == search_bound::upper) {
               return scalar_block_searcher::upper_bound_n(
-                base + block_start, count, key, comp, std::identity{});
+                base + block_start, count, *needle_iter, comp, std::identity{});
             } else {
               return scalar_block_searcher::lower_bound_n(
-                base + block_start, count, key, comp, std::identity{});
+                base + block_start, count, *needle_iter, comp, std::identity{});
             }
           }();
 
@@ -657,40 +659,56 @@ namespace eytzinger {
         }
 
         if (k * B >= n) {
-          return {nullptr}; // No more children
+          return {nullptr};
         }
 
         return {reinterpret_cast<const void*>(base + (k * B))};
       }
 
-      [[nodiscard]] I result() const
+      [[nodiscard]] HaystackIter haystack_cursor() const
       {
         return (result_idx == n) ? (begin_it + n) : (begin_it + result_idx);
       }
+
+      [[nodiscard]] NeedleIter needle_cursor() const { return needle_iter; }
     };
 
-    struct batch_lower_bound_fn {
-      template <typename I, typename T, typename Comp>
-      [[nodiscard]] static auto make_job(
-        I first, std::size_t n, T key, Comp comp)
+    struct lower_bound_job_fn {
+      template <std::ranges::random_access_range Haystack,
+        typename Comp,
+        typename NeedleIter>
+      [[nodiscard]] static auto operator()(
+        Haystack&& haystack, Comp comp, NeedleIter needle)
       {
-        return search_job<I, T, Comp, search_bound::lower>(
-          first, n, std::move(key), comp);
+        return search_job<std::ranges::iterator_t<Haystack>,
+          NeedleIter,
+          Comp,
+          search_bound::lower>(std::ranges::begin(haystack),
+          std::ranges::size(haystack),
+          needle,
+          comp);
       }
     };
 
-    struct batch_upper_bound_fn {
-      template <typename I, typename T, typename Comp>
-      [[nodiscard]] static auto make_job(
-        I first, std::size_t n, T key, Comp comp)
+    struct upper_bound_job_fn {
+      template <std::ranges::random_access_range Haystack,
+        typename Comp,
+        typename NeedleIter>
+      [[nodiscard]] static auto operator()(
+        Haystack&& haystack, Comp comp, NeedleIter needle)
       {
-        return search_job<I, T, Comp, search_bound::upper>(
-          first, n, std::move(key), comp);
+        return search_job<std::ranges::iterator_t<Haystack>,
+          NeedleIter,
+          Comp,
+          search_bound::upper>(std::ranges::begin(haystack),
+          std::ranges::size(haystack),
+          needle,
+          comp);
       }
     };
 
-    static constexpr inline batch_lower_bound_fn batch_lower_bound{};
-    static constexpr inline batch_upper_bound_fn batch_upper_bound{};
+    static constexpr inline lower_bound_job_fn lower_bound_job{};
+    static constexpr inline upper_bound_job_fn upper_bound_job{};
   };
 
 } // namespace eytzinger

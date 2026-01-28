@@ -110,7 +110,7 @@ namespace vault::amac::concepts {
    * @ingroup vault_amac
    */
   template <typename R, typename J>
-  concept job_reporter = std::invocable<R, J&&>;
+  concept job_reporter = job<J> && std::invocable<R, J&&>;
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
@@ -189,45 +189,34 @@ namespace vault::amac {
 
   public:
     /**
-     * @brief Executes a batch lookup using the AMAC algorithm.
+     * @brief Executes a batch of jobs using the AMAC algorithm.
      *
      * Coordination happens in three logical phases:
-     *
-     * 1. **Setup**: Populate the initial batch of N jobs and issue
-     *   first-round prefetches.
+
+     * 1. **Setup**: Populate the initial batch of N jobs from the
+     *   input range and issue first-round prefetches.
      * 2. **Execution/Refill**: Interleave job steps. When a job
      *   completes, it is reported and replaced by a new job from the
-     *   needles range.
-     * 3. **Drain**: Once needles are exhausted, continue stepping
-     *   remaining active jobs until all are complete.
+     *   input range.
+     * 3. **Drain**: Once the input range is exhausted, continue
+     *   stepping remaining active jobs until all are complete.
      *
-     * @param haystack The data structure being searched.
-     * @param needles The range of keys to look up.
-     * @param job_factory A callable that constructs a Job from a
-     *   needle.
+     * @param ijobs The input range of job objects (state machines) to
+     *   execute.
      * @param reporter A callable invoked with the Job once it
      *   completes.
      *
-     * @pre The needles range must be at least an input_range.
-     * @pre The job_factory must return a type satisfying
+     * @pre The ijobs range must be at least an input_range.
+     * @pre The value type of the ijobs range must satisfy
      *   vault::amac::concepts::job.
      */
-    template <std::ranges::forward_range           haystack_t,
-      std::ranges::input_range                     needles_t,
-      concepts::job_factory<haystack_t,
-        std::ranges::iterator_t<needles_t const>>  job_factory_t,
-      concepts::job_reporter<std::invoke_result_t<job_factory_t,
-        haystack_t const&,
-        std::ranges::iterator_t<needles_t const>>> reporter_t>
-    static constexpr void operator()(haystack_t const& haystack,
-      needles_t const&                                 needles,
-      job_factory_t                                    job_factory,
-      reporter_t                                       reporter)
+    template <std::ranges::input_range                         Jobs,
+      concepts::job_reporter<std::ranges::range_value_t<Jobs>> Reporter>
+    static constexpr void operator()(Jobs&& ijobs, Reporter&& reporter)
     {
-      auto [needles_cursor, needles_last] = std::ranges::subrange(needles);
+      using job_t = std::ranges::range_value_t<Jobs>;
 
-      using job_t = std::remove_cvref_t<decltype(std::invoke(
-        job_factory, haystack, std::ranges::begin(needles)))>;
+      auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
       // Populate up to N jobs from the range of needles and
       // prefetching the memory addresses they will use in the next
@@ -237,12 +226,13 @@ namespace vault::amac {
       auto [jobs_first, jobs_last] = std::invoke([&] {
         auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
 
-        while (jobs_first != jobs_last and needles_cursor != needles_last) {
-          auto job = job_factory(haystack, needles_cursor++);
+        while (jobs_first != jobs_last and ijobs_cursor != ijobs_last) {
+          auto&& job = *ijobs_cursor++;
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
-            std::construct_at(jobs_first->get(), std::move(job));
+            std::construct_at(
+              jobs_first->get(), std::forward<decltype(job)>(job));
             ++jobs_first;
           } else {
             std::invoke(reporter, std::move(job));
@@ -269,20 +259,20 @@ namespace vault::amac {
       auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
 
       do {
-        while (jobs_cursor != jobs_last && needles_cursor != needles_last) {
-          auto job = job_factory(haystack, needles_cursor++);
+        while (jobs_cursor != jobs_last && ijobs_cursor != ijobs_last) {
+          auto&& job = *ijobs_cursor++;
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
-            *jobs_cursor->get() = std::move(job);
+            *jobs_cursor->get() = std::forward<decltype(job)>(job);
             ++jobs_cursor;
           } else {
-            std::invoke(reporter, std::move(job));
+            std::invoke(reporter, std::forward<decltype(job)>(job));
           }
         }
 
         jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
-      } while (needles_cursor != needles_last);
+      } while (ijobs_cursor != ijobs_last);
 
       // Once the needles are consumed, step active jobs until they
       // are all complete.

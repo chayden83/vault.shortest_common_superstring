@@ -347,209 +347,82 @@ namespace eytzinger {
 
     // --- AMAC Batch Interface ---
 
-    template <uint8_t          BatchSize = 16,
+    template <typename Executor,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
-        std::pair<
-          std::ranges::iterator_t<const std::remove_reference_t<Needles>>,
+        std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>,
           const_iterator>>
-    void batch_lower_bound(Needles&& needles, OutputIt output) const
+    void batch_lower_bound(
+      Executor&& executor, Needles&& needles, OutputIt output) const
     {
-      if (empty()) {
-        for (auto it = std::ranges::begin(needles);
-          it != std::ranges::end(needles);
-          ++it) {
-          *output++ = {it, end()};
-        }
-        return;
-      }
+      auto job_factory = std::bind_front(policy_type::lower_bound_job,
+        std::ranges::subrange(unordered_keys()),
+        compare_);
 
-      using NeedleIter =
-        std::ranges::iterator_t<const std::remove_reference_t<Needles>>;
+      auto reporter = [=, this](auto const& job) {
+        auto offset = std::ranges::distance(
+          std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-      struct Job {
-        decltype(policy_type::batch_lower_bound.make_job(
-          std::declval<const key_storage_type&>().cbegin(),
-          0,
-          std::declval<key_type>(),
-          std::declval<Compare>())) impl;
-        NeedleIter                  needle_it;
-
-        Job(const layout_map& map, NeedleIter it)
-            : impl(policy_type::batch_lower_bound.make_job(
-                map.keys_.cbegin(), map.keys_.size(), *it, map.compare_))
-            , needle_it(it)
-        {}
-
-        Job(Job&&)            = default;
-        Job& operator=(Job&&) = default;
-
-        vault::amac::concepts::job_step_result auto init()
-        {
-          return impl.init();
-        }
-
-        vault::amac::concepts::job_step_result auto step()
-        {
-          return impl.step();
-        }
+        *output++ = std::pair{std::next(begin(), offset), job.needle_cursor()};
       };
 
-      auto factory = [](const layout_map& map, NeedleIter it) {
-        return Job(map, it);
-      };
-
-      auto reporter = [this, &output](Job&& job) {
-        auto           key_it = job.impl.result();
-        const_iterator result_it;
-        if (key_it == keys_.end()) {
-          result_it = end();
-        } else {
-          auto idx  = std::distance(keys_.cbegin(), key_it);
-          result_it = const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
-        }
-        *output++ = {job.needle_it, result_it};
-      };
-
-      vault::amac::coordinator<BatchSize>(*this, needles, factory, reporter);
+      executor(std::ranges::transform(needles, job_factory), reporter);
     }
 
-    template <uint8_t          BatchSize = 16,
+    template <typename Executor,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
-        std::pair<
-          std::ranges::iterator_t<const std::remove_reference_t<Needles>>,
+        std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>,
           const_iterator>>
-    void batch_upper_bound(Needles&& needles, OutputIt output) const
+    void batch_upper_bound(
+      Executor&& executor, Needles&& needles, OutputIt output) const
     {
-      if (empty()) {
-        for (auto it = std::ranges::begin(needles);
-          it != std::ranges::end(needles);
-          ++it) {
-          *output++ = {it, end()};
-        }
-        return;
-      }
+      auto job_factory = std::bind_front(policy_type::upper_bound_job,
+        std::ranges::subrange(unordered_keys()),
+        compare_);
 
-      using NeedleIter =
-        std::ranges::iterator_t<const std::remove_reference_t<Needles>>;
+      auto reporter = [=, this](auto const& job) {
+        auto offset = std::ranges::distance(
+          std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-      struct Job {
-        decltype(policy_type::batch_upper_bound.make_job(
-          std::declval<const key_storage_type&>().cbegin(),
-          0,
-          std::declval<key_type>(),
-          std::declval<Compare>())) impl;
-        NeedleIter                  needle_it;
-
-        Job(const layout_map& map, NeedleIter it)
-            : impl(policy_type::batch_upper_bound.make_job(
-                map.keys_.cbegin(), map.keys_.size(), *it, map.compare_))
-            , needle_it(it)
-        {}
-
-        Job(Job&&)            = default;
-        Job& operator=(Job&&) = default;
-
-        vault::amac::concepts::job_step_result auto init()
-        {
-          return impl.init();
-        }
-
-        vault::amac::concepts::job_step_result auto step()
-        {
-          return impl.step();
-        }
+        *output++ = std::pair{std::next(begin(), offset), job.needle_cursor()};
       };
 
-      auto factory = [](const layout_map& map, NeedleIter it) {
-        return Job(map, it);
-      };
-
-      auto reporter = [this, &output](Job&& job) {
-        auto           key_it = job.impl.result();
-        const_iterator result_it;
-        if (key_it == keys_.end()) {
-          result_it = end();
-        } else {
-          auto idx  = std::distance(keys_.cbegin(), key_it);
-          result_it = const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
-        }
-        *output++ = {job.needle_it, result_it};
-      };
-
-      vault::amac::coordinator<BatchSize>(*this, needles, factory, reporter);
+      executor(std::ranges::transform(needles, job_factory), reporter);
     }
 
-    template <uint8_t          BatchSize = 16,
+    template <typename Executor,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
-        std::pair<
-          std::ranges::iterator_t<const std::remove_reference_t<Needles>>,
+        std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>,
           const_iterator>>
-    void batch_find(Needles&& needles, OutputIt output) const
+    void batch_find(
+      Executor&& executor, Needles&& needles, OutputIt output) const
     {
-      if (empty()) {
-        for (auto it = std::ranges::begin(needles);
-          it != std::ranges::end(needles);
-          ++it) {
-          *output++ = {it, end()};
-        }
-        return;
-      }
+      auto job_factory = std::bind_front(policy_type::lower_bound_job,
+        std::ranges::subrange(unordered_keys()),
+        compare_);
 
-      using NeedleIter =
-        std::ranges::iterator_t<const std::remove_reference_t<Needles>>;
+      auto reporter = [=, this](auto const& job) {
+        auto result = std::pair{end(), job.needle_cursor()};
 
-      struct Job {
-        decltype(policy_type::batch_lower_bound.make_job(
-          std::declval<const key_storage_type&>().cbegin(),
-          0,
-          std::declval<key_type>(),
-          std::declval<Compare>())) impl;
-        NeedleIter                  needle_it;
-
-        Job(const layout_map& map, NeedleIter it)
-            : impl(policy_type::batch_lower_bound.make_job(
-                map.keys_.cbegin(), map.keys_.size(), *it, map.compare_))
-            , needle_it(it)
-        {}
-
-        Job(Job&&)            = default;
-        Job& operator=(Job&&) = default;
-
-        vault::amac::concepts::job_step_result auto init()
-        {
-          return impl.init();
+        if (job.haystack_cursor == unordered_keys().end()) {
+          // pass
+        } else if (compare(*job.needle_cursor(), *job.haystack_cursor())) {
+          // pass
+        } else {
+          result.first = std::advance(begin(),
+            std::ranges::distance(
+              std::ranges::begin(unordered_keys()), job.haystack_cursor()));
         }
 
-        vault::amac::concepts::job_step_result auto step()
-        {
-          return impl.step();
-        }
+        *output++ = std::move(result);
       };
 
-      auto factory = [](const layout_map& map, NeedleIter it) {
-        return Job(map, it);
-      };
-
-      auto reporter = [this, &output](Job&& job) {
-        auto           key_it    = job.impl.result();
-        const_iterator result_it = end();
-
-        if (key_it != keys_.end()) {
-          if (!compare_(*job.needle_it, *key_it)) {
-            auto idx  = std::distance(keys_.cbegin(), key_it);
-            result_it = const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
-          }
-        }
-        *output++ = {job.needle_it, result_it};
-      };
-
-      vault::amac::coordinator<BatchSize>(*this, needles, factory, reporter);
+      executor(std::ranges::transform(needles, job_factory), reporter);
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept

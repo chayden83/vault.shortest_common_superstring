@@ -1,14 +1,16 @@
 #ifndef SORTED_LAYOUT_POLICY_HPP
 #define SORTED_LAYOUT_POLICY_HPP
 
-#include "concepts.hpp"
-#include "vault/algorithm/amac.hpp"
 #include <algorithm>
 #include <cassert>
 #include <functional>
 #include <iterator>
+#include <numeric>
 #include <ranges>
 #include <stdexcept>
+#include <type_traits>
+
+#include <vault/algorithm/amac.hpp>
 
 namespace eytzinger {
 
@@ -143,95 +145,102 @@ namespace eytzinger {
       }
     };
 
-    // --- AMAC Batch Support ---
+    static constexpr inline permute_fn        permute{};
+    static constexpr inline get_nth_sorted_fn get_nth_sorted{};
+    static constexpr inline next_index_fn     next_index{};
+    static constexpr inline prev_index_fn     prev_index{};
+    static constexpr inline lower_bound_fn    lower_bound{};
+    static constexpr inline upper_bound_fn    upper_bound{};
 
-    template <typename I, typename T, typename Comp, search_bound Bound>
-    struct search_job {
-      I              first;
-      std::ptrdiff_t count;
-      T              key;
-      Comp           comp;
+    // --- Batch Support ---
 
-      // State
-      I              current_mid_it;
-      std::ptrdiff_t step_size = 0;
+    template <typename HaystackI, typename NeedleI, typename Compare>
+    struct batch_job {
+      NeedleI needle_cursor_;
 
-      [[nodiscard]] search_job(I f, std::size_t n, T k, Comp c)
-          : first(f)
-          , count(static_cast<std::ptrdiff_t>(n))
-          , key(std::move(k))
-          , comp(c)
-          , current_mid_it(f)
-      {}
+      HaystackI haystack_cursor_;
+      HaystackI haystack_last_;
 
-      [[nodiscard]] vault::amac::job_step_result<1> init()
+      [[no_unique_address]] Compare compare_;
+
+      [[nodiscard]] constexpr vault::amac::job_step_result<1> init()
       {
-        if (count == 0) {
+        if (haystack_cursor_ == haystack_last_) {
           return {nullptr};
-        }
-        step_size      = count / 2;
-        current_mid_it = first + step_size;
-        return {std::to_address(current_mid_it)};
-      }
-
-      [[nodiscard]] vault::amac::job_step_result<1> step()
-      {
-        // Use IIFE for const-initialization
-        bool const go_right = [&] {
-          if constexpr (Bound == search_bound::upper) {
-            return !std::invoke(comp, key, *current_mid_it);
-          } else {
-            return std::invoke(comp, *current_mid_it, key);
-          }
-        }();
-
-        if (go_right) {
-          first = ++current_mid_it;
-          count -= (step_size + 1);
         } else {
-          count = step_size;
+          return {
+            std::addressof(*std::midpoint(haystack_cursor_, haystack_last_))};
+        }
+      }
+
+      [[nodiscard]] constexpr vault::amac::job_step_result<1> step()
+      {
+        auto middle = std::midpoint(haystack_cursor_, haystack_last_);
+
+        if (std::invoke(compare_, *middle, *needle_cursor_)) {
+          haystack_cursor_ = std::next(middle);
+        } else {
+          haystack_last_ = middle;
         }
 
-        if (count == 0) {
-          return {nullptr};
-        }
-
-        step_size      = count / 2;
-        current_mid_it = first + step_size;
-        return {std::to_address(current_mid_it)};
+        return init();
       }
 
-      [[nodiscard]] I result() const { return first; }
-    };
-
-    struct batch_lower_bound_fn {
-      template <typename I, typename T, typename Comp>
-      [[nodiscard]] static auto make_job(
-        I first, std::size_t n, T key, Comp comp)
+      [[nodiscard]] constexpr HaystackI haystack_cursor() const
       {
-        return search_job<I, T, Comp, search_bound::lower>(
-          first, n, std::move(key), comp);
+        return haystack_cursor_;
       }
-    };
 
-    struct batch_upper_bound_fn {
-      template <typename I, typename T, typename Comp>
-      [[nodiscard]] static auto make_job(
-        I first, std::size_t n, T key, Comp comp)
+      [[nodiscard]] constexpr NeedleI needle_cursor() const
       {
-        return search_job<I, T, Comp, search_bound::upper>(
-          first, n, std::move(key), comp);
+        return needle_cursor_;
       }
     };
 
-    static constexpr inline permute_fn           permute{};
-    static constexpr inline get_nth_sorted_fn    get_nth_sorted{};
-    static constexpr inline next_index_fn        next_index{};
-    static constexpr inline prev_index_fn        prev_index{};
-    static constexpr inline lower_bound_fn       lower_bound{};
-    static constexpr inline upper_bound_fn       upper_bound{};
-    static constexpr inline batch_lower_bound_fn batch_lower_bound{};
-    static constexpr inline batch_upper_bound_fn batch_upper_bound{};
+    struct lower_bound_job_fn {
+      template <std::ranges::forward_range Haystack,
+        typename Compare,
+        std::forward_iterator needle_iterator>
+      [[nodiscard]] static constexpr auto operator()(Haystack const& haystack,
+        Compare                                                      compare,
+        needle_iterator needle_cursor)
+      {
+        using haystack_iterator =
+          std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
+
+        return batch_job<haystack_iterator, needle_iterator, Compare>{
+          needle_cursor,
+          std::ranges::begin(haystack),
+          std::ranges::end(haystack),
+          compare};
+      }
+    };
+
+    struct upper_bound_job_fn {
+      template <std::ranges::forward_range Haystack,
+        typename Compare,
+        std::forward_iterator needle_iterator>
+      [[nodiscard]] static constexpr auto operator()(Haystack const& haystack,
+        Compare                                                      compare,
+        needle_iterator needle_cursor)
+      {
+        auto adapted_compare = [=](auto const& haystrand, auto const& needle) {
+          return not std::invoke(compare, needle, haystrand);
+        };
+
+        using haystack_iterator =
+          std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
+
+        return batch_job<haystack_iterator, needle_iterator, Compare>{
+          needle_cursor,
+          std::ranges::begin(haystack),
+          std::ranges::end(haystack),
+          adapted_compare};
+      }
+    };
+
+    static constexpr inline lower_bound_job_fn lower_bound_job{};
+    static constexpr inline upper_bound_job_fn upper_bound_job{};
   };
 
 } // namespace eytzinger
