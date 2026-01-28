@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-/**
- * @file amac.hpp
- *
- * @brief Header file for the Asynchronous Memory Access Coordinator.
- */
 
 #ifndef VAULT_AMAC_HPP
 #define VAULT_AMAC_HPP
