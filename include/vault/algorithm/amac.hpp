@@ -162,15 +162,15 @@ namespace vault::amac {
      *
      * @tparam J The specific job type being stored.
      */
-    template <typename J> class alignas(J) job_slot_t {
+    template <typename J> class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
 
     public:
-      [[nodiscard]] job_slot_t() = default;
+      [[nodiscard]] job_slot() = default;
 
-      job_slot_t(job_slot_t const&) = delete;
+      job_slot(job_slot const&) = delete;
 
-      job_slot_t& operator=(job_slot_t&& other)
+      job_slot& operator=(job_slot&& other)
       {
         if (this != std::addressof(other)) {
           *this->get() = std::move(*other.get());
@@ -179,7 +179,7 @@ namespace vault::amac {
         return *this;
       }
 
-      job_slot_t& operator=(job_slot_t const&) = delete;
+      job_slot& operator=(job_slot const&) = delete;
 
       [[nodiscard]] J* get() noexcept
       {
@@ -232,7 +232,7 @@ namespace vault::amac {
       // Populate up to N jobs from the range of needles and
       // prefetching the memory addresses they will use in the next
       // step.
-      auto jobs = std::array<job_slot_t<job_t>, N>{};
+      auto jobs = std::array<job_slot<job_t>, N>{};
 
       auto [jobs_first, jobs_last] = std::invoke([&] {
         auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
