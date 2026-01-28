@@ -3,7 +3,7 @@
  * @file amac.hpp
  *
  * @brief Asynchronous Memory Access Coordinator (AMAC)
- * Implementation.
+ *   Implementation.
  *
  * AMAC is a software-pipelining technique designed to hide memory
  * latency by interleaving the execution of multiple independent
