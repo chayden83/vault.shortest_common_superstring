@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <random>
+#include <ranges>
 #include <vector>
 
 // --- Test Job Definition ---
@@ -70,10 +71,7 @@ TEST_CASE("AMAC Coordinator: Countdown Integrity", "[amac][coordinator]")
     start_counts.push_back(dist(rng));
   }
 
-  // 2. Setup Haystack (Dummy)
-  std::vector<int> dummy_haystack;
-
-  // 3. Setup Reporting
+  // 2. Setup Reporting
   size_t reported_count = 0;
 
   auto reporter = [&](CountdownJob&& job) {
@@ -82,16 +80,15 @@ TEST_CASE("AMAC Coordinator: Countdown Integrity", "[amac][coordinator]")
     REQUIRE(job.counter() == 0);
   };
 
-  // 4. Setup Factory
-  auto factory = [](const std::vector<int>&, auto needle_it) {
-    return CountdownJob(*needle_it);
-  };
+  // 3. Create Jobs View (Lazy Construction)
+  // We transform the vector of integers into a range of CountdownJob objects.
+  auto jobs = start_counts
+    | std::views::transform([](int count) { return CountdownJob(count); });
 
-  // 5. Run Coordinator (Batch Size 16)
-  // We use a dummy haystack since our job is self-contained
-  vault::amac::coordinator<16>(dummy_haystack, start_counts, factory, reporter);
+  // 4. Run Coordinator (Batch Size 16)
+  vault::amac::coordinator<16>(jobs, reporter);
 
-  // 6. Verification
+  // 5. Verification
   // Condition: Reported is invoked N times
   CHECK(reported_count == num_jobs);
 }
@@ -103,7 +100,6 @@ TEST_CASE("AMAC Coordinator: Batch Size Sensitivity", "[amac][batch_size]")
 
   const size_t     num_jobs = 100;
   std::vector<int> start_counts(num_jobs, 5); // All jobs take 5 steps
-  std::vector<int> dummy_haystack;
 
   size_t reported_count = 0;
   auto   reporter       = [&](CountdownJob&& job) {
@@ -111,21 +107,18 @@ TEST_CASE("AMAC Coordinator: Batch Size Sensitivity", "[amac][batch_size]")
     REQUIRE(job.counter() == 0);
   };
 
-  auto factory = [](const std::vector<int>&, auto needle_it) {
-    return CountdownJob(*needle_it);
-  };
+  auto jobs = start_counts
+    | std::views::transform([](int count) { return CountdownJob(count); });
 
   SECTION("Batch Size = 1 (Serial Execution)")
   {
-    vault::amac::coordinator<1>(
-      dummy_haystack, start_counts, factory, reporter);
+    vault::amac::coordinator<1>(jobs, reporter);
     CHECK(reported_count == num_jobs);
   }
 
   SECTION("Batch Size = 2")
   {
-    vault::amac::coordinator<2>(
-      dummy_haystack, start_counts, factory, reporter);
+    vault::amac::coordinator<2>(jobs, reporter);
     CHECK(reported_count == num_jobs);
   }
 }
@@ -134,11 +127,6 @@ TEST_CASE(
   "AMAC Coordinator: Immediate Completion Edge Cases", "[amac][edge_cases]")
 {
   // Specifically target the "init returns nullptr" logic
-
-  std::vector<int> dummy_haystack;
-  auto             factory = [](const std::vector<int>&, auto needle_it) {
-    return CountdownJob(*needle_it);
-  };
 
   size_t reported_count = 0;
   auto   reporter       = [&](CountdownJob&& job) {
@@ -150,7 +138,11 @@ TEST_CASE(
   {
     // Needle 0 -> Counter 0 -> init() returns nullptr immediately
     std::vector<int> zeros(50, 0);
-    vault::amac::coordinator<16>(dummy_haystack, zeros, factory, reporter);
+
+    auto jobs = zeros
+      | std::views::transform([](int count) { return CountdownJob(count); });
+
+    vault::amac::coordinator<16>(jobs, reporter);
     CHECK(reported_count == 50);
   }
 
@@ -162,7 +154,10 @@ TEST_CASE(
       mixed.push_back(i % 2 == 0 ? 0 : 10);
     }
 
-    vault::amac::coordinator<16>(dummy_haystack, mixed, factory, reporter);
+    auto jobs = mixed
+      | std::views::transform([](int count) { return CountdownJob(count); });
+
+    vault::amac::coordinator<16>(jobs, reporter);
     CHECK(reported_count == 100);
   }
 }
@@ -227,8 +222,7 @@ TEST_CASE(
     needles.emplace_back(static_cast<int>(i), steps);
   }
 
-  std::vector<int> dummy_haystack;
-  size_t           reported_count = 0;
+  size_t reported_count = 0;
 
   auto reporter = [&](ResourceJob&& job) {
     // Touch the resource to ensure it's valid
@@ -237,14 +231,15 @@ TEST_CASE(
     reported_count++;
   };
 
-  auto factory = [](const auto&, auto needle_it) {
-    return ResourceJob(*needle_it);
-  };
+  // 2. Create Jobs View
+  auto jobs = needles | std::views::transform([](const auto& needle) {
+    return ResourceJob(needle);
+  });
 
-  // 2. Run with Batch Size 16
+  // 3. Run with Batch Size 16
   // This ensures we have enough active slots to trigger the "holes" pattern.
-  vault::amac::coordinator<16>(dummy_haystack, needles, factory, reporter);
+  vault::amac::coordinator<16>(jobs, reporter);
 
-  // 3. Verify
+  // 4. Verify
   CHECK(reported_count == num_jobs);
 }
