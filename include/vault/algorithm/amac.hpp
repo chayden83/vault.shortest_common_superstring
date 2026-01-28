@@ -12,28 +12,6 @@
 #include <tuple>
 #include <utility>
 
-namespace vault::amac {
-  template <std::size_t N>
-  struct job_step_result : public std::array<void const*, N> {
-    [[nodiscard]] constexpr explicit operator bool() const noexcept
-    {
-      return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return (((*this)[Is] == nullptr) && ...);
-      }(std::make_index_sequence<N>{});
-    }
-  };
-} // namespace vault::amac
-
-template <std::size_t N>
-struct std::tuple_size<vault::amac::job_step_result<N>> {
-  static constexpr inline auto const value = std::size_t{N};
-};
-
-template <std::size_t I, std::size_t N>
-struct std::tuple_element<I, vault::amac::job_step_result<N>> {
-  using type = void const*;
-};
-
 namespace vault::amac::concepts {
   template <typename T>
   concept job_step_result = std::constructible_from<bool, T> &&
@@ -56,13 +34,17 @@ namespace vault::amac::concepts {
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
-  template <std::forward_iterator I, std::sentinel_for<I> S>
-  [[nodiscard]] constexpr I bisect(I first, S last)
-  {
-    return std::ranges::next(first, std::ranges::distance(first, last) / 2);
-  }
+  template <std::size_t N>
+  struct job_step_result : public std::array<void const*, N> {
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+      return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return (((*this)[Is] == nullptr) && ...);
+      }(std::make_index_sequence<N>{});
+    }
+  };
 
-  template <uint8_t N> class conductor_fn {
+  template <uint8_t N> class coordinator_fn {
     template <concepts::job_step_result J>
     static constexpr void prefetch(J const& step_result)
     {
@@ -185,7 +167,7 @@ namespace vault::amac {
   };
 
   template <uint8_t N>
-  constexpr inline auto const conductor = conductor_fn<N>{};
+  constexpr inline auto const coordinator = coordinator_fn<N>{};
 } // namespace vault::amac
 
 namespace vault::amac {
@@ -195,6 +177,12 @@ namespace vault::amac {
       std::ranges::iterator_t<haystack_t const> m_haystack_last  = {};
 
       std::ranges::iterator_t<needles_t const> m_needle_itr = {};
+
+      template <std::forward_iterator I, std::sentinel_for<I> S>
+      [[nodiscard]] static constexpr I bisect(I first, S last)
+      {
+        return std::ranges::next(first, std::ranges::distance(first, last) / 2);
+      }
 
     public:
       [[nodiscard]] constexpr job_t(haystack_t const& haystack,
@@ -255,12 +243,22 @@ namespace vault::amac {
           return job_t<haystack_t, needles_t>(haystack, needle_itr);
         };
 
-      conductor<N>(haystack, needles, job_factory, std::move(reporter));
+      coordinator<N>(haystack, needles, job_factory, std::move(reporter));
     }
   };
 
   template <uint8_t N>
   constexpr inline auto const lower_bound = lower_bound_fn<N>{};
 } // namespace vault::amac
+
+template <std::size_t N>
+struct std::tuple_size<vault::amac::job_step_result<N>> {
+  static constexpr inline auto const value = std::size_t{N};
+};
+
+template <std::size_t I, std::size_t N>
+struct std::tuple_element<I, vault::amac::job_step_result<N>> {
+  using type = void const*;
+};
 
 #endif

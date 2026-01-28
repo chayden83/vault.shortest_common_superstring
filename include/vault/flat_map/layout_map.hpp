@@ -412,7 +412,7 @@ namespace eytzinger {
         *output++ = {job.needle_it, result_it};
       };
 
-      vault::amac::conductor<BatchSize>(*this, needles, factory, reporter);
+      vault::amac::coordinator<BatchSize>(*this, needles, factory, reporter);
     }
 
     template <uint8_t          BatchSize = 16,
@@ -480,7 +480,7 @@ namespace eytzinger {
         *output++ = {job.needle_it, result_it};
       };
 
-      vault::amac::conductor<BatchSize>(*this, needles, factory, reporter);
+      vault::amac::coordinator<BatchSize>(*this, needles, factory, reporter);
     }
 
     template <uint8_t          BatchSize = 16,
@@ -549,7 +549,7 @@ namespace eytzinger {
         *output++ = {job.needle_it, result_it};
       };
 
-      vault::amac::conductor<BatchSize>(*this, needles, factory, reporter);
+      vault::amac::coordinator<BatchSize>(*this, needles, factory, reporter);
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept
