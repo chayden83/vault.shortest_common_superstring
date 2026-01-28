@@ -3,7 +3,10 @@
 #ifndef VAULT_AMAC_HPP
 #define VAULT_AMAC_HPP
 
+#include <print>
+
 #include <algorithm>
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <functional>
@@ -72,8 +75,24 @@ namespace vault::amac {
       using job_t = std::remove_cvref_t<decltype(std::invoke(
         job_factory, haystack, std::ranges::begin(needles)))>;
 
-      struct alignas(job_t) job_slot_t {
+      class alignas(job_t) job_slot_t {
         std::byte storage[sizeof(job_t)];
+
+      public:
+        [[nodiscard]] job_slot_t() = default;
+
+        job_slot_t(job_slot_t const&) = delete;
+
+        job_slot_t& operator=(job_slot_t&& other)
+        {
+          if (this != std::addressof(other)) {
+            *this->get() = std::move(*other.get());
+          }
+
+          return *this;
+        }
+
+        job_slot_t& operator=(job_slot_t const&) = delete;
 
         [[nodiscard]] job_t* get() noexcept
         {
@@ -83,41 +102,35 @@ namespace vault::amac {
 
       auto jobs = std::array<job_slot_t, N>{};
 
-      auto needles_itr = std::ranges::begin(needles);
-      auto needles_end = std::ranges::end(needles);
+      auto [needles_first, needles_last] = std::ranges::subrange(needles);
 
-      auto const [jobs_first, jobs_last] = std::invoke([&] {
-        auto jobs_first = std::ranges::begin(jobs);
-        auto jobs_last  = std::ranges::end(jobs);
+      auto [jobs_first, jobs_last] = std::invoke([&] {
+        auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
 
-        while (jobs_first != jobs_last and needles_itr != needles_end) {
-          auto job = job_factory(haystack, needles_itr++);
+        while (jobs_first != jobs_last and needles_first != needles_last) {
+          auto job = job_factory(haystack, needles_first++);
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
             std::construct_at(jobs_first->get(), std::move(job));
             ++jobs_first;
-            continue;
+          } else {
+            std::invoke(reporter, std::move(job));
           }
-
-          std::invoke(reporter, std::move(job));
         }
 
-        return std::pair{std::ranges::begin(jobs), jobs_first};
+        return std::ranges::subrange(std::ranges::begin(jobs), jobs_first);
       });
 
       /////////////
       // EXECUTE //
       /////////////
 
-      auto active_jobs_first = jobs_first;
-      auto active_jobs_last  = jobs_last;
-
-      auto is_active = [&](auto& job) {
+      auto is_inactive = [&](auto& job) {
         if (auto addresses = job.get()->step()) {
-          return prefetch(addresses), true;
+          return prefetch(addresses), false;
         } else {
-          return std::invoke(reporter, std::move(*job.get())), false;
+          return std::invoke(reporter, std::move(*job.get())), true;
         }
       };
 
@@ -127,52 +140,40 @@ namespace vault::amac {
       // successfully activates, we insert it into the jobs slot where
       // we found the complete job. We immediately report and then
       // discard any newly constructed job that fails to activate.
-      while (needles_itr != needles_end) {
-        active_jobs_first =
-          std::find_if_not(active_jobs_first, active_jobs_last, is_active);
+      do {
+        auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
 
-        if (active_jobs_first == active_jobs_last) {
-          active_jobs_first = jobs_first;
-          continue;
-        };
-
-        auto inactive_job_cursor = active_jobs_first;
-
-        while (needles_itr != needles_end) {
-          auto job = job_factory(haystack, needles_itr++);
+        while (jobs_cursor != jobs_last && needles_first != needles_last) {
+          auto job = job_factory(haystack, needles_first++);
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
-            *active_jobs_first->get() = std::move(job);
-            ++active_jobs_first;
-            break;
+            *jobs_cursor->get() = std::move(job);
+            ++jobs_cursor;
+          } else {
+            std::invoke(reporter, std::move(job));
           }
-
-          std::invoke(reporter, std::move(job));
         }
 
-        if (active_jobs_first == inactive_job_cursor) {
-          active_jobs_last =
-            std::shift_left(active_jobs_first, active_jobs_last, 1);
+        for (auto itr = jobs_cursor; itr != jobs_last; ++itr) {
+          std::destroy_at(itr->get());
         }
+
+        jobs_last = jobs_cursor;
+      } while (needles_first != needles_last);
+
+      // Continue executing active jobs until they are all complete.
+      auto jobs_cursor = jobs_last;
+
+      while (jobs_cursor != jobs_first) {
+        jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       }
 
-      // Remove the jobs that are finished while preserving the order
-      // of the remaining jobs. This maximizes the latency between
-      // consecutive steps on the same job in order to give the the
-      // prefetch instruction the greatest possible opportunity to
-      // complete.
-      active_jobs_last = std::remove_if(
-        active_jobs_first, active_jobs_last, std::not_fn(is_active));
-
-      while (active_jobs_last != jobs_first) {
-        active_jobs_last =
-          std::remove_if(jobs_first, active_jobs_last, std::not_fn(is_active));
-      }
-
-      // We constructed the jobs in-place, so we have to explicitly
+      // We manutally constructed the jobs, so we must manually
       // destroy them.
-      std::destroy(jobs_first, jobs_last);
+      for (; jobs_first != jobs_last; ++jobs_first) {
+        std::destroy_at(jobs_first->get());
+      }
     }
   };
 
