@@ -54,6 +54,31 @@ namespace vault::amac {
       }(std::make_index_sequence<std::tuple_size_v<J>>{});
     }
 
+    template <typename J> class alignas(J) job_slot_t {
+      std::byte storage[sizeof(J)];
+
+    public:
+      [[nodiscard]] job_slot_t() = default;
+
+      job_slot_t(job_slot_t const&) = delete;
+
+      job_slot_t& operator=(job_slot_t&& other)
+      {
+        if (this != std::addressof(other)) {
+          *this->get() = std::move(*other.get());
+        }
+
+        return *this;
+      }
+
+      job_slot_t& operator=(job_slot_t const&) = delete;
+
+      [[nodiscard]] J* get() noexcept
+      {
+        return reinterpret_cast<J*>(&storage[0]);
+      }
+    };
+
   public:
     template <std::ranges::forward_range           haystack_t,
       std::ranges::input_range                     needles_t,
@@ -67,40 +92,15 @@ namespace vault::amac {
       job_factory_t                                    job_factory,
       reporter_t                                       reporter)
     {
-      ///////////
-      // SETUP //
-      ///////////
+      auto [needles_cursor, needles_last] = std::ranges::subrange(needles);
+
       using job_t = std::remove_cvref_t<decltype(std::invoke(
         job_factory, haystack, std::ranges::begin(needles)))>;
 
-      class alignas(job_t) job_slot_t {
-        std::byte storage[sizeof(job_t)];
-
-      public:
-        [[nodiscard]] job_slot_t() = default;
-
-        job_slot_t(job_slot_t const&) = delete;
-
-        job_slot_t& operator=(job_slot_t&& other)
-        {
-          if (this != std::addressof(other)) {
-            *this->get() = std::move(*other.get());
-          }
-
-          return *this;
-        }
-
-        job_slot_t& operator=(job_slot_t const&) = delete;
-
-        [[nodiscard]] job_t* get() noexcept
-        {
-          return reinterpret_cast<job_t*>(&storage[0]);
-        }
-      };
-
-      auto jobs = std::array<job_slot_t, N>{};
-
-      auto [needles_cursor, needles_last] = std::ranges::subrange(needles);
+      // Populate up to N jobs from the range of needles and
+      // prefetching the memory addresses they will use in the next
+      // step.
+      auto jobs = std::array<job_slot_t<job_t>, N>{};
 
       auto [jobs_first, jobs_last] = std::invoke([&] {
         auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
@@ -120,10 +120,9 @@ namespace vault::amac {
         return std::ranges::subrange(std::ranges::begin(jobs), jobs_first);
       });
 
-      /////////////
-      // EXECUTE //
-      /////////////
-
+      // A predicate that determines not only if a job is complete,
+      // but also takes the appropriate action depending on the jobs
+      // state.
       auto is_inactive = [&](auto& job) {
         if (auto addresses = job.get()->step()) {
           return prefetch(addresses), false;
@@ -132,12 +131,9 @@ namespace vault::amac {
         }
       };
 
-      // Step each of the active jobs one after another. If a job
-      // completes, we begin constructing new jobs from the remaining
-      // needles. Once we find a newly constructed job that
-      // successfully activates, we insert it into the jobs slot where
-      // we found the complete job. We immediately report and then
-      // discard any newly constructed job that fails to activate.
+      // Loop over the active jobs. Remove any that are complete and
+      // replace them with new jobs constructed from the remaining
+      // needles. Repeat until all needles are consumed.
       auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
 
       do {
@@ -156,7 +152,8 @@ namespace vault::amac {
         jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       } while (needles_cursor != needles_last);
 
-      // Continue executing active jobs until they are all complete.
+      // Once the needles are consumed, step active jobs until they
+      // are all complete.
       while (jobs_cursor != jobs_first) {
         jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       }
