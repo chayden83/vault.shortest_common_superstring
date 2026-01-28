@@ -2,14 +2,7 @@
 /**
  * @file amac.hpp
  *
- * @brief Asynchronous Memory Access Coordinator (AMAC)
- *   Implementation.
- *
- * AMAC is a software-pipelining technique designed to hide memory
- * latency by interleaving the execution of multiple independent
- * "jobs." It allows a single CPU core to exploit Memory-Level
- * Parallelism (MLP) by issuing prefetches for multiple jobs before
- * needing the data for any single job.
+ * @brief Header file for the Asynchronous Memory Access Coordinator.
  */
 
 #ifndef VAULT_AMAC_HPP
@@ -26,9 +19,60 @@
 #include <tuple>
 #include <utility>
 
+/**
+ * @defgroup vault_amac Asynchronous Memory Access Coordinator (AMAC)
+ *
+ * @brief A software-pipelining engine for hiding memory latency.
+ *
+ * AMAC is a software-pipelining technique designed to hide memory
+ * latency by interleaving the execution of multiple independent
+ * "jobs." It allows a single CPU core to exploit Memory-Level
+ * Parallelism (MLP) by issuing prefetches for multiple jobs before
+ * needing the data for any single job.
+ *
+ * **Memory Pressure and Prefetch Volume**
+ *
+ * The coordinator manages up to $N$ active jobs
+ * simultaneously. During each coordination cycle, the total number of
+ * outstanding prefetches is defined as $N \times K$, where $K$ is the
+ * number of pointers returned by the Job's `init()` or `step()`
+ * method.
+ *
+ * Users should be aware that high values of $N \times K$ can saturate
+ * the CPU's Line Fill Buffers (LFBs). Most modern x86_64 CPUs can
+ * track between 10 and 12 outstanding cache line fills. Exceeding
+ * this limit may cause the CPU to stall or ignore speculative
+ * prefetch requests.
+ *
+ * **Heuristics for Choosing Batch Size (N)**
+ *
+ * Selecting the appropriate $N$ is a balance between hiding latency
+ * and minimizing overhead. Consider the following factors:
+ *
+ * 1. **Data Locality**: If the "haystack" fits in the L2 or L3 cache,
+ * $N$ should be small (e.g., 2–4). The overhead of the coordinator
+ * loop outweighs the benefit of hiding the relatively low latency of
+ * a cache hit.
+ *
+ * 2. **DRAM Access**: For datasets significantly larger than the L3
+ * cache, $N$ should be larger (e.g., 8–16) to hide the ~200+ cycle
+ * latency of main memory.
+ *
+ * 3. **Search Type (K)**: For binary searches ($K=1$), $N$ can be
+ * higher.  For K-ary searches or multi-probe structures ($K > 1$),
+ * $N$ should be reduced to keep the total $N \times K$ product within
+ * the limits of the hardware's Fill Buffers.
+ *
+ * 4. **Job Complexity**: If the `step()` logic involves heavy
+ * computation (e.g., complex string comparisons or SIMD), a smaller
+ * $N$ is preferred to avoid "compute-stalling" the pipeline while
+ * memory is already available.
+ */
+
 namespace vault::amac::concepts {
   /**
    * @brief Validates the return type of job state transitions.
+   * @ingroup vault_amac
    *
    * A result must be explicitly convertible to bool (true = active,
    * false = done) and satisfy the tuple protocol where every element
@@ -42,6 +86,7 @@ namespace vault::amac::concepts {
 
   /**
    * @brief Defines the interface for an AMAC-compatible job.
+   * @ingroup vault_amac
    *
    * A Job is a state machine that transitions via init() and step().
    *
@@ -60,12 +105,14 @@ namespace vault::amac::concepts {
 
   /**
    * @brief Concept for a factory that produces AMAC jobs.
+   * @ingroup vault_amac
    */
   template <typename F, typename R, typename I>
   concept job_factory = job<std::invoke_result_t<F, R const&, I>>;
 
   /**
    * @brief Concept for a reporter that handles completed AMAC jobs.
+   * @ingroup vault_amac
    */
   template <typename R, typename J>
   concept job_reporter = std::invocable<R, J&&>;
@@ -74,6 +121,7 @@ namespace vault::amac::concepts {
 namespace vault::amac {
   /**
    * @brief A fixed-size collection of memory addresses to prefetch.
+   * @ingroup vault_amac
    *
    * @tparam N The number of simultaneous probes (e.g., 1 for Binary
    *   Search, 3 for Binary Fuse Filter).
@@ -95,6 +143,7 @@ namespace vault::amac {
 
   /**
    * @brief Functional coordinator for managing a batch of AMAC jobs.
+   * @ingroup vault_amac
    *
    * @tparam N The batch size (interleaving degree). Typical values
    *   are 8-16.
@@ -256,6 +305,7 @@ namespace vault::amac {
 
   /**
    * @brief Global instance of the coordinator.
+   * @ingroup vault_amac
    *
    * Usage: `vault::amac::coordinator<16>(haystack, needles, factory,
    * reporter);`
