@@ -166,3 +166,85 @@ TEST_CASE(
     CHECK(reported_count == 100);
   }
 }
+
+TEST_CASE(
+  "AMAC Coordinator: Double Free Regression Test", "[amac][resource][asan]")
+{
+  // This test uses std::unique_ptr to detect double-free bugs.
+  // If the coordinator performs a shallow byte-copy of the job during
+  // compaction (std::remove_if) instead of a proper move assignment, the
+  // unique_ptr in the source slot will remain valid. When both slots are
+  // eventually destroyed, the same pointer will be deleted twice, triggering
+  // ASan/UBSan.
+
+  class ResourceJob {
+    std::unique_ptr<int> m_resource;
+    int                  m_steps_remaining;
+
+  public:
+    // Needles are pairs: {id, steps}
+    using Needle = std::pair<int, int>;
+
+    explicit ResourceJob(Needle n)
+        : m_resource(std::make_unique<int>(n.first))
+        , m_steps_remaining(n.second)
+    {}
+
+    // Disable copy, allow move (standard for unique_ptr wrappers)
+    ResourceJob(const ResourceJob&)            = delete;
+    ResourceJob& operator=(const ResourceJob&) = delete;
+    ResourceJob(ResourceJob&&)                 = default;
+    ResourceJob& operator=(ResourceJob&&)      = default;
+
+    [[nodiscard]] vault::amac::job_step_result<1> init()
+    {
+      if (m_steps_remaining <= 0) {
+        return {nullptr};
+      }
+      m_steps_remaining--;
+      // Return address of heap data to simulate dependency
+      return {m_resource.get()};
+    }
+
+    [[nodiscard]] vault::amac::job_step_result<1> step() { return init(); }
+
+    [[nodiscard]] int id() const { return *m_resource; }
+  };
+
+  // 1. Setup Inputs
+  // We need a specific pattern to force compaction (std::remove_if):
+  // [Finish, Run, Finish, Run, ...]
+  // This creates "holes" at indices 0, 2, 4... requiring jobs at 1, 3, 5... to
+  // shift left.
+  const size_t                     num_jobs = 32;
+  std::vector<std::pair<int, int>> needles;
+  needles.reserve(num_jobs);
+
+  for (size_t i = 0; i < num_jobs; ++i) {
+    // Even indices finish immediately (0 steps).
+    // Odd indices run for 10 steps.
+    int steps = (i % 2 == 0) ? 0 : 10;
+    needles.emplace_back(static_cast<int>(i), steps);
+  }
+
+  std::vector<int> dummy_haystack;
+  size_t           reported_count = 0;
+
+  auto reporter = [&](ResourceJob&& job) {
+    // Touch the resource to ensure it's valid
+    volatile int x = job.id();
+    (void)x;
+    reported_count++;
+  };
+
+  auto factory = [](const auto&, auto needle_it) {
+    return ResourceJob(*needle_it);
+  };
+
+  // 2. Run with Batch Size 16
+  // This ensures we have enough active slots to trigger the "holes" pattern.
+  vault::amac::coordinator<16>(dummy_haystack, needles, factory, reporter);
+
+  // 3. Verify
+  CHECK(reported_count == num_jobs);
+}
