@@ -100,13 +100,13 @@ namespace vault::amac {
 
       auto jobs = std::array<job_slot_t, N>{};
 
-      auto [needles_first, needles_last] = std::ranges::subrange(needles);
+      auto [needles_cursor, needles_last] = std::ranges::subrange(needles);
 
       auto [jobs_first, jobs_last] = std::invoke([&] {
         auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
 
-        while (jobs_first != jobs_last and needles_first != needles_last) {
-          auto job = job_factory(haystack, needles_first++);
+        while (jobs_first != jobs_last and needles_cursor != needles_last) {
+          auto job = job_factory(haystack, needles_cursor++);
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
@@ -141,8 +141,8 @@ namespace vault::amac {
       auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
 
       do {
-        while (jobs_cursor != jobs_last && needles_first != needles_last) {
-          auto job = job_factory(haystack, needles_first++);
+        while (jobs_cursor != jobs_last && needles_cursor != needles_last) {
+          auto job = job_factory(haystack, needles_cursor++);
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
@@ -154,7 +154,7 @@ namespace vault::amac {
         }
 
         jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
-      } while (needles_first != needles_last);
+      } while (needles_cursor != needles_last);
 
       // Continue executing active jobs until they are all complete.
       while (jobs_cursor != jobs_first) {
