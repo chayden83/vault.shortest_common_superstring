@@ -3,8 +3,6 @@
 #ifndef VAULT_AMAC_HPP
 #define VAULT_AMAC_HPP
 
-#include <print>
-
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -140,9 +138,9 @@ namespace vault::amac {
       // successfully activates, we insert it into the jobs slot where
       // we found the complete job. We immediately report and then
       // discard any newly constructed job that fails to activate.
-      do {
-        auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
+      auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
 
+      do {
         while (jobs_cursor != jobs_last && needles_first != needles_last) {
           auto job = job_factory(haystack, needles_first++);
 
@@ -155,16 +153,10 @@ namespace vault::amac {
           }
         }
 
-        for (auto itr = jobs_cursor; itr != jobs_last; ++itr) {
-          std::destroy_at(itr->get());
-        }
-
-        jobs_last = jobs_cursor;
+        jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       } while (needles_first != needles_last);
 
       // Continue executing active jobs until they are all complete.
-      auto jobs_cursor = jobs_last;
-
       while (jobs_cursor != jobs_first) {
         jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       }
