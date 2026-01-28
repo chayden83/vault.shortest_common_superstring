@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <ranges>
 #include <tuple>
 #include <utility>
@@ -19,15 +20,14 @@ namespace vault::amac::concepts {
       return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
     }(std::make_index_sequence<std::tuple_size_v<T>>{});
 
-  template <typename J, typename R, typename I>
-  concept job = std::ranges::range<R> && std::input_iterator<I>
-    && std::move_constructible<J> && requires(J& job) {
-         { job.init() } -> job_step_result;
-         { job.step() } -> job_step_result;
-       };
+  template <typename J>
+  concept job = std::move_constructible<J> && requires(J& job) {
+    { job.init() } -> job_step_result;
+    { job.step() } -> job_step_result;
+  };
 
   template <typename F, typename R, typename I>
-  concept job_factory = job<std::invoke_result_t<F, R const&, I>, R, I>;
+  concept job_factory = job<std::invoke_result_t<F, R const&, I>>;
 
   template <typename R, typename J>
   concept job_reporter = std::invocable<R, J&&>;
@@ -39,7 +39,7 @@ namespace vault::amac {
     [[nodiscard]] constexpr explicit operator bool() const noexcept
     {
       return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
-        return (((*this)[Is] == nullptr) && ...);
+        return (((*this)[Is] != nullptr) || ...);
       }(std::make_index_sequence<N>{});
     }
   };
@@ -69,8 +69,8 @@ namespace vault::amac {
       ///////////
       // SETUP //
       ///////////
-      using job_t = decltype(std::invoke(
-        job_factory, haystack, std::ranges::begin(needles)));
+      using job_t = std::remove_cvref_t<decltype(std::invoke(
+        job_factory, haystack, std::ranges::begin(needles)))>;
 
       struct alignas(job_t) job_slot_t {
         std::byte storage[sizeof(job_t)];
@@ -97,7 +97,10 @@ namespace vault::amac {
             prefetch(addresses);
             std::construct_at(jobs_first->get(), std::move(job));
             ++jobs_first;
+            continue;
           }
+
+          std::invoke(reporter, std::move(job));
         }
 
         return std::pair{std::ranges::begin(jobs), jobs_first};
@@ -133,6 +136,8 @@ namespace vault::amac {
           continue;
         };
 
+        auto inactive_job_cursor = active_jobs_first;
+
         while (needles_itr != needles_end) {
           auto job = job_factory(haystack, needles_itr++);
 
@@ -144,6 +149,11 @@ namespace vault::amac {
           }
 
           std::invoke(reporter, std::move(job));
+        }
+
+        if (active_jobs_first == inactive_job_cursor) {
+          active_jobs_last =
+            std::shift_left(active_jobs_first, active_jobs_last, 1);
         }
       }
 
@@ -168,87 +178,6 @@ namespace vault::amac {
 
   template <uint8_t N>
   constexpr inline auto const coordinator = coordinator_fn<N>{};
-} // namespace vault::amac
-
-namespace vault::amac {
-  template <uint8_t N> struct lower_bound_fn {
-    template <typename haystack_t, typename needles_t> class job_t {
-      std::ranges::iterator_t<haystack_t const> m_haystack_first = {};
-      std::ranges::iterator_t<haystack_t const> m_haystack_last  = {};
-
-      std::ranges::iterator_t<needles_t const> m_needle_itr = {};
-
-      template <std::forward_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] static constexpr I bisect(I first, S last)
-      {
-        return std::ranges::next(first, std::ranges::distance(first, last) / 2);
-      }
-
-    public:
-      [[nodiscard]] constexpr job_t(haystack_t const& haystack,
-        std::ranges::iterator_t<needles_t const>      needle_itr)
-          : m_haystack_first{std::ranges::begin(haystack)}
-          , m_haystack_last{std::ranges::end(haystack)}
-          , m_needle_itr{needle_itr}
-      {}
-
-      [[nodiscard]] job_step_result<1> init() const
-      {
-        if (m_haystack_first == m_haystack_last) {
-          return {nullptr};
-        }
-
-        return {std::addressof(*bisect(m_haystack_first, m_haystack_last))};
-      }
-
-      [[nodiscard]] job_step_result<1> step()
-      {
-        auto haystack_middle = bisect(m_haystack_first, m_haystack_last);
-
-        // TODO: Generalize comparison.
-        if (*haystack_middle < *m_needle_itr) {
-          m_haystack_first = ++haystack_middle;
-        } else {
-          m_haystack_last = haystack_middle;
-        }
-
-        return init();
-      }
-
-      [[nodiscard]] std::ranges::iterator_t<needles_t const> needle_itr() const
-      {
-        return m_needle_itr;
-      }
-
-      [[nodiscard]] std::ranges::iterator_t<haystack_t const>
-      haystack_first() const
-      {
-        return m_haystack_first;
-      }
-
-      [[nodiscard]] std::ranges::iterator_t<haystack_t const>
-      haystack_last() const
-      {
-        return m_haystack_last;
-      }
-    };
-
-    template <typename haystack_t, typename needles_t>
-    static constexpr void operator()(
-      haystack_t const& haystack, needles_t const& needles, auto reporter)
-    {
-      auto job_factory =
-        [](haystack_t const&                       haystack,
-          std::ranges::iterator_t<needles_t const> needle_itr) {
-          return job_t<haystack_t, needles_t>(haystack, needle_itr);
-        };
-
-      coordinator<N>(haystack, needles, job_factory, std::move(reporter));
-    }
-  };
-
-  template <uint8_t N>
-  constexpr inline auto const lower_bound = lower_bound_fn<N>{};
 } // namespace vault::amac
 
 template <std::size_t N>
