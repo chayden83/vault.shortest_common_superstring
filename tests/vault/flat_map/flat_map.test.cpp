@@ -148,7 +148,7 @@ template <typename Policy> void test_traversal_logic(size_t n)
 
 // --- Topology Tests ---
 
-using Sorted              = eytzinger::sorted_layout_policy;
+using Sorted              = eytzinger::sorted_layout_policy<>;
 using Eytzinger           = eytzinger::eytzinger_layout_policy<6>;
 using ImplicitBTree_Tiny  = eytzinger::implicit_btree_layout_policy<2>;
 using ImplicitBTree_Large = eytzinger::implicit_btree_layout_policy<8>;
@@ -321,7 +321,7 @@ template <typename K, typename V>
 using DequeSortedMap = eytzinger::layout_map<K,
   V,
   std::less<K>,
-  eytzinger::sorted_layout_policy,
+  eytzinger::sorted_layout_policy<>,
   std::allocator<std::pair<const K, V>>,
   std::deque, // Keys: Deque
   std::deque  // Values: Deque
@@ -382,7 +382,7 @@ TEST_CASE(
 {
   using Eytzinger = eytzinger::eytzinger_layout_policy<6>;
   using BTree     = eytzinger::implicit_btree_layout_policy<8>;
-  using Sorted    = eytzinger::sorted_layout_policy;
+  using Sorted    = eytzinger::sorted_layout_policy<>;
 
   // 1. Vector (Contiguous) should work for ALL policies
   CHECK(CanInstantiateMap<int, int, Eytzinger, std::vector>);

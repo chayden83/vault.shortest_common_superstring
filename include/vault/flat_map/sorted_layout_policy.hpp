@@ -13,8 +13,10 @@
 
 namespace eytzinger {
 
-  struct sorted_layout_policy {
-    static constexpr inline const auto UID_V001 = 4185834535822629149uLL;
+  template <std::size_t Arity = 2> struct sorted_layout_policy {
+    static constexpr inline auto const ARITY    = Arity;
+    static constexpr inline auto const FANOUT   = ARITY - 1;
+    static constexpr inline auto const UID_V001 = 4185834535822629149uLL;
 
     template <typename I> struct is_compatible_key_iterator {
       static constexpr bool value = std::random_access_iterator<I>;

@@ -29,11 +29,6 @@ namespace eytzinger::detail {
 
   template <typename K> [[nodiscard]] consteval int calculate_optimal_prefetch()
   {
-    // Compile-time type checks
-    static_assert(
-        sizeof(K) > 0, "Key type must be complete and have non-zero size"
-    );
-
     constexpr std::size_t cache_line             = get_cache_line_size();
     constexpr std::size_t target_lookahead_bytes = 4 * cache_line;
 
@@ -56,16 +51,13 @@ namespace eytzinger::detail {
   [[nodiscard]] consteval std::size_t calculate_optimal_block_size()
   {
     // 1. Compile-time Safety Checks
-    static_assert(sizeof(K) > 0, "Key type must be complete");
     static_assert(std::is_object_v<K>, "Key type must be an object type");
 
     // We assume the cache line is sufficient for at least one element's
     // alignment
-    static_assert(
-        alignof(K) <= get_cache_line_size(),
-        "Key alignment requirements exceed cache line size, optimization "
-        "impossible"
-    );
+    static_assert(alignof(K) <= get_cache_line_size(),
+      "Key alignment requirements exceed cache line size, optimization "
+      "impossible");
 
     // 2. SIMD Optimization Check
     // If K is integral and fits within the 64-byte AVX2 width, we force B to
@@ -77,10 +69,8 @@ namespace eytzinger::detail {
 
         // Assertions for SIMD logic
         static_assert(simd_B >= 1, "SIMD block size must be at least 1");
-        static_assert(
-            (simd_B * sizeof(K)) <= simd_target_bytes,
-            "Block exceeds SIMD width"
-        );
+        static_assert((simd_B * sizeof(K)) <= simd_target_bytes,
+          "Block exceeds SIMD width");
 
         return simd_B;
       }
@@ -104,8 +94,7 @@ namespace eytzinger::detail {
       // Sanity checks for the generic calculation
       static_assert(calculated_B >= 1, "Calculated block size cannot be zero");
       static_assert(
-          calculated_B * sizeof(K) <= cache_line, "Block exceeds cache line"
-      );
+        calculated_B * sizeof(K) <= cache_line, "Block exceeds cache line");
 
       return calculated_B;
     }
@@ -116,17 +105,15 @@ namespace eytzinger::detail {
 
 namespace eytzinger {
 
-  template <
-      typename K,
-      typename V,
-      typename Compare   = std::less<>,
-      typename Allocator = std::allocator<std::pair<const K, V>>>
-  using eytzinger_map = layout_map<
-      K,
-      V,
-      Compare,
-      eytzinger_layout_policy<detail::calculate_optimal_prefetch<K>()>,
-      Allocator>;
+  template <typename K,
+    typename V,
+    typename Compare   = std::less<>,
+    typename Allocator = std::allocator<std::pair<const K, V>>>
+  using eytzinger_map = layout_map<K,
+    V,
+    Compare,
+    eytzinger_layout_policy<detail::calculate_optimal_prefetch<K>()>,
+    Allocator>;
 
   /**
    * @brief A layout_map specialized for the Implicit B-Tree layout.
@@ -136,24 +123,23 @@ namespace eytzinger {
    * - Otherwise, B is calculated to fill one CPU cache line, respecting
    * alignment.
    */
-  template <
-      typename K,
-      typename V,
-      typename Compare   = std::less<>,
-      typename Allocator = std::allocator<std::pair<const K, V>>>
-  using btree_map = layout_map<
-      K,
-      V,
-      Compare,
-      implicit_btree_layout_policy<detail::calculate_optimal_block_size<K>()>,
-      Allocator>;
+  template <typename K,
+    typename V,
+    typename Compare   = std::less<>,
+    typename Allocator = std::allocator<std::pair<const K, V>>>
+  using btree_map = layout_map<K,
+    V,
+    Compare,
+    implicit_btree_layout_policy<detail::calculate_optimal_block_size<K>()>,
+    Allocator>;
 
-  template <
-      typename K,
-      typename V,
-      typename Compare   = std::less<>,
-      typename Allocator = std::allocator<std::pair<const K, V>>>
-  using sorted_map = layout_map<K, V, Compare, sorted_layout_policy, Allocator>;
+  template <typename K,
+    typename V,
+    typename Compare   = std::less<>,
+    typename Fanout    = std::integral_constant<std::size_t, 2>,
+    typename Allocator = std::allocator<std::pair<const K, V>>>
+  using sorted_map =
+    layout_map<K, V, Compare, sorted_layout_policy<Fanout::value>, Allocator>;
 
 } // namespace eytzinger
 

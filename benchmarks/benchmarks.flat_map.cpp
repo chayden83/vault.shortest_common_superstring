@@ -483,12 +483,12 @@ static void BM_Batch_Find(benchmark::State& state)
 
 // --- Register Batch Benchmarks ---
 
-REGISTER_ALL_BATCH_TYPES("Sorted", eytzinger::sorted_layout_policy)
+REGISTER_ALL_BATCH_TYPES("Sorted", eytzinger::sorted_layout_policy<>)
 REGISTER_ALL_BATCH_TYPES("Eytzinger", eytzinger::eytzinger_layout_policy<6>)
 REGISTER_ALL_BATCH_TYPES("BTree", eytzinger::implicit_btree_layout_policy<16>)
 
 REGISTER_BATCH_BENCHMARKS(
-  "Sorted", eytzinger::sorted_layout_policy, "String", std::string)
+  "Sorted", eytzinger::sorted_layout_policy<>, "String", std::string)
 REGISTER_BATCH_BENCHMARKS(
   "Eytzinger", eytzinger::eytzinger_layout_policy<6>, "String", std::string)
 REGISTER_BATCH_BENCHMARKS(
@@ -553,7 +553,7 @@ static void BM_Batch_Lookup_BASELINE(benchmark::State& state)
 // --- Benchmarks Registration ---
 
 // 1. Sorted Baseline
-REGISTER_ALL_BASELINES("Sorted", eytzinger::sorted_layout_policy)
+REGISTER_ALL_BASELINES("Sorted", eytzinger::sorted_layout_policy<>)
 
 // 2. Eytzinger Baseline
 REGISTER_ALL_BASELINES("Eytzinger", eytzinger::eytzinger_layout_policy<6>)
@@ -563,7 +563,7 @@ REGISTER_ALL_BASELINES("BTree", eytzinger::implicit_btree_layout_policy<16>)
 
 // 4. String Baselines
 REGISTER_BASELINE_BENCHMARKS(
-  "Sorted", eytzinger::sorted_layout_policy, "String", std::string)
+  "Sorted", eytzinger::sorted_layout_policy<>, "String", std::string)
 REGISTER_BASELINE_BENCHMARKS(
   "Eytzinger", eytzinger::eytzinger_layout_policy<6>, "String", std::string)
 REGISTER_BASELINE_BENCHMARKS(

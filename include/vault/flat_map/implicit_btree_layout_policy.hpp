@@ -257,7 +257,9 @@ namespace eytzinger {
     static_assert((B % 2 == 0),
       "Block size should be even for proper alignment/node sizing");
 
-    static constexpr inline const auto UID_V001 = 15922480214965706541uLL;
+    static constexpr inline auto const ARITY    = B + 1;
+    static constexpr inline auto const FANOUT   = 1;
+    static constexpr inline auto const UID_V001 = 15922480214965706541uLL;
 
     template <typename I> struct is_compatible_key_iterator {
       static constexpr bool value = std::contiguous_iterator<I>;

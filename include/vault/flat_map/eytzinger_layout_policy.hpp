@@ -24,8 +24,10 @@
 
 namespace eytzinger {
 
-  template <int L = 6> struct eytzinger_layout_policy {
-    static constexpr inline const auto UID_V001 = 16427278603008041617uLL;
+  template <std::size_t L = 6> struct eytzinger_layout_policy {
+    static constexpr inline auto const ARITY    = 2;
+    static constexpr inline auto const FANOUT   = 1;
+    static constexpr inline auto const UID_V001 = 16427278603008041617uLL;
 
     template <typename I> struct is_compatible_key_iterator {
       static constexpr bool value = std::contiguous_iterator<I>;
