@@ -253,22 +253,24 @@ namespace eytzinger {
 
     [[nodiscard]] constexpr auto keys() const noexcept
     {
-      using Iter = layout_iterator<const key_storage_type>;
-      std::size_t start_idx =
-        keys_.empty() ? -1 : policy_type::sorted_rank_to_index(0, keys_.size());
+      using Iter            = layout_iterator<const key_storage_type>;
+      std::size_t start_idx = keys_.empty()
+        ? size()
+        : policy_type::sorted_rank_to_index(0, keys_.size());
       return std::ranges::subrange(
-        Iter(keys_, static_cast<std::ptrdiff_t>(start_idx)), Iter(keys_, -1));
+        Iter(keys_, static_cast<std::ptrdiff_t>(start_idx)),
+        Iter(keys_, size()));
     }
 
     [[nodiscard]] constexpr auto values() const noexcept
     {
       using Iter            = layout_iterator<const value_storage_type>;
       std::size_t start_idx = values_.empty()
-        ? -1
+        ? size()
         : policy_type::sorted_rank_to_index(0, values_.size());
       return std::ranges::subrange(
         Iter(values_, static_cast<std::ptrdiff_t>(start_idx)),
-        Iter(values_, -1));
+        Iter(values_, size()));
     }
 
     template <typename K0 = key_type>
@@ -364,10 +366,6 @@ namespace eytzinger {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        if (offset == size()) {
-          offset = -1;
-        }
-
         *output++ =
           std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
@@ -394,10 +392,6 @@ namespace eytzinger {
       auto reporter = [&, this](auto const& job) mutable {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
-
-        if (offset == size()) {
-          offset = -1;
-        }
 
         *output++ =
           std::pair{job.needle_cursor(), const_iterator{*this, offset}};
@@ -432,10 +426,6 @@ namespace eytzinger {
         } else {
           auto offset = std::ranges::distance(
             std::ranges::begin(unordered_keys()), job.haystack_cursor());
-
-          if (offset == size()) {
-            offset = -1;
-          }
 
           result.second = const_iterator{*this, offset};
         }
@@ -473,7 +463,7 @@ namespace eytzinger {
 
     [[nodiscard]] constexpr const_iterator end() const noexcept
     {
-      return const_iterator(*this, -1);
+      return const_iterator(*this, size());
     }
 
     [[nodiscard]] constexpr const_iterator cbegin() const noexcept

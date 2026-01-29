@@ -20,7 +20,7 @@ namespace eytzinger {
 
     /**
      * @brief Unique identifier of verison 1 of the
-     *   sorted_layout_policy.
+     * sorted_layout_policy.
      *
      * The version identifier **should** be included in the serialized
      * representation of the layout policy, and it **must** be updated
@@ -90,12 +90,10 @@ namespace eytzinger {
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
-        assert(i >= -1 && i < n && "Index out of bounds");
-        if (i >= n - 1) {
-          return -1;
-        } else {
-          return i + 1;
-        }
+        // Valid to increment: [0, n-1].
+        // Sentinel 'n' cannot be incremented.
+        assert(i >= 0 && i < n && "Cannot increment end iterator");
+        return i + 1;
       }
     };
 
@@ -104,11 +102,12 @@ namespace eytzinger {
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
-        assert(i >= -1 && i < n && "Index out of bounds");
-        if (i == -1) {
-          return (n == 0) ? -1 : n - 1;
+        assert(i >= 0 && i <= n && "Index out of bounds");
+
+        if (i == n) {
+          return (n == 0) ? n : n - 1; // Decrementing end() -> last element
         } else if (i == 0) {
-          return -1;
+          return n; // Decrementing begin() -> underflow to sentinel
         } else {
           return i - 1;
         }

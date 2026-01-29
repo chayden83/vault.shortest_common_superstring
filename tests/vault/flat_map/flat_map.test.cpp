@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
-#include <iostream> // For diagnostics
 #include <limits>
 #include <random>
 #include <set>

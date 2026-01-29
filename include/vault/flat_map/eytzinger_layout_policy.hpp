@@ -32,15 +32,7 @@ namespace eytzinger {
 
     /**
      * @brief Unique identifier of verison 1 of the
-     *   eytzinger_layout_policy.
-     *
-     * The version identifier **should** be included in the serialized
-     * representation of the layout policy, and it **must** be updated
-     * whenever you modify the eytzinger_layout_policy in a non-backward
-     * compatible manner. Otherwise we may deserialize an old version
-     * of the layout that is physically compatible with the current
-     * version, but logically incompatible. That may result in
-     * undefined behavior.
+     * eytzinger_layout_policy.
      */
     static constexpr inline auto const UID_V001 = 16427278603008041617uLL;
 
@@ -156,6 +148,8 @@ namespace eytzinger {
       }
     };
 
+    static constexpr inline permute_fn permute{};
+
     struct get_nth_sorted_fn {
       template <std::random_access_iterator I, std::sentinel_for<I> S>
       [[nodiscard]] static constexpr std::iter_reference_t<I> operator()(
@@ -178,13 +172,18 @@ namespace eytzinger {
       }
     };
 
+    static constexpr inline get_nth_sorted_fn get_nth_sorted{};
+
     struct next_index_fn {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
+        // Valid inputs: [0, n-1]. Input 'n_sz' (end) is invalid to increment.
+        assert(i >= 0 && i < static_cast<std::ptrdiff_t>(n_sz));
+
         std::ptrdiff_t n           = static_cast<std::ptrdiff_t>(n_sz);
         auto           right_child = (i << 1) + 2;
+
         if (right_child < n) {
           i               = right_child;
           auto left_child = (i << 1) + 1;
@@ -197,7 +196,9 @@ namespace eytzinger {
           while (i > 0 && !(i & 1)) {
             i = (i - 1) >> 1;
           }
-          return (i > 0) ? ((i - 1) >> 1) : -1;
+          // If we traversed back to root (i=0) and it was a right child
+          // (or root itself has no successor), return n (end).
+          return (i > 0) ? ((i - 1) >> 1) : n;
         }
       }
     };
@@ -206,18 +207,24 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
+        // Valid inputs: [0, n].
+        assert(i >= 0 && i <= static_cast<std::ptrdiff_t>(n_sz));
+
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
-        if (i == -1) {
+
+        // Handle decrementing End iterator (n)
+        if (i == n) {
           if (n == 0) {
-            return -1;
+            return n; // Empty: begin() == end()
           }
+          // The last element in sorted order is the right-most node in the tree
           i = 0;
           while ((i << 1) + 2 < n) {
             i = (i << 1) + 2;
           }
           return i;
         }
+
         auto left_child = (i << 1) + 1;
         if (left_child < n) {
           i                = left_child;
@@ -231,10 +238,15 @@ namespace eytzinger {
           while (i > 0 && (i & 1)) {
             i = (i - 1) >> 1;
           }
-          return (i > 0) ? ((i - 1) >> 1) : -1;
+          // If we traversed back to root and it was a left child,
+          // we have exhausted the tree. Return n (end).
+          return (i > 0) ? ((i - 1) >> 1) : n;
         }
       }
     };
+
+    static constexpr inline next_index_fn next_index{};
+    static constexpr inline prev_index_fn prev_index{};
 
     struct lower_bound_fn {
       template <std::random_access_iterator I,
@@ -259,6 +271,7 @@ namespace eytzinger {
           i             = (i << 1) + 1 + static_cast<std::size_t>(go_right);
         }
         std::size_t result_idx = restore_lower_bound_index(i);
+        // Map internal failure (-1) to 'n' (end)
         return (result_idx == static_cast<std::size_t>(-1))
           ? last
           : (first + result_idx);
@@ -322,6 +335,9 @@ namespace eytzinger {
       }
     };
 
+    static constexpr inline lower_bound_fn lower_bound{};
+    static constexpr inline upper_bound_fn upper_bound{};
+
     template <typename HaystackIter,
       typename NeedleIter,
       typename Comp,
@@ -381,6 +397,7 @@ namespace eytzinger {
       [[nodiscard]] HaystackIter haystack_cursor() const
       {
         std::size_t result_idx = restore_lower_bound_index(i);
+        // Correctly maps internal -1 to public n (end)
         return (result_idx == static_cast<std::size_t>(-1))
           ? (begin_it + n)
           : (begin_it + result_idx);
@@ -424,12 +441,6 @@ namespace eytzinger {
       }
     };
 
-    static constexpr inline permute_fn         permute{};
-    static constexpr inline get_nth_sorted_fn  get_nth_sorted{};
-    static constexpr inline next_index_fn      next_index{};
-    static constexpr inline prev_index_fn      prev_index{};
-    static constexpr inline lower_bound_fn     lower_bound{};
-    static constexpr inline upper_bound_fn     upper_bound{};
     static constexpr inline lower_bound_job_fn lower_bound_job{};
     static constexpr inline upper_bound_job_fn upper_bound_job{};
   };

@@ -262,18 +262,6 @@ namespace eytzinger {
     static constexpr inline auto const ARITY  = B + 1;
     static constexpr inline auto const FANOUT = 1;
 
-    /**
-     * @brief Unique identifier of verison 1 of the
-     *   implicit_btree_layout_policy.
-     *
-     * The version identifier **should** be included in the serialized
-     * representation of the layout policy, and it **must** be updated
-     * whenever you modify the implicit_btree_layout_policy in a
-     * non-backward compatible manner. Otherwise we may deserialize an
-     * old version of the layout that is physically compatible with
-     * the current version, but logically incompatible. That may
-     * result in undefined behavior.
-     */
     static constexpr inline auto const UID_V001 = 15922480214965706541uLL;
 
     template <typename I> struct is_compatible_key_iterator {
@@ -302,8 +290,6 @@ namespace eytzinger {
         LAYOUT_PREFETCH(&base[child_start]);
 
         if (block_start + B <= n) {
-          // Full Block: Delegate to block_searcher (which handles SIMD or
-          // Scalar)
           std::size_t idx_in_block = block_searcher<T, Comp, B>::lower_bound(
             base + block_start, value, comp, proj);
 
@@ -312,7 +298,6 @@ namespace eytzinger {
           }
           k = detail::btree_child_block_index(k, idx_in_block, B);
         } else {
-          // Tail Block: Always scalar
           std::size_t count       = n - block_start;
           std::size_t idx_in_tail = scalar_block_searcher::lower_bound_n(
             base + block_start, count, value, comp, proj);
@@ -393,8 +378,9 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz)
       {
-        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
-        return detail::btree_next_index(i, n_sz, B);
+        assert(i >= 0 && i < static_cast<std::ptrdiff_t>(n_sz));
+        std::ptrdiff_t res = detail::btree_next_index(i, n_sz, B);
+        return (res == -1) ? static_cast<std::ptrdiff_t>(n_sz) : res;
       }
     };
 
@@ -402,8 +388,12 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz)
       {
-        assert(i >= -1 && i < static_cast<std::ptrdiff_t>(n_sz));
-        return detail::btree_prev_index(i, n_sz, B);
+        // Handle n_sz (end) as -1 for detail impl
+        std::ptrdiff_t input_i = (i == static_cast<std::ptrdiff_t>(n_sz)) ? -1
+                                                                          : i;
+        std::ptrdiff_t res     = detail::btree_prev_index(input_i, n_sz, B);
+        // Map output -1 (underflow) to n_sz
+        return (res == -1) ? static_cast<std::ptrdiff_t>(n_sz) : res;
       }
     };
 
@@ -597,8 +587,6 @@ namespace eytzinger {
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
 
-    // --- AMAC Batch Support ---
-
     template <typename HaystackIter,
       typename NeedleIter,
       typename Comp,
@@ -642,7 +630,6 @@ namespace eytzinger {
           return {nullptr};
         }
 
-        // Logic mirrors the scalar generic implementation but uses *needle_iter
         if (block_start + B <= n) {
           std::size_t idx_in_block = [&] {
             if constexpr (Bound == search_bound::upper) {
