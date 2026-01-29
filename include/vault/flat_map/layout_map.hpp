@@ -364,7 +364,8 @@ namespace eytzinger {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        *output++ = std::pair{job.needle_cursor(), std::next(begin(), offset)};
+        *output++ =
+          std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
 
       auto needle_cursors = std::views::iota(
@@ -390,7 +391,8 @@ namespace eytzinger {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        *output++ = std::pair{job.needle_cursor(), std::next(begin(), offset)};
+        *output++ =
+          std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
 
       auto needle_cursors = std::views::iota(
@@ -420,9 +422,10 @@ namespace eytzinger {
         } else if (compare_(*job.needle_cursor(), *job.haystack_cursor())) {
           // pass
         } else {
-          result.second = std::next(begin(),
-            std::ranges::distance(
-              std::ranges::begin(unordered_keys()), job.haystack_cursor()));
+          auto offset = std::ranges::distance(
+            std::ranges::begin(unordered_keys()), job.haystack_cursor());
+
+          result.second = const_iterator{*this, offset};
         }
 
         *output++ = std::move(result);
