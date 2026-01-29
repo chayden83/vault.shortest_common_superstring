@@ -347,7 +347,8 @@ namespace eytzinger {
 
     // --- AMAC Batch Interface ---
 
-    template <typename Executor,
+    template <std::size_t TotalFanout = 16,
+      typename Executor,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
@@ -374,7 +375,8 @@ namespace eytzinger {
       executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
-    template <typename Executor,
+    template <std::size_t TotalFanout = 16,
+      typename Executor,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,
@@ -401,7 +403,8 @@ namespace eytzinger {
       executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
-    template <typename Executor,
+    template <std::size_t TotalFanout = 16,
+      typename Executor,
       std::ranges::input_range Needles,
       typename OutputIt>
       requires std::output_iterator<OutputIt,

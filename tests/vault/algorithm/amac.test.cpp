@@ -3,7 +3,6 @@
 
 #include <vault/algorithm/amac.hpp>
 
-#include <atomic>
 #include <random>
 #include <ranges>
 #include <vector>
@@ -16,6 +15,8 @@ class CountdownJob {
   int m_counter;
 
 public:
+  [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
+
   // Needles are simple integers representing the starting count
   using Needle = int;
 
@@ -177,6 +178,8 @@ TEST_CASE(
     int                  m_steps_remaining;
 
   public:
+    [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
+
     // Needles are pairs: {id, steps}
     using Needle = std::pair<int, int>;
 

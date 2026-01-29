@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
-#include <cstdint>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -93,10 +92,11 @@ namespace vault::amac::concepts {
    *   undefined behavior during range compaction.
    */
   template <typename J>
-  concept job = std::move_constructible<J> && requires(J& job) {
-    { job.init() } -> job_step_result;
-    { job.step() } -> job_step_result;
-  };
+  concept job =
+    std::move_constructible<J> && J::fanout() > 0uz && requires(J& job) {
+      { job.init() } -> job_step_result;
+      { job.step() } -> job_step_result;
+    };
 
   /**
    * @brief Concept for a factory that produces AMAC jobs.
@@ -140,10 +140,10 @@ namespace vault::amac {
    * @brief Functional coordinator for managing a batch of AMAC jobs.
    * @ingroup vault_amac
    *
-   * @tparam N The batch size (interleaving degree). Typical values
-   *   are 8-16.
+   * @tparam TotalFanout The interleaving degree. Typical values are
+   *   8-16.
    */
-  template <uint8_t N> class coordinator_fn {
+  template <uint8_t TotalFanout = 16> class coordinator_fn {
     template <concepts::job_step_result J>
     static constexpr void prefetch(J const& step_result)
     {
@@ -218,10 +218,10 @@ namespace vault::amac {
 
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
-      // Populate up to N jobs from the range of needles and
-      // prefetching the memory addresses they will use in the next
-      // step.
-      auto jobs = std::array<job_slot<job_t>, N>{};
+      static constexpr auto const JOB_COUNT =
+        (TotalFanout + job_t::fanout() - 1) / job_t::fanout();
+
+      auto jobs = std::array<job_slot<job_t>, JOB_COUNT>{};
 
       auto [jobs_first, jobs_last] = std::invoke([&] {
         auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
@@ -295,10 +295,11 @@ namespace vault::amac {
    * Usage: `vault::amac::coordinator<16>(haystack, needles, factory,
    * reporter);`
    *
-   * @tparam N The batch size (interleaving degree).
+   * @tparam TotalFanout The interleaving degree. Typical values are
+   *   8-16.
    */
-  template <uint8_t N>
-  constexpr inline auto const coordinator = coordinator_fn<N>{};
+  template <uint8_t TotalFanout = 16>
+  constexpr inline auto const coordinator = coordinator_fn{};
 } // namespace vault::amac
 
 template <std::size_t N>

@@ -312,6 +312,11 @@ namespace eytzinger {
       typename Comp,
       search_bound Bound>
     struct search_job {
+      [[nodiscard]] static constexpr uint64_t fanout()
+      {
+        return eytzinger_layout_policy::FANOUT;
+      }
+
       using ValT = std::iter_value_t<HaystackIter>;
 
       HaystackIter begin_it;

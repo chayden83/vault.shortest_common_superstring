@@ -157,6 +157,11 @@ namespace eytzinger {
 
     template <typename HaystackI, typename NeedleI, typename Compare>
     struct batch_job {
+      [[nodiscard]] static constexpr uint64_t fanout()
+      {
+        return sorted_layout_policy::FANOUT;
+      }
+
       NeedleI needle_cursor_;
 
       HaystackI haystack_cursor_;

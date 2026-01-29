@@ -589,9 +589,13 @@ namespace eytzinger {
       typename Comp,
       search_bound Bound>
     struct search_job {
+      [[nodiscard]] static constexpr uint64_t fanout()
+      {
+        return implicit_btree_layout_policy::FANOUT;
+      }
+
       using ValT = std::iter_value_t<HaystackIter>;
 
-      const ValT*  base;
       HaystackIter begin_it;
       std::size_t  n;
       NeedleIter   needle_iter; // Storing iterator
@@ -601,8 +605,7 @@ namespace eytzinger {
 
       [[nodiscard]] search_job(
         HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
-          : base(std::to_address(first))
-          , begin_it(first)
+          : begin_it(first)
           , n(size)
           , needle_iter(n_iter)
           , comp(c)
@@ -614,7 +617,7 @@ namespace eytzinger {
         if (n == 0) {
           return {nullptr};
         }
-        return {reinterpret_cast<const void*>(base)};
+        return {std::to_address(begin_it)};
       }
 
       [[nodiscard]] vault::amac::job_step_result<1> step()
@@ -629,10 +632,16 @@ namespace eytzinger {
           std::size_t idx_in_block = [&] {
             if constexpr (Bound == search_bound::upper) {
               return block_searcher<ValT, Comp, B>::upper_bound(
-                base + block_start, *needle_iter, comp, std::identity{});
+                std::to_address(begin_it + block_start),
+                *needle_iter,
+                comp,
+                std::identity{});
             } else {
               return block_searcher<ValT, Comp, B>::lower_bound(
-                base + block_start, *needle_iter, comp, std::identity{});
+                std::to_address(begin_it + block_start),
+                *needle_iter,
+                comp,
+                std::identity{});
             }
           }();
 
@@ -645,10 +654,18 @@ namespace eytzinger {
           std::size_t idx_in_tail = [&] {
             if constexpr (Bound == search_bound::upper) {
               return scalar_block_searcher::upper_bound_n(
-                base + block_start, count, *needle_iter, comp, std::identity{});
+                std::to_address(begin_it + block_start),
+                count,
+                *needle_iter,
+                comp,
+                std::identity{});
             } else {
               return scalar_block_searcher::lower_bound_n(
-                base + block_start, count, *needle_iter, comp, std::identity{});
+                std::to_address(begin_it + block_start),
+                count,
+                *needle_iter,
+                comp,
+                std::identity{});
             }
           }();
 
@@ -664,7 +681,7 @@ namespace eytzinger {
           return {nullptr};
         }
 
-        return {reinterpret_cast<const void*>(base + (k * B))};
+        return {std::to_address(begin_it + (k * B))};
       }
 
       [[nodiscard]] HaystackIter haystack_cursor() const
