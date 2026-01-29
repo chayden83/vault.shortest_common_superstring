@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include <utility>
 #include <vault/algorithm/amac.hpp>
 
 namespace eytzinger {
@@ -170,29 +171,63 @@ namespace eytzinger {
       [[no_unique_address]] Compare compare_;
 
       template <std::forward_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] static constexpr I bisect(I first, S last)
+      [[nodiscard]] static constexpr std::array<I, FANOUT> n_sect(
+        I first, S last)
       {
-        return std::next(first, std::distance(first, last) / 2);
+        auto chunk_size = std::distance(first, last) / ARITY;
+
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+          return std::array<I, FANOUT>{
+            std::next(first, chunk_size * (Is + 1))...};
+        }(std::make_index_sequence<FANOUT>{});
       }
 
-      [[nodiscard]] constexpr vault::amac::job_step_result<1> init()
+      [[nodiscard]] constexpr vault::amac::job_step_result<FANOUT> init()
       {
+        using result = vault::amac::job_step_result<FANOUT>;
+
         if (haystack_cursor_ == haystack_last_) {
-          return {nullptr};
+          return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return result{((void)Is, nullptr)...};
+          }(std::make_index_sequence<FANOUT>{});
         } else {
-          return {std::addressof(*bisect(haystack_cursor_, haystack_last_))};
+          auto pivots = n_sect(haystack_cursor_, haystack_last_);
+
+          return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+            return result{std::addressof(*std::get<Is>(pivots))...};
+          }(std::make_index_sequence<FANOUT>{});
         }
       }
 
-      [[nodiscard]] constexpr vault::amac::job_step_result<1> step()
+      [[nodiscard]] constexpr vault::amac::job_step_result<FANOUT> step()
       {
-        auto middle = bisect(haystack_cursor_, haystack_last_);
+        auto pivots = n_sect(haystack_cursor_, haystack_last_);
 
-        if (std::invoke(compare_, *middle, *needle_cursor_)) {
-          haystack_cursor_ = std::next(middle);
-        } else {
-          haystack_last_ = middle;
-        }
+        // clang-format off
+
+        auto head = []<std::size_t H, std::size_t... Is>
+	  (std::index_sequence<H, Is...>) { return H; };
+
+        auto tail = []<std::size_t H, std::size_t... Is>
+	  (std::index_sequence<H, Is...>)
+	{ return std::index_sequence<Is...>{}; };
+
+        [&]<std::size_t... Is>
+	  (this auto &&self, std::index_sequence<Is...> idxs)
+        {
+          if constexpr (sizeof...(Is) != 0) {
+            auto n_cursor = std::get<head(idxs)>(pivots);
+	    
+            if (std::invoke(compare_, *n_cursor, *needle_cursor_)) {
+              haystack_cursor_ = std::next(n_cursor);
+              self(tail(idxs));
+            } else {
+              haystack_last_ = n_cursor;
+            }
+          }
+        }(std::make_index_sequence<FANOUT>{});
+
+        // clang-format on
 
         return init();
       }
