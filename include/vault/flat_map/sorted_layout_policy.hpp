@@ -203,31 +203,14 @@ namespace eytzinger {
       {
         auto pivots = n_sect(haystack_cursor_, haystack_last_);
 
-        // clang-format off
-
-        auto head = []<std::size_t H, std::size_t... Is>
-	  (std::index_sequence<H, Is...>) { return H; };
-
-        auto tail = []<std::size_t H, std::size_t... Is>
-	  (std::index_sequence<H, Is...>)
-	{ return std::index_sequence<Is...>{}; };
-
-        [&]<std::size_t... Is>
-	  (this auto &&self, std::index_sequence<Is...> idxs)
-        {
-          if constexpr (sizeof...(Is) != 0) {
-            auto n_cursor = std::get<head(idxs)>(pivots);
-	    
-            if (std::invoke(compare_, *n_cursor, *needle_cursor_)) {
-              haystack_cursor_ = std::next(n_cursor);
-              self(tail(idxs));
-            } else {
-              haystack_last_ = n_cursor;
-            }
+        for (auto&& pivot : pivots) {
+          if (std::invoke(compare_, *pivot, *needle_cursor_)) {
+            haystack_cursor_ = std::next(pivot);
+          } else {
+            haystack_last_ = pivot;
+            break;
           }
-        }(std::make_index_sequence<FANOUT>{});
-
-        // clang-format on
+        }
 
         return init();
       }
