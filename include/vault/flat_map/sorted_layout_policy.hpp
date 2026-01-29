@@ -15,8 +15,21 @@
 namespace eytzinger {
 
   template <std::size_t Arity = 2> struct sorted_layout_policy {
-    static constexpr inline auto const ARITY    = Arity;
-    static constexpr inline auto const FANOUT   = ARITY - 1;
+    static constexpr inline auto const ARITY  = Arity;
+    static constexpr inline auto const FANOUT = ARITY - 1;
+
+    /**
+     * @brief Unique identifier of verison 1 of the
+     *   sorted_layout_policy.
+     *
+     * The version identifier **should** be included in the serialized
+     * representation of the layout policy, and it **must** be updated
+     * whenever you modify the sorted_layout_policy in a non-backward
+     * compatible manner. Otherwise we may deserialize an old version
+     * of the layout that is physically compatible with the current
+     * version, but logically incompatible. That may result in
+     * undefined behavior.
+     */
     static constexpr inline auto const UID_V001 = 4185834535822629149uLL;
 
     template <typename I> struct is_compatible_key_iterator {
@@ -80,8 +93,9 @@ namespace eytzinger {
         assert(i >= -1 && i < n && "Index out of bounds");
         if (i >= n - 1) {
           return -1;
+        } else {
+          return i + 1;
         }
-        return i + 1;
       }
     };
 
@@ -93,11 +107,11 @@ namespace eytzinger {
         assert(i >= -1 && i < n && "Index out of bounds");
         if (i == -1) {
           return (n == 0) ? -1 : n - 1;
-        }
-        if (i == 0) {
+        } else if (i == 0) {
           return -1;
+        } else {
+          return i - 1;
         }
-        return i - 1;
       }
     };
 

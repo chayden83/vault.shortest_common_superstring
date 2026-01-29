@@ -2,7 +2,7 @@
 #define IMPLICIT_BTREE_LAYOUT_POLICY_HPP
 
 #include "concepts.hpp"
-#include "vault/algorithm/amac.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -11,6 +11,8 @@
 #include <ranges>
 #include <stdexcept>
 #include <vector>
+
+#include <vault/algorithm/amac.hpp>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define LAYOUT_PREFETCH(ptr) __builtin_prefetch(ptr, 0, 3)
@@ -257,8 +259,21 @@ namespace eytzinger {
     static_assert((B % 2 == 0),
       "Block size should be even for proper alignment/node sizing");
 
-    static constexpr inline auto const ARITY    = B + 1;
-    static constexpr inline auto const FANOUT   = 1;
+    static constexpr inline auto const ARITY  = B + 1;
+    static constexpr inline auto const FANOUT = 1;
+
+    /**
+     * @brief Unique identifier of verison 1 of the
+     *   implicit_btree_layout_policy.
+     *
+     * The version identifier **should** be included in the serialized
+     * representation of the layout policy, and it **must** be updated
+     * whenever you modify the implicit_btree_layout_policy in a
+     * non-backward compatible manner. Otherwise we may deserialize an
+     * old version of the layout that is physically compatible with
+     * the current version, but logically incompatible. That may
+     * result in undefined behavior.
+     */
     static constexpr inline auto const UID_V001 = 15922480214965706541uLL;
 
     template <typename I> struct is_compatible_key_iterator {
