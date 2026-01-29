@@ -364,6 +364,10 @@ namespace eytzinger {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
+        if (offset == size()) {
+          offset = -1;
+        }
+
         *output++ =
           std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
@@ -390,6 +394,10 @@ namespace eytzinger {
       auto reporter = [&, this](auto const& job) mutable {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
+
+        if (offset == size()) {
+          offset = -1;
+        }
 
         *output++ =
           std::pair{job.needle_cursor(), const_iterator{*this, offset}};
@@ -424,6 +432,10 @@ namespace eytzinger {
         } else {
           auto offset = std::ranges::distance(
             std::ranges::begin(unordered_keys()), job.haystack_cursor());
+
+          if (offset == size()) {
+            offset = -1;
+          }
 
           result.second = const_iterator{*this, offset};
         }
