@@ -312,7 +312,6 @@ namespace eytzinger {
     struct search_job {
       using ValT = std::iter_value_t<HaystackIter>;
 
-      const ValT*  base;
       HaystackIter begin_it;
       std::size_t  n;
       NeedleIter   needle_iter; // Storing iterator, not value
@@ -321,8 +320,7 @@ namespace eytzinger {
 
       [[nodiscard]] search_job(
         HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
-          : base(std::to_address(first))
-          , begin_it(first)
+          : begin_it(first)
           , n(size)
           , needle_iter(n_iter)
           , comp(c)
@@ -333,7 +331,7 @@ namespace eytzinger {
         if (n == 0) {
           return {nullptr};
         }
-        return {reinterpret_cast<const void*>(base)};
+        return {std::to_address(begin_it)};
       }
 
       [[nodiscard]] vault::amac::job_step_result<1> step()
@@ -341,9 +339,9 @@ namespace eytzinger {
         bool const go_right = [&] {
           // Dereference needle_iter for comparison
           if constexpr (Bound == search_bound::upper) {
-            return !std::invoke(comp, *needle_iter, base[i]);
+            return !std::invoke(comp, *needle_iter, begin_it[i]);
           } else {
-            return std::invoke(comp, base[i], *needle_iter);
+            return std::invoke(comp, begin_it[i], *needle_iter);
           }
         }();
 
@@ -354,7 +352,7 @@ namespace eytzinger {
         }
 
         const std::size_t future_i = ((i + 1) << L) - 1;
-        return {reinterpret_cast<const void*>(base + future_i)};
+        return {std::to_address(begin_it + future_i)};
       }
 
       // Accessor for the reporter
