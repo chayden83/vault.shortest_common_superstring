@@ -13,9 +13,9 @@ FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
   flat_map
-  #frozen_vector
-  #segmented_vector
-  #shortest_common_superstring
+  frozen_vector
+  segmented_vector
+  shortest_common_superstring
 )
 
 message(STATUS "${PROJECT_NAME}: Benchmarks to be built: ${ALL_BENCHMARKS}")

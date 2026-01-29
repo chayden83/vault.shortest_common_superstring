@@ -7,6 +7,7 @@
 
 #include <benchmark/benchmark.h>
 
+#include <vault/algorithm/amac.hpp>
 #include <vault/flat_map/aliases.hpp>
 
 using namespace eytzinger;
@@ -371,7 +372,6 @@ static void BM_Batch_Lower_Bound(benchmark::State& state)
 
   auto needles = generate_random_data<KeyT>(num_needles);
 
-  // FIX: Use const_iterator for needles to match AMAC conductor behavior
   using NeedleIter = typename std::vector<KeyT>::const_iterator;
   using MapIter    = typename MapType::const_iterator;
   using ResultPair = std::pair<NeedleIter, MapIter>;
@@ -381,7 +381,9 @@ static void BM_Batch_Lower_Bound(benchmark::State& state)
 
   for (auto _ : state) {
     results.clear();
-    map.template batch_lower_bound<16>(needles, std::back_inserter(results));
+    // Directly pass the vault::amac::coordinator object
+    map.batch_lower_bound(
+      vault::amac::coordinator<16>, needles, std::back_inserter(results));
     benchmark::DoNotOptimize(results.data());
   }
   state.SetItemsProcessed(state.iterations() * num_needles);
@@ -406,7 +408,6 @@ static void BM_Batch_Upper_Bound(benchmark::State& state)
 
   auto needles = generate_random_data<KeyT>(num_needles);
 
-  // FIX: Use const_iterator
   using NeedleIter = typename std::vector<KeyT>::const_iterator;
   using MapIter    = typename MapType::const_iterator;
   using ResultPair = std::pair<NeedleIter, MapIter>;
@@ -415,7 +416,9 @@ static void BM_Batch_Upper_Bound(benchmark::State& state)
 
   for (auto _ : state) {
     results.clear();
-    map.template batch_upper_bound<16>(needles, std::back_inserter(results));
+    // Directly pass the vault::amac::coordinator object
+    map.batch_upper_bound(
+      vault::amac::coordinator<16>, needles, std::back_inserter(results));
     benchmark::DoNotOptimize(results.data());
   }
   state.SetItemsProcessed(state.iterations() * num_needles);
@@ -440,7 +443,6 @@ static void BM_Batch_Find(benchmark::State& state)
 
   auto needles = generate_random_data<KeyT>(num_needles);
 
-  // FIX: Use const_iterator
   using NeedleIter = typename std::vector<KeyT>::const_iterator;
   using MapIter    = typename MapType::const_iterator;
   using ResultPair = std::pair<NeedleIter, MapIter>;
@@ -449,7 +451,9 @@ static void BM_Batch_Find(benchmark::State& state)
 
   for (auto _ : state) {
     results.clear();
-    map.template batch_find<16>(needles, std::back_inserter(results));
+    // Directly pass the vault::amac::coordinator object
+    map.batch_find(
+      vault::amac::coordinator<16>, needles, std::back_inserter(results));
     benchmark::DoNotOptimize(results.data());
   }
   state.SetItemsProcessed(state.iterations() * num_needles);
@@ -534,8 +538,7 @@ static void BM_Batch_Lookup_BASELINE(benchmark::State& state)
 // Register the baseline for a specific Layout + Type
 #define REGISTER_BASELINE_BENCHMARKS(LayoutName, LayoutType, KeyName, KeyType) \
   BENCHMARK_TEMPLATE(BM_Batch_Lookup_BASELINE, LayoutType, KeyType)            \
-  BATCH_ARGS->Name(                                                            \
-    LayoutName "/" KeyName "/SerialBaseline"); // <--- Added semicolon here
+  BATCH_ARGS->Name(LayoutName "/" KeyName "/SerialBaseline");
 
 // Register baseline for all integral types
 #define REGISTER_ALL_BASELINES(LayoutName, LayoutType)                         \

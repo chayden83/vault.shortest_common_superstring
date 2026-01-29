@@ -615,7 +615,7 @@ namespace eytzinger {
         return {reinterpret_cast<const void*>(base)};
       }
 
-      [[nodiscard]] const vault::amac::job_step_result<1> step()
+      [[nodiscard]] vault::amac::job_step_result<1> step()
       {
         std::size_t block_start = k * B;
         if (block_start >= n) {

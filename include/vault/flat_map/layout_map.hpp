@@ -360,14 +360,17 @@ namespace eytzinger {
         std::ranges::subrange(unordered_keys()),
         compare_);
 
-      auto reporter = [=, this](auto const& job) {
+      auto reporter = [&, this](auto const& job) mutable {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        *output++ = std::pair{std::next(begin(), offset), job.needle_cursor()};
+        *output++ = std::pair{job.needle_cursor(), std::next(begin(), offset)};
       };
 
-      executor(std::ranges::transform(needles, job_factory), reporter);
+      auto needle_cursors = std::views::iota(
+        std::ranges::begin(needles), std::ranges::end(needles));
+
+      executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
     template <typename Executor,
@@ -383,14 +386,17 @@ namespace eytzinger {
         std::ranges::subrange(unordered_keys()),
         compare_);
 
-      auto reporter = [=, this](auto const& job) {
+      auto reporter = [&, this](auto const& job) mutable {
         auto offset = std::ranges::distance(
           std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        *output++ = std::pair{std::next(begin(), offset), job.needle_cursor()};
+        *output++ = std::pair{job.needle_cursor(), std::next(begin(), offset)};
       };
 
-      executor(std::ranges::transform(needles, job_factory), reporter);
+      auto needle_cursors = std::views::iota(
+        std::ranges::begin(needles), std::ranges::end(needles));
+
+      executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
     template <typename Executor,
@@ -406,15 +412,15 @@ namespace eytzinger {
         std::ranges::subrange(unordered_keys()),
         compare_);
 
-      auto reporter = [=, this](auto const& job) {
-        auto result = std::pair{end(), job.needle_cursor()};
+      auto reporter = [&, this](auto const& job) mutable {
+        auto result = std::pair{job.needle_cursor(), end()};
 
-        if (job.haystack_cursor == unordered_keys().end()) {
+        if (job.haystack_cursor() == unordered_keys().end()) {
           // pass
-        } else if (compare(*job.needle_cursor(), *job.haystack_cursor())) {
+        } else if (compare_(*job.needle_cursor(), *job.haystack_cursor())) {
           // pass
         } else {
-          result.first = std::advance(begin(),
+          result.second = std::next(begin(),
             std::ranges::distance(
               std::ranges::begin(unordered_keys()), job.haystack_cursor()));
         }
@@ -422,7 +428,10 @@ namespace eytzinger {
         *output++ = std::move(result);
       };
 
-      executor(std::ranges::transform(needles, job_factory), reporter);
+      auto needle_cursors = std::views::iota(
+        std::ranges::begin(needles), std::ranges::end(needles));
+
+      executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept

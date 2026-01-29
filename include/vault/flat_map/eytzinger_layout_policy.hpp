@@ -328,7 +328,7 @@ namespace eytzinger {
           , comp(c)
       {}
 
-      [[nodiscard]] const vault::amac::job_step_result<1> init()
+      [[nodiscard]] vault::amac::job_step_result<1> init()
       {
         if (n == 0) {
           return {nullptr};
@@ -336,7 +336,7 @@ namespace eytzinger {
         return {reinterpret_cast<const void*>(base)};
       }
 
-      [[nodiscard]] const vault::amac::job_step_result<1> step()
+      [[nodiscard]] vault::amac::job_step_result<1> step()
       {
         bool const go_right = [&] {
           // Dereference needle_iter for comparison

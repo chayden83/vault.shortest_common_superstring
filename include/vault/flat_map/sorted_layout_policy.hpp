@@ -5,7 +5,6 @@
 #include <cassert>
 #include <functional>
 #include <iterator>
-#include <numeric>
 #include <ranges>
 #include <stdexcept>
 #include <type_traits>
@@ -163,19 +162,24 @@ namespace eytzinger {
 
       [[no_unique_address]] Compare compare_;
 
+      template <std::forward_iterator I, std::sentinel_for<I> S>
+      [[nodiscard]] static constexpr I bisect(I first, S last)
+      {
+        return std::next(first, std::distance(first, last) / 2);
+      }
+
       [[nodiscard]] constexpr vault::amac::job_step_result<1> init()
       {
         if (haystack_cursor_ == haystack_last_) {
           return {nullptr};
         } else {
-          return {
-            std::addressof(*std::midpoint(haystack_cursor_, haystack_last_))};
+          return {std::addressof(*bisect(haystack_cursor_, haystack_last_))};
         }
       }
 
       [[nodiscard]] constexpr vault::amac::job_step_result<1> step()
       {
-        auto middle = std::midpoint(haystack_cursor_, haystack_last_);
+        auto middle = bisect(haystack_cursor_, haystack_last_);
 
         if (std::invoke(compare_, *middle, *needle_cursor_)) {
           haystack_cursor_ = std::next(middle);
@@ -231,11 +235,13 @@ namespace eytzinger {
         using haystack_iterator =
           std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
 
-        return batch_job<haystack_iterator, needle_iterator, Compare>{
+        using AdaptedCompare = decltype(std::ref(adapted_compare));
+
+        return batch_job<haystack_iterator, needle_iterator, AdaptedCompare>{
           needle_cursor,
           std::ranges::begin(haystack),
           std::ranges::end(haystack),
-          adapted_compare};
+          std::ref(adapted_compare)};
       }
     };
 
