@@ -8,8 +8,8 @@
 #include <ranges>
 #include <stdexcept>
 #include <type_traits>
-
 #include <utility>
+
 #include <vault/algorithm/amac.hpp>
 
 namespace eytzinger {
@@ -157,7 +157,7 @@ namespace eytzinger {
     // --- Batch Support ---
 
     template <typename HaystackI, typename NeedleI, typename Compare>
-    struct batch_job {
+    struct kary_search_job {
       [[nodiscard]] static constexpr uint64_t fanout()
       {
         return sorted_layout_policy::FANOUT;
@@ -171,7 +171,7 @@ namespace eytzinger {
       [[no_unique_address]] Compare compare_;
 
       template <std::forward_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] static constexpr std::array<I, FANOUT> n_sect(
+      [[nodiscard]] static constexpr std::array<I, FANOUT> kary_pivots(
         I first, S last)
       {
         auto chunk_size = std::distance(first, last) / ARITY;
@@ -191,7 +191,7 @@ namespace eytzinger {
             return result{((void)Is, nullptr)...};
           }(std::make_index_sequence<FANOUT>{});
         } else {
-          auto pivots = n_sect(haystack_cursor_, haystack_last_);
+          auto pivots = kary_pivots(haystack_cursor_, haystack_last_);
 
           return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
             return result{std::addressof(*std::get<Is>(pivots))...};
@@ -201,9 +201,12 @@ namespace eytzinger {
 
       [[nodiscard]] constexpr vault::amac::job_step_result<FANOUT> step()
       {
-        auto pivots = n_sect(haystack_cursor_, haystack_last_);
+        auto pivots = kary_pivots(haystack_cursor_, haystack_last_);
 
         for (auto&& pivot : pivots) {
+          assert(pivot != haystack_last_
+            && "Pivot should never be one past the end of the haystack");
+
           if (std::invoke(compare_, *pivot, *needle_cursor_)) {
             haystack_cursor_ = std::next(pivot);
           } else {
@@ -237,7 +240,7 @@ namespace eytzinger {
         using haystack_iterator =
           std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
 
-        return batch_job<haystack_iterator, needle_iterator, Compare>{
+        return kary_search_job<haystack_iterator, needle_iterator, Compare>{
           needle_cursor,
           std::ranges::begin(haystack),
           std::ranges::end(haystack),
@@ -262,8 +265,9 @@ namespace eytzinger {
 
         using AdaptedCompare = decltype(std::ref(adapted_compare));
 
-        return batch_job<haystack_iterator, needle_iterator, AdaptedCompare>{
-          needle_cursor,
+        return kary_search_job<haystack_iterator,
+          needle_iterator,
+          AdaptedCompare>{needle_cursor,
           std::ranges::begin(haystack),
           std::ranges::end(haystack),
           std::ref(adapted_compare)};
