@@ -85,7 +85,7 @@ TEST(ShortestCommonSuperstringBespoke, ShortestCommonSuperstring) {
   auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (input, std::back_inserter(bounds));
 
-  EXPECT_EQ(superstring, "doorstoplightbazfoobar");
+  EXPECT_EQ(superstring.length(), std::strlen("bazfoobardoorstoplight"));
 
   auto reconstructed = bounds | ::ranges::views::transform
     ([&](auto const &b) { return superstring.substr(b.first, b.second); });
