@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <functional>
 #include <iterator>
 #include <ranges>
@@ -125,11 +126,6 @@ namespace vault::algorithm {
     using bounds_t = std::pair<std::ranges::range_difference_t<R>,
       std::ranges::range_size_t<R>>;
 
-    template <std::ranges::range R>
-      requires std::ranges::range<std::ranges::range_reference_t<R>>
-    using superstring_t = std::vector<
-      std::ranges::range_value_t<std::ranges::range_reference_t<R>>>;
-
     // =========================================================================
     // Overload 1: Raw / No Projection
     // =========================================================================
@@ -165,7 +161,11 @@ namespace vault::algorithm {
       requires std::indirect_binary_predicate<Comp,
                  std::ranges::iterator_t<std::ranges::range_value_t<R>>,
                  std::ranges::iterator_t<std::ranges::range_value_t<R>>>
-      && std::output_iterator<Out, bounds_t<superstring_t<R>>>
+      && std::output_iterator<Out,
+        // Constraint: Out must accept bounds of the generated SuperString
+        // (vector<Element>)
+        bounds_t<std::vector<
+          std::ranges::range_value_t<std::ranges::range_reference_t<R>>>>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Comp comp = {}) const
     {
@@ -413,15 +413,19 @@ namespace vault::algorithm {
       typename Out,
       typename Proj,
       typename Comp = std::equal_to<>>
+    // We calculate the ProjectedValue type to formulate the constraint.
+    // The constraint requires Comp to be valid for pointers to ProjectedValue,
+    // which simulates the iterators of the vector<ProjectedValue> used
+    // internally.
       requires std::indirectly_unary_invocable<Proj,
                  std::ranges::iterator_t<std::ranges::range_value_t<R>>>
       && std::indirect_binary_predicate<Comp,
-        std::invoke_result_t<Proj,
+        std::remove_cvref_t<std::invoke_result_t<Proj,
           std::iter_reference_t<
-            std::ranges::iterator_t<std::ranges::range_value_t<R>>>>,
-        std::invoke_result_t<Proj,
+            std::ranges::iterator_t<std::ranges::range_value_t<R>>>>>*,
+        std::remove_cvref_t<std::invoke_result_t<Proj,
           std::iter_reference_t<
-            std::ranges::iterator_t<std::ranges::range_value_t<R>>>>>
+            std::ranges::iterator_t<std::ranges::range_value_t<R>>>>>*>
       && std::output_iterator<Out,
         // Constraint: Out must accept bounds of the generated SuperString
         // (vector<ProjectedValue>)
