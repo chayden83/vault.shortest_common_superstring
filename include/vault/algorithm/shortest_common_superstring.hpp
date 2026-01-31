@@ -31,15 +31,12 @@
 namespace vault::algorithm {
 
   namespace detail {
-    // Extract the iterator type of the *inner* range (the elements of the outer
-    // range). e.g., for vector<string>, this is string::iterator.
+    // Extract the iterator type of the *inner* range.
     template <typename R>
     using inner_iterator_t = std::ranges::iterator_t<
       std::remove_cvref_t<std::ranges::range_reference_t<R>>>;
 
-    // The result of projecting an element of the inner range, stripped of
-    // ref/cv qualifiers. This represents the type stored in the internal cache
-    // vector.
+    // The result of projecting an element of the inner range.
     template <typename Proj, typename R>
     using inner_projected_value_t =
       std::remove_cvref_t<std::indirect_result_t<Proj, inner_iterator_t<R>>>;
@@ -60,19 +57,18 @@ namespace vault::algorithm {
     std::indirectly_unary_invocable<Proj, detail::inner_iterator_t<R>>;
 
   // Verifies that Comp can compare the results of Proj applied to inner
-  // elements. We constrain against pointers to the projected value to simulate
-  // the vector iterators used internally.
+  // elements.
   template <typename Comp, typename Proj, typename R>
   concept projected_inner_element_comparator =
     std::indirect_binary_predicate<Comp,
       detail::inner_projected_value_t<Proj, R>*,
       detail::inner_projected_value_t<Proj, R>*>;
 
-  // Verifies that Out is an output iterator capable of accepting a bounds pair
-  // (offset, length).
-  template <typename Out>
-  concept range_bounds_output_iterator =
-    std::output_iterator<Out, std::pair<std::ptrdiff_t, std::size_t>>;
+  // Verifies that Out is an output iterator capable of accepting a subrange of
+  // a vector of ValueType.
+  template <typename Out, typename ValueType>
+  concept vector_subrange_output_iterator = std::output_iterator<Out,
+    std::ranges::subrange<typename std::vector<ValueType>::iterator>>;
 
   /**
    * @brief Computes an approximation of the Shortest Common Superstring (SCS)
@@ -122,10 +118,6 @@ namespace vault::algorithm {
       Overlap     total_overlap;
     };
 
-    template <std::ranges::range R>
-    using bounds_t = std::pair<std::ranges::range_difference_t<R>,
-      std::ranges::range_size_t<R>>;
-
     // =========================================================================
     // Overload 1: Raw / No Projection
     // =========================================================================
@@ -134,7 +126,8 @@ namespace vault::algorithm {
       typename Out,
       typename Comp = std::equal_to<>>
       requires inner_element_comparator<Comp, R>
-      && range_bounds_output_iterator<Out>
+      && vector_subrange_output_iterator<Out,
+        std::iter_value_t<detail::inner_iterator_t<R>>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Comp comp = {}) const
       -> result<std::ranges::iterator_t<R>,
@@ -289,7 +282,8 @@ namespace vault::algorithm {
         }
       }
 
-      // Position Mapping
+      // Position Mapping using Subranges
+      // Note: std::vector iterators remain valid after the move constructor.
       auto super_begin = std::ranges::begin(final_superstring);
       auto super_end   = std::ranges::end(final_superstring);
 
@@ -298,11 +292,12 @@ namespace vault::algorithm {
         auto match    = std::search(super_begin, super_end, searcher);
 
         if (match == super_end) {
-          *out++ = bounds_t<SuperStringT>{-1, 0};
+          // Empty subrange at end
+          *out++ = std::ranges::subrange(super_end, super_end);
         } else {
-          auto offset = std::ranges::distance(super_begin, match);
+          auto length = std::ranges::distance(substring);
           *out++ =
-            bounds_t<SuperStringT>{offset, std::ranges::distance(substring)};
+            std::ranges::subrange(match, std::ranges::next(match, length));
         }
       }
 
@@ -323,7 +318,8 @@ namespace vault::algorithm {
       typename Comp = std::equal_to<>>
       requires inner_element_projector<Proj, R>
       && projected_inner_element_comparator<Comp, Proj, R>
-      && range_bounds_output_iterator<Out>
+      && vector_subrange_output_iterator<Out,
+        detail::inner_projected_value_t<Proj, R>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Proj proj, Comp comp = {}) const
       -> result<std::ranges::iterator_t<R>,
