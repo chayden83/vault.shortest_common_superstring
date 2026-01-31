@@ -30,8 +30,11 @@ void shortest_common_superstring(benchmark::State& state)
     | ::ranges::views::take_exactly(state.range(0))
     | ::ranges::to<std::vector>();
 
-  auto out = std::vector<
-    std::ranges::subrange<std::ranges::iterator_t<std::vector<char>>>>(10000);
+  using superstring_bounds_t =
+    vault::algorithm::greedy_shortest_common_superstring_fn::
+      superstring_bounds_t<std::vector<std::string>>;
+
+  auto out = std::vector<superstring_bounds_t>{};
 
   for (auto _ : state) {
     benchmark::DoNotOptimize(

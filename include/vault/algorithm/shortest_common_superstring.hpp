@@ -40,6 +40,11 @@ namespace vault::algorithm {
     template <typename Proj, typename R>
     using inner_projected_value_t =
       std::remove_cvref_t<std::indirect_result_t<Proj, inner_iterator_t<R>>>;
+
+    // Helper to deduce the full vector type of the superstring
+    template <typename R, typename Proj>
+    using superstring_container_t =
+      std::vector<inner_projected_value_t<Proj, R>>;
   } // namespace detail
 
   // --- reusable concepts ---
@@ -107,6 +112,22 @@ namespace vault::algorithm {
     };
 
   public:
+    // --- Type Aliases for Convenience ---
+
+    /**
+     * @brief The type of the subrange (iterator pair) into the generated
+     * superstring. This is the type that will be written to the output
+     * iterator.
+     *
+     * @tparam R The input range type.
+     * @tparam Proj The projection type (defaults to std::identity).
+     */
+    template <typename R, typename Proj = std::identity>
+    using superstring_bounds_t = std::ranges::subrange<
+      typename detail::superstring_container_t<R, Proj>::iterator>;
+
+    // --- Result Structure ---
+
     template <typename In,
       typename Out,
       typename SuperString,
@@ -132,11 +153,10 @@ namespace vault::algorithm {
     auto operator()(R&& strings, Out out, Comp comp = {}) const
       -> result<std::ranges::iterator_t<R>,
         Out,
-        std::vector<std::iter_value_t<detail::inner_iterator_t<R>>>>
+        detail::superstring_container_t<R, std::identity>>
     {
       using InputString  = std::ranges::range_reference_t<R>;
-      using Element      = std::ranges::range_value_t<InputString>;
-      using SuperStringT = std::vector<Element>;
+      using SuperStringT = detail::superstring_container_t<R, std::identity>;
 
       if (std::ranges::empty(strings)) {
         return result<std::ranges::iterator_t<R>, Out, SuperStringT>{
@@ -283,7 +303,6 @@ namespace vault::algorithm {
       }
 
       // Position Mapping using Subranges
-      // Note: std::vector iterators remain valid after the move constructor.
       auto super_begin = std::ranges::begin(final_superstring);
       auto super_end   = std::ranges::end(final_superstring);
 
@@ -292,7 +311,6 @@ namespace vault::algorithm {
         auto match    = std::search(super_begin, super_end, searcher);
 
         if (match == super_end) {
-          // Empty subrange at end
           *out++ = std::ranges::subrange(super_end, super_end);
         } else {
           auto length = std::ranges::distance(substring);
@@ -324,7 +342,7 @@ namespace vault::algorithm {
     auto operator()(R&& strings, Out out, Proj proj, Comp comp = {}) const
       -> result<std::ranges::iterator_t<R>,
         Out,
-        std::vector<detail::inner_projected_value_t<Proj, R>>>
+        detail::superstring_container_t<R, Proj>>
     {
       using ProjectedValue = detail::inner_projected_value_t<Proj, R>;
       using CachedString   = std::vector<ProjectedValue>;
