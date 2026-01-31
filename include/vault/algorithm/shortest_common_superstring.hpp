@@ -168,6 +168,10 @@ namespace vault::algorithm {
           std::ranges::range_value_t<std::ranges::range_reference_t<R>>>>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Comp comp = {}) const
+      -> result<std::ranges::iterator_t<R>,
+        Out,
+        std::vector<
+          std::ranges::range_value_t<std::ranges::range_reference_t<R>>>>
     {
       // Use range_reference_t to capture 'const T&' correctly, ensuring
       // ref_view works for const inputs.
@@ -413,10 +417,6 @@ namespace vault::algorithm {
       typename Out,
       typename Proj,
       typename Comp = std::equal_to<>>
-    // We calculate the ProjectedValue type to formulate the constraint.
-    // The constraint requires Comp to be valid for pointers to ProjectedValue,
-    // which simulates the iterators of the vector<ProjectedValue> used
-    // internally.
       requires std::indirectly_unary_invocable<Proj,
                  std::ranges::iterator_t<std::ranges::range_value_t<R>>>
       && std::indirect_binary_predicate<Comp,
@@ -434,6 +434,11 @@ namespace vault::algorithm {
             std::ranges::iterator_t<std::ranges::range_reference_t<R>>>>>>>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Proj proj, Comp comp = {}) const
+      -> result<std::ranges::iterator_t<R>,
+        Out,
+        std::vector<std::remove_cvref_t<std::invoke_result_t<Proj,
+          std::iter_reference_t<
+            std::ranges::iterator_t<std::ranges::range_value_t<R>>>>>>>
     {
       // Deduce the projected value type
       using InputString = std::ranges::range_reference_t<R>;
