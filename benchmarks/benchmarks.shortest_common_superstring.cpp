@@ -16,13 +16,13 @@
 // ----------------------------------------------------------------------------
 // Benchmark                                  Time             CPU   Iterations
 // ----------------------------------------------------------------------------
-// shortest_common_superstring/256     18228456 ns     18224757 ns           38
-// shortest_common_superstring/512     95512244 ns     95489932 ns            7
-// shortest_common_superstring/1024   395013301 ns    394849611 ns            2
-// shortest_common_superstring/2048  1551283540 ns   1550802734 ns            1
-// shortest_common_superstring/4096  5021567731 ns   5019122442 ns            1
-// shortest_common_superstring/8192  1.2800e+10 ns   1.2797e+10 ns            1
-// shortest_common_superstring/10000 1.5460e+10 ns   1.5456e+10 ns            1
+// shortest_common_superstring/256      3533515 ns      3532753 ns          198
+// shortest_common_superstring/512     13044572 ns     13036340 ns           53
+// shortest_common_superstring/1024    48283333 ns     48250833 ns           13
+// shortest_common_superstring/2048   177116306 ns    177067181 ns            4
+// shortest_common_superstring/4096   598450524 ns    598333673 ns            1
+// shortest_common_superstring/8192  1717887426 ns   1717194548 ns            1
+// shortest_common_superstring/10000 2177187373 ns   2176746639 ns            1
 void shortest_common_superstring(benchmark::State& state)
 {
   auto strings = vault::internal::random_words_10k()
@@ -34,7 +34,7 @@ void shortest_common_superstring(benchmark::State& state)
     vault::algorithm::greedy_shortest_common_superstring_fn::
       superstring_bounds_t<std::vector<std::string>>;
 
-  auto out = std::vector<superstring_bounds_t>{};
+  auto out = std::vector<superstring_bounds_t>(10000);
 
   for (auto _ : state) {
     benchmark::DoNotOptimize(
