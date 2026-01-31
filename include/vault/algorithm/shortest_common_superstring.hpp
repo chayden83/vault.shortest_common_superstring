@@ -125,6 +125,11 @@ namespace vault::algorithm {
     using bounds_t = std::pair<std::ranges::range_difference_t<R>,
       std::ranges::range_size_t<R>>;
 
+    template <std::ranges::range R>
+      requires std::ranges::range<std::ranges::range_reference_t<R>>
+    using superstring_t = std::vector<
+      std::ranges::range_value_t<std::ranges::range_reference_t<R>>>;
+
     // =========================================================================
     // Overload 1: Raw / No Projection
     // =========================================================================
@@ -158,8 +163,9 @@ namespace vault::algorithm {
       typename Out,
       typename Comp = std::equal_to<>>
       requires std::indirect_binary_predicate<Comp,
-        std::ranges::iterator_t<std::ranges::range_value_t<R>>,
-        std::ranges::iterator_t<std::ranges::range_value_t<R>>>
+                 std::ranges::iterator_t<std::ranges::range_value_t<R>>,
+                 std::ranges::iterator_t<std::ranges::range_value_t<R>>>
+      && std::output_iterator<Out, bounds_t<superstring_t<R>>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Comp comp = {}) const
     {
@@ -363,10 +369,13 @@ namespace vault::algorithm {
         auto match = std::search(super_begin, super_end, searcher);
 
         if (match == super_end) {
-          *out++ = bounds_t<R>{-1, 0};
+          // We use bounds_t<SuperStringT> to report the result relative to the
+          // generated superstring.
+          *out++ = bounds_t<SuperStringT>{-1, 0};
         } else {
           auto offset = std::ranges::distance(super_begin, match);
-          *out++      = bounds_t<R>{offset, std::ranges::distance(substring)};
+          *out++ =
+            bounds_t<SuperStringT>{offset, std::ranges::distance(substring)};
         }
       }
 
@@ -401,7 +410,7 @@ namespace vault::algorithm {
      * @return result struct containing the projected superstring.
      */
     template <std::ranges::forward_range R,
-      std::forward_iterator              Out,
+      typename Out,
       typename Proj,
       typename Comp = std::equal_to<>>
       requires std::indirectly_unary_invocable<Proj,
@@ -413,6 +422,12 @@ namespace vault::algorithm {
         std::invoke_result_t<Proj,
           std::iter_reference_t<
             std::ranges::iterator_t<std::ranges::range_value_t<R>>>>>
+      && std::output_iterator<Out,
+        // Constraint: Out must accept bounds of the generated SuperString
+        // (vector<ProjectedValue>)
+        bounds_t<std::vector<std::remove_cvref_t<std::invoke_result_t<Proj,
+          std::iter_reference_t<
+            std::ranges::iterator_t<std::ranges::range_reference_t<R>>>>>>>>
     [[nodiscard]]
     auto operator()(R&& strings, Out out, Proj proj, Comp comp = {}) const
     {
