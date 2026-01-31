@@ -62,7 +62,7 @@ TEST(ShortestCommonSuperstringOfEmptyRange, ShortestCommonSuperstring) {
   auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (std::vector<std::string> { }, std::back_inserter(bounds));
 
-  EXPECT_EQ(superstring, ""sv);
+  EXPECT_TRUE(std::ranges::equal(superstring, ""sv));
   EXPECT_TRUE(bounds.empty());
 }
 
@@ -72,7 +72,7 @@ TEST(ShortestCommonSuperstringOfSingletonRange, ShortestCommonSuperstring) {
   auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (std::vector { "foobar"s }, std::back_inserter(bounds));
 
-  EXPECT_EQ(superstring, "foobar"sv);
+  EXPECT_TRUE(std::ranges::equal(superstring, "foobar"sv));
 }
 
 TEST(ShortestCommonSuperstringBespoke, ShortestCommonSuperstring) {
@@ -85,12 +85,12 @@ TEST(ShortestCommonSuperstringBespoke, ShortestCommonSuperstring) {
   auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (input, std::back_inserter(bounds));
 
-  EXPECT_EQ(superstring.length(), std::strlen("bazfoobardoorstoplight"));
+  EXPECT_EQ(superstring.size(), std::strlen("bazfoobardoorstoplight"));
 
   auto reconstructed = bounds | ::ranges::views::transform
-    ([&](auto const &b) { return superstring.substr(b.first, b.second); });
+    ([&](auto const &b) { return std::span(superstring).subspan(b.first, b.second); });
 
-  EXPECT_THAT(reconstructed | ::ranges::to<std::vector>(), ::testing::ContainerEq(input));
+  EXPECT_TRUE(std::ranges::equal(reconstructed, input, std::ranges::equal));
 }
 
 TEST(ShortestCommonSuperstring1K, ShortestCommonSuperstring) {
@@ -102,13 +102,13 @@ TEST(ShortestCommonSuperstring1K, ShortestCommonSuperstring) {
   auto [in, out, superstring, overlap] = val::shortest_common_superstring
     (words, std::back_inserter(bounds));
 
-  EXPECT_EQ(overlap             , 1636);
-  EXPECT_EQ(superstring.length(), 4790);
+  EXPECT_EQ(overlap           , 1636);
+  EXPECT_EQ(superstring.size(), 4790);
 
   auto reconstructed = bounds | ::ranges::views::transform
-    ([&](auto const &b) { return superstring.substr(b.first, b.second); });
+    ([&](auto const &b) { return std::span(superstring).subspan(b.first, b.second); });
 
-  EXPECT_THAT(reconstructed | ::ranges::to<std::vector>(), ::testing::ContainerEq(words));
+  EXPECT_TRUE(std::ranges::equal(reconstructed, words, std::ranges::equal));
 }
 
 // clang-format on
