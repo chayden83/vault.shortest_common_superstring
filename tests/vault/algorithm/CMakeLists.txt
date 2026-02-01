@@ -35,3 +35,17 @@ target_link_libraries(vault.amac.tests PRIVATE
 )
 
 add_test(vault.amac.tests vault.amac.tests)
+
+add_executable(vault.fsst_dictionary.tests)
+
+target_sources(vault.fsst_dictionary.tests PRIVATE
+  fsst_dictionary.test.cpp
+)
+
+target_link_libraries(vault.fsst_dictionary.tests PRIVATE
+  Catch2::Catch2WithMain
+  vault::shortest_common_superstring
+  vault::shortest_common_superstring.internal
+)
+
+add_test(vault.fsst_dictionary.tests vault.fsst_dictionary.tests)
