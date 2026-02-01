@@ -153,11 +153,10 @@ namespace vault::algorithm {
       auto  dst_len = std::size_t{0};
       auto* dst_ptr = static_cast<unsigned char*>(nullptr);
 
-      // Pass str_in directly (unsigned char const**)
       fsst_compress(encoder,
         1,                         // nstrings
         len_in,                    // lenIn
-        str_in,                    // strIn API non-const quirk
+        str_in,                    // strIn
         compression_buffer.size(), // outsize
         compression_buffer.data(), // output
         &dst_len,                  // lenOut
@@ -173,7 +172,6 @@ namespace vault::algorithm {
         compression_buffer.begin(),
         compression_buffer.begin() + dst_len);
 
-      // Initialize with struct initializer syntax
       unique_keys.push_back({current_offset, dst_len});
     }
 

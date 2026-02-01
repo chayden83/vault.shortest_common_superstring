@@ -140,7 +140,7 @@ TEST_CASE("fsst_dictionary error handling", "[fsst][error]")
   }
 }
 
-TEST_CASE("fsst_compress_strings template API", "[fsst][template]")
+TEST_CASE("make_fsst_dictionary template API", "[fsst][template]")
 {
   struct user_record {
     int         id;
@@ -155,7 +155,7 @@ TEST_CASE("fsst_compress_strings template API", "[fsst][template]")
   {
     auto keys = std::vector<fsst_key>{};
 
-    auto dict = fsst_compress_strings(records,
+    auto dict = make_fsst_dictionary(records,
       std::back_inserter(keys),
       &user_record::username // Projection
     );
@@ -170,7 +170,7 @@ TEST_CASE("fsst_compress_strings template API", "[fsst][template]")
     auto const raw  = std::vector<std::string>{"one", "two"};
     auto       keys = std::vector<fsst_key>{};
 
-    auto dict = fsst_compress_strings(raw, std::back_inserter(keys));
+    auto dict = make_fsst_dictionary(raw, std::back_inserter(keys));
 
     REQUIRE(keys.size() == 2);
     CHECK(*dict[keys[0]] == "one");

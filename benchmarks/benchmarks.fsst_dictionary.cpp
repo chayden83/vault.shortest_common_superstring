@@ -13,28 +13,28 @@
 // Benchmark                                    Time             CPU Iterations
 // UserCounters...
 // ----------------------------------------------------------------------------------------------
-// BM_DictionaryBuild_Random/10000/16     8830975 ns      8828653 ns 75
-// Ratio=0.56976 Savings=-0.755125 bytes_per_second=17.2833Mi/s
-// items_per_second=1.13268M/s BM_DictionaryBuild_Random/10000/32     8757354 ns
-// 8756713 ns           80 Ratio=0.800244 Savings=-0.249619
-// bytes_per_second=34.8505Mi/s items_per_second=1.14198M/s
-// BM_DictionaryBuild_Random/10000/64    10508673 ns     10507656 ns 67
-// Ratio=0.99982 Savings=-179.687u bytes_per_second=58.0864Mi/s
-// items_per_second=951.687k/s BM_DictionaryBuild_Hex/10000/32        7566898 ns
-// 7565894 ns           91 Ratio=0.975152 Savings=-0.0254812
-// bytes_per_second=40.3357Mi/s items_per_second=1.32172M/s
-// BM_DictionaryBuild_URLs/10000          8070748 ns      8070454 ns 88
-// Ratio=1.37193 Savings=0.271101 bytes_per_second=56.3329Mi/s
-// items_per_second=1.23909M/s BM_DictionaryBuild_Repeated/100000    62886795 ns
-// 62878257 ns           10 items_per_second=1.59037M/s
-// BM_DictionaryLookup_Random/10000/16     521589 ns       521557 ns 1216
-// bytes_per_second=292.562Mi/s items_per_second=19.1733M/s
-// BM_DictionaryLookup_Random/10000/64     902705 ns       902638 ns 780
-// bytes_per_second=676.186Mi/s items_per_second=11.0786M/s
-// BM_DictionaryLookup_URLs/10000          595950 ns       595908 ns 1136
-// items_per_second=16.7811M/s BM_DictionaryLookup_Large               142900 ns
-// 142840 ns         4845 bytes_per_second=1.33531Gi/s
-// items_per_second=700.086k/s
+// BM_DictionaryBuild_Random/10000/16     8583156 ns      8581712 ns 72
+// Ratio=0.796234 Savings=-0.255912 bytes_per_second=17.7806Mi/s
+// items_per_second=1.16527M/s BM_DictionaryBuild_Random/10000/32     8784097 ns
+// 8783706 ns           79 Ratio=0.997792 Savings=-2.2125m
+// bytes_per_second=34.7434Mi/s items_per_second=1.13847M/s
+// BM_DictionaryBuild_Random/10000/64    10554485 ns     10553685 ns 68
+// Ratio=1.143 Savings=0.125109 bytes_per_second=57.833Mi/s
+// items_per_second=947.536k/s BM_DictionaryBuild_Hex/10000/32        7703802 ns
+// 7702676 ns           88 Ratio=1.28942 Savings=0.224459
+// bytes_per_second=39.6194Mi/s items_per_second=1.29825M/s
+// BM_DictionaryBuild_URLs/10000          8203324 ns      8199358 ns 84
+// Ratio=1.75453 Savings=0.430045 bytes_per_second=55.4347Mi/s
+// items_per_second=1.21961M/s BM_DictionaryBuild_Repeated/100000    63951450 ns
+// 63942915 ns           10 items_per_second=1.56389M/s
+// BM_DictionaryLookup_Random/10000/16     534975 ns       534896 ns 1304
+// bytes_per_second=285.266Mi/s items_per_second=18.6952M/s
+// BM_DictionaryLookup_Random/10000/64    1012327 ns      1012180 ns 723
+// bytes_per_second=603.007Mi/s items_per_second=9.87966M/s
+// BM_DictionaryLookup_URLs/10000          631243 ns       631134 ns 979
+// items_per_second=15.8445M/s BM_DictionaryLookup_Large               138517 ns
+// 138505 ns         4760 bytes_per_second=1.3771Gi/s
+// items_per_second=721.998k/s
 namespace {
 
   // --- Data Generators ---
