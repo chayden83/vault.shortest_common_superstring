@@ -88,9 +88,7 @@ namespace vault::algorithm {
     str_ptrs.reserve(unique_strings.size());
     str_lens.reserve(unique_strings.size());
 
-    for (auto& s : unique_strings) {
-      // fsst_create expects unsigned char* (not const) in some versions,
-      // but standard signature is usually const. We cast to be safe.
+    for (const auto& s : unique_strings) {
       str_ptrs.push_back(
         reinterpret_cast<unsigned char*>(const_cast<char*>(s.data())));
       str_lens.push_back(s.size());
@@ -124,25 +122,25 @@ namespace vault::algorithm {
     auto unique_keys = std::vector<fsst_key>{};
     unique_keys.reserve(unique_strings.size());
 
-    for (auto i = std::size_t{0}; i < unique_strings.size(); ++i) {
+    for (const auto& s : unique_strings) {
       auto current_offset = blob.size();
 
       // Prepare 1-element arrays for batch API
-      size_t src_len = unique_strings[i].size();
-      auto*  src_ptr = reinterpret_cast<unsigned char const*>(
-        const_cast<char*>(unique_strings[i].data()));
+      auto  src_len = s.size();
+      auto* src_ptr =
+        reinterpret_cast<unsigned char const*>(const_cast<char*>(s.data()));
 
-      const size_t*         lenIn = &src_len;
-      unsigned char const** strIn = &src_ptr;
+      auto const* len_in = &src_len;
+      auto        str_in = &src_ptr;
 
-      size_t         dst_len = 0;
-      unsigned char* dst_ptr = nullptr; // Will point inside compression_buffer
+      auto  dst_len = std::size_t{0};
+      auto* dst_ptr = static_cast<unsigned char*>(nullptr);
 
       // Call FSST with 8 arguments (Batch size = 1)
       fsst_compress(encoder,
         1,                         // nstrings
-        lenIn,                     // lenIn
-        strIn,                     // strIn
+        len_in,                    // lenIn
+        str_in,                    // strIn
         compression_buffer.size(), // outsize
         compression_buffer.data(), // output
         &dst_len,                  // lenOut (receives compressed size)
