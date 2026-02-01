@@ -5,14 +5,12 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
-#include <vector>
 
 #include <fsst.h>
 
 namespace vault::algorithm {
 
-  class fsst_dictionary::impl {
-  public:
+  struct fsst_dictionary::impl {
     std::vector<unsigned char> data_blob;
     fsst_decoder_t             decoder;
 
@@ -20,26 +18,23 @@ namespace vault::algorithm {
   };
 
   fsst_dictionary::fsst_dictionary()
-      : pImpl(std::make_unique<impl>())
+      : p_impl(std::make_shared<impl const>())
   {}
 
-  fsst_dictionary::~fsst_dictionary()                          = default;
-  fsst_dictionary::fsst_dictionary(fsst_dictionary&&) noexcept = default;
-  fsst_dictionary& fsst_dictionary::operator=(
-    fsst_dictionary&&) noexcept = default;
+  fsst_dictionary::~fsst_dictionary() = default;
 
-  fsst_dictionary::fsst_dictionary(std::unique_ptr<impl> implementation)
-      : pImpl(std::move(implementation))
+  fsst_dictionary::fsst_dictionary(std::shared_ptr<impl const> implementation)
+      : p_impl(std::move(implementation))
   {}
 
   bool fsst_dictionary::empty() const
   {
-    return !pImpl || pImpl->data_blob.empty();
+    return !p_impl || p_impl->data_blob.empty();
   }
 
   std::size_t fsst_dictionary::size_in_bytes() const
   {
-    return pImpl ? pImpl->data_blob.size() : 0;
+    return p_impl ? p_impl->data_blob.size() : 0;
   }
 
   std::optional<std::string> fsst_dictionary::operator[](fsst_key key) const
@@ -47,21 +42,29 @@ namespace vault::algorithm {
     if (empty()) {
       return std::nullopt;
     }
-    if (key.offset + key.length > pImpl->data_blob.size()) {
+    if (key.offset + key.length > p_impl->data_blob.size()) {
       return std::nullopt;
     }
 
-    auto* compressed_ptr = pImpl->data_blob.data() + key.offset;
-    auto  compressed_len = key.length;
+    auto const* compressed_ptr = p_impl->data_blob.data() + key.offset;
+    auto        compressed_len = key.length;
 
     auto result = std::string{};
+    // Heuristic resize: 4-5x compression ratio assumption or min 64
+    // bytes
     result.resize(std::max(std::size_t{64}, compressed_len * 5));
 
-    auto actual_size = fsst_decompress(&pImpl->decoder,
-      compressed_len,
-      compressed_ptr,
-      result.size(),
-      reinterpret_cast<unsigned char*>(result.data()));
+    // Note: fsst_decompress signature takes non-const decoder pointer
+    // in C API but effectively reads it. We may need a const_cast if
+    // the C API is not const-correct, but standard usage implies
+    // read-only decoder usage here.  Ideally fsst_decompress should
+    // take const fsst_decoder_t*.
+    auto actual_size =
+      fsst_decompress(const_cast<fsst_decoder_t*>(&p_impl->decoder),
+        compressed_len,
+        const_cast<unsigned char*>(compressed_ptr), // API quirk
+        result.size(),
+        reinterpret_cast<unsigned char*>(result.data()));
 
     result.resize(actual_size);
     return result;
@@ -69,15 +72,15 @@ namespace vault::algorithm {
 
   // --- Static Factory Implementation (Core) ---
 
-  fsst_dictionary fsst_dictionary::build(const std::vector<std::string>& inputs,
-    std::function<void(fsst_key)> emit_key)
+  fsst_dictionary fsst_dictionary::build(
+    std::span<std::string const> inputs, std::function<void(fsst_key)> emit_key)
   {
     if (inputs.empty()) {
       return fsst_dictionary{};
     }
 
     // 1. Deduplicate
-    auto unique_strings = inputs;
+    auto unique_strings = inputs | std::ranges::to<std::vector>();
     std::ranges::sort(unique_strings);
     auto [last, end] = std::ranges::unique(unique_strings);
     unique_strings.erase(last, end);
@@ -89,12 +92,12 @@ namespace vault::algorithm {
     str_lens.reserve(unique_strings.size());
 
     for (const auto& s : unique_strings) {
-      str_ptrs.push_back(
-        reinterpret_cast<unsigned char*>(const_cast<char*>(s.data())));
+      str_ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
       str_lens.push_back(s.size());
     }
 
     // 3. Create Encoder
+    // fsst_create takes non-const pointers in standard API signature
     auto* encoder =
       fsst_create(unique_strings.size(), str_lens.data(), str_ptrs.data(), 0);
 
@@ -103,7 +106,8 @@ namespace vault::algorithm {
     }
 
     // 4. Compress
-    auto impl_ptr = std::make_unique<fsst_dictionary::impl>();
+    // We construct a mutable impl locally
+    auto impl_ptr = std::make_shared<impl>();
 
     unsigned char deserialized_buf[FSST_MAXHEADER];
     auto          header_size = fsst_export(encoder, deserialized_buf);
@@ -126,25 +130,23 @@ namespace vault::algorithm {
       auto current_offset = blob.size();
 
       // Prepare 1-element arrays for batch API
-      auto  src_len = s.size();
-      auto* src_ptr =
-        reinterpret_cast<unsigned char const*>(const_cast<char*>(s.data()));
+      auto src_len = s.size();
+      auto src_ptr = reinterpret_cast<unsigned char const*>(s.data());
 
-      auto const* len_in = &src_len;
-      auto        str_in = &src_ptr;
+      auto const*           len_in = &src_len;
+      unsigned char const** str_in = &src_ptr;
 
       auto  dst_len = std::size_t{0};
       auto* dst_ptr = static_cast<unsigned char*>(nullptr);
 
-      // Call FSST with 8 arguments (Batch size = 1)
       fsst_compress(encoder,
         1,                         // nstrings
         len_in,                    // lenIn
-        str_in,                    // strIn
+        str_in,                    // strIn API non-const quirk
         compression_buffer.size(), // outsize
         compression_buffer.data(), // output
-        &dst_len,                  // lenOut (receives compressed size)
-        &dst_ptr                   // strOut (receives pointer)
+        &dst_len,                  // lenOut
+        &dst_ptr                   // strOut
       );
 
       blob.insert(blob.end(),
@@ -173,12 +175,11 @@ namespace vault::algorithm {
   // --- Static Factory Implementation (Convenience Overload) ---
 
   std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
-    const std::vector<std::string>& inputs)
+    std::span<std::string const> inputs)
   {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(inputs.size());
 
-    // Delegate to the core build method
     auto dict = build(inputs, [&](fsst_key k) { keys.push_back(k); });
 
     return {std::move(dict), std::move(keys)};

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef VAULT_ALGORITHM_FSST_COMPRESSION_HPP
-#define VAULT_ALGORITHM_FSST_COMPRESSION_HPP
+#ifndef VAULT_ALGORITHM_FSST_DICTIONARY_HPP
+#define VAULT_ALGORITHM_FSST_DICTIONARY_HPP
 
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,19 +21,21 @@ namespace vault::algorithm {
   struct fsst_key {
     std::size_t offset;
     std::size_t length;
-    bool        operator==(const fsst_key&) const = default;
+
+    bool operator==(const fsst_key&) const = default;
   };
 
   class fsst_dictionary {
   public:
-    fsst_dictionary();
-    ~fsst_dictionary();
+    [[nodiscard]] fsst_dictionary();
 
-    fsst_dictionary(fsst_dictionary&&) noexcept;
-    fsst_dictionary& operator=(fsst_dictionary&&) noexcept;
+    [[nodiscard]] fsst_dictionary(const fsst_dictionary&)     = default;
+    [[nodiscard]] fsst_dictionary(fsst_dictionary&&) noexcept = default;
 
-    fsst_dictionary(const fsst_dictionary&)            = delete;
-    fsst_dictionary& operator=(const fsst_dictionary&) = delete;
+    fsst_dictionary& operator=(const fsst_dictionary&)     = default;
+    fsst_dictionary& operator=(fsst_dictionary&&) noexcept = default;
+
+    ~fsst_dictionary(); // Defaulted in source for pimpl destruction
 
     [[nodiscard]] std::optional<std::string> operator[](fsst_key key) const;
     [[nodiscard]] bool                       empty() const;
@@ -46,8 +49,9 @@ namespace vault::algorithm {
      * corresponding fsst_key.
      * @return The compressed dictionary.
      */
-    static fsst_dictionary build(const std::vector<std::string>& inputs,
-      std::function<void(fsst_key)>                              emit_key);
+    [[nodiscard]] static fsst_dictionary build(
+      std::span<std::string const>  inputs,
+      std::function<void(fsst_key)> emit_key);
 
     /**
      * @brief Convenience factory method. Returns keys as a vector.
@@ -56,20 +60,21 @@ namespace vault::algorithm {
      * @return A pair containing the compressed dictionary and the vector of
      * keys.
      */
-    static std::pair<fsst_dictionary, std::vector<fsst_key>> build(
-      const std::vector<std::string>& inputs);
+    [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
+    build(std::span<std::string const> inputs);
 
   private:
     class impl;
-    std::unique_ptr<impl> pImpl;
+    std::shared_ptr<impl const> p_impl;
 
-    explicit fsst_dictionary(std::unique_ptr<impl> implementation);
+    [[nodiscard]] explicit fsst_dictionary(
+      std::shared_ptr<impl const> implementation);
   };
 
   // --- Generic Template Interface ---
 
   template <std::ranges::range R, typename Out, typename Proj = std::identity>
-  auto fsst_compress_strings(R&& strings, Out out, Proj proj = {})
+  [[nodiscard]] auto fsst_compress_strings(R&& strings, Out out, Proj proj = {})
     -> fsst_dictionary
   {
     auto working_set = strings | ::ranges::views::transform([&](auto&& s) {
@@ -86,4 +91,4 @@ namespace vault::algorithm {
 
 } // namespace vault::algorithm
 
-#endif // VAULT_ALGORITHM_FSST_COMPRESSION_HPP
+#endif // VAULT_ALGORITHM_FSST_DICTIONARY_HPP
