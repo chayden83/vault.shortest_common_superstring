@@ -19,11 +19,13 @@
 namespace vault::algorithm {
 
   struct fsst_key {
-    std::size_t offset;
-    std::size_t length;
+    std::size_t offset : 40;
+    std::size_t length : 24;
 
     bool operator==(const fsst_key&) const = default;
   };
+
+  static_assert(sizeof(fsst_key) == 8, "fsst_key must be exactly 8 bytes");
 
   class fsst_dictionary {
   public:

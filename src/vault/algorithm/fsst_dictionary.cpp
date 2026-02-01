@@ -57,8 +57,7 @@ namespace vault::algorithm {
     // Note: fsst_decompress signature takes non-const decoder pointer
     // in C API but effectively reads it. We may need a const_cast if
     // the C API is not const-correct, but standard usage implies
-    // read-only decoder usage here.  Ideally fsst_decompress should
-    // take const fsst_decoder_t*.
+    // read-only decoder usage here.
     auto actual_size =
       fsst_decompress(const_cast<fsst_decoder_t*>(&p_impl->decoder),
         compressed_len,
@@ -91,13 +90,22 @@ namespace vault::algorithm {
     str_ptrs.reserve(unique_strings.size());
     str_lens.reserve(unique_strings.size());
 
+    // Limits for bit-field packing
+    constexpr auto MAX_OFFSET = std::size_t{1} << 40; // 1 TB
+    constexpr auto MAX_LENGTH = std::size_t{1} << 24; // 16 MB
+
     for (const auto& s : unique_strings) {
+      if (s.size() >= MAX_LENGTH) {
+        throw std::length_error(
+          "fsst_dictionary: String too large for key format");
+      }
       str_ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
       str_lens.push_back(s.size());
     }
 
     // 3. Create Encoder
-    // fsst_create takes non-const pointers in standard API signature
+    // fsst_create takes non-const pointers in standard API signature, but
+    // we pass our correctly typed const pointer array.
     auto* encoder =
       fsst_create(unique_strings.size(), str_lens.data(), str_ptrs.data(), 0);
 
@@ -129,6 +137,12 @@ namespace vault::algorithm {
     for (const auto& s : unique_strings) {
       auto current_offset = blob.size();
 
+      if (current_offset >= MAX_OFFSET) {
+        fsst_destroy(encoder);
+        throw std::length_error(
+          "fsst_dictionary: Blob size exceeds key format");
+      }
+
       // Prepare 1-element arrays for batch API
       auto src_len = s.size();
       auto src_ptr = reinterpret_cast<unsigned char const*>(s.data());
@@ -139,6 +153,7 @@ namespace vault::algorithm {
       auto  dst_len = std::size_t{0};
       auto* dst_ptr = static_cast<unsigned char*>(nullptr);
 
+      // Pass str_in directly (unsigned char const**)
       fsst_compress(encoder,
         1,                         // nstrings
         len_in,                    // lenIn
@@ -149,10 +164,16 @@ namespace vault::algorithm {
         &dst_ptr                   // strOut
       );
 
+      if (dst_len >= MAX_LENGTH) {
+        fsst_destroy(encoder);
+        throw std::length_error("fsst_dictionary: Compressed string too large");
+      }
+
       blob.insert(blob.end(),
         compression_buffer.begin(),
         compression_buffer.begin() + dst_len);
 
+      // Initialize with struct initializer syntax
       unique_keys.push_back({current_offset, dst_len});
     }
 

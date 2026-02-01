@@ -14,6 +14,7 @@ FetchContent_MakeAvailable(googlebench)
 set(ALL_BENCHMARKS
   flat_map
   frozen_vector
+  fsst_dictionary
   segmented_vector
   shortest_common_superstring
 )
