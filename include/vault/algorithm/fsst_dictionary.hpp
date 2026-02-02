@@ -6,7 +6,6 @@
 #include <algorithm> // for std::clamp
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -38,7 +37,11 @@ namespace vault::algorithm {
       std::size_t value = 9;
     };
 
+    // Zero-Copy Generator: Returns a view into existing, stable memory.
     using Generator = std::function<std::optional<std::string_view>()>;
+
+    // R-Value Generator: Returns a string (ownership transfer).
+    using RValueGenerator = std::function<std::optional<std::string>()>;
 
     using Deduplicator =
       std::function<std::pair<std::uint64_t, bool>(std::string_view)>;
@@ -84,7 +87,7 @@ namespace vault::algorithm {
       return fsst_dictionary::compression_levels[level.value];
     }
 
-    // --- Core Factories ---
+    // --- Core Factories (View Based) ---
     [[nodiscard]] static fsst_dictionary build(Generator gen,
       Deduplicator                                       dedup,
       std::function<void(fsst_key)>                      emit_key,
@@ -101,41 +104,17 @@ namespace vault::algorithm {
     [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
     build_from_unique(Generator gen, sample_ratio ratio = sample_ratio{1.});
 
-    // --- Compression Level Overloads ---
-    [[nodiscard]] static inline fsst_dictionary build(Generator gen,
-      Deduplicator                                              dedup,
-      std::function<void(fsst_key)>                             emit_key,
-      compression_level                                         level)
-    {
-      return build(std::move(gen),
-        std::move(dedup),
-        std::move(emit_key),
-        level_to_ratio(level));
-    }
+    // --- R-Value Factories (String Based) ---
+    [[nodiscard]] static fsst_dictionary build(RValueGenerator gen,
+      Deduplicator                                             dedup,
+      std::function<void(fsst_key)>                            emit_key,
+      sample_ratio ratio = sample_ratio{1.});
 
-    [[nodiscard]] static inline fsst_dictionary build_from_unique(Generator gen,
+    [[nodiscard]] static fsst_dictionary build_from_unique(RValueGenerator gen,
       std::function<void(fsst_key)> emit_key,
-      compression_level             level)
-    {
-      return build_from_unique(
-        std::move(gen), std::move(emit_key), level_to_ratio(level));
-    }
+      sample_ratio                  ratio = sample_ratio{1.});
 
-    [[nodiscard]] static inline std::pair<fsst_dictionary,
-      std::vector<fsst_key>>
-    build(Generator gen, Deduplicator dedup, compression_level level)
-    {
-      return build(std::move(gen), std::move(dedup), level_to_ratio(level));
-    }
-
-    [[nodiscard]] static inline std::pair<fsst_dictionary,
-      std::vector<fsst_key>>
-    build_from_unique(Generator gen, compression_level level)
-    {
-      return build_from_unique(std::move(gen), level_to_ratio(level));
-    }
-
-    // --- Range Interface ---
+    // --- Range Interface (Generalized) ---
     template <std::ranges::input_range R, typename... Args>
     [[nodiscard]] static auto build(R&& range, Args&&... args)
     {
@@ -146,10 +125,11 @@ namespace vault::algorithm {
         std::ranges::contiguous_range<ValueType>
         && std::is_lvalue_reference_v<Reference>;
 
-      if constexpr (is_contiguous_lvalue) {
-        auto it  = std::ranges::begin(range);
-        auto end = std::ranges::end(range);
+      auto it  = std::ranges::begin(range);
+      auto end = std::ranges::end(range);
 
+      if constexpr (is_contiguous_lvalue) {
+        // --- Zero Copy Path ---
         Generator gen = [it, end]() mutable -> std::optional<std::string_view> {
           if (it == end) {
             return std::nullopt;
@@ -160,44 +140,24 @@ namespace vault::algorithm {
             reinterpret_cast<const char*>(std::ranges::data(val)),
             std::ranges::size(val)};
         };
-
         return build(std::move(gen), std::forward<Args>(args)...);
 
       } else {
-        auto arena = std::make_shared<std::deque<std::vector<char>>>();
-
-        auto it  = std::ranges::begin(range);
-        auto end = std::ranges::end(range);
-
-        Generator gen =
-          [it, end, arena]() mutable -> std::optional<std::string_view> {
+        // --- R-Value / Non-Contiguous Path --- We project the
+        // element to std::string and let the source file handle
+        // buffering.
+        RValueGenerator gen = [it,
+                                end]() mutable -> std::optional<std::string> {
           if (it == end) {
             return std::nullopt;
           }
-
-          auto&&      val = *it;
-          std::size_t len = std::ranges::size(val);
-
-          constexpr std::size_t kPageSize = 1024 * 1024;
-
-          if (arena->empty()
-            || (arena->back().capacity() - arena->back().size() < len)) {
-            std::size_t new_cap = std::max(kPageSize, len);
-            arena->emplace_back();
-            arena->back().reserve(new_cap);
-          }
-
-          auto&       current_page = arena->back();
-          std::size_t offset       = current_page.size();
-
-          auto const* raw_data =
-            reinterpret_cast<const char*>(std::ranges::data(val));
-          current_page.insert(current_page.end(), raw_data, raw_data + len);
-
+          auto&& val = *it;
+          // Construct string from the byte range
+          std::string s(reinterpret_cast<const char*>(std::ranges::data(val)),
+            std::ranges::size(val));
           ++it;
-          return std::string_view{current_page.data() + offset, len};
+          return s;
         };
-
         return build(std::move(gen), std::forward<Args>(args)...);
       }
     }

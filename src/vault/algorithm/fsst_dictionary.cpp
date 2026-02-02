@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <deque> // Added for buffering R-values
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -250,7 +251,6 @@ namespace vault::algorithm {
       }
 
       auto offset = impl_ptr->data_blob.size();
-
       impl_ptr->data_blob.insert(
         impl_ptr->data_blob.end(), comp_buf_ptr, comp_buf_ptr + dst_len);
 
@@ -263,7 +263,7 @@ namespace vault::algorithm {
     return {std::move(impl_ptr), std::move(keys)};
   }
 
-  // --- Factories (Core Implementations) ---
+  // --- Factories: View-Based (Zero Copy) ---
 
   fsst_dictionary fsst_dictionary::build(Generator gen,
     Deduplicator                                   dedup,
@@ -286,19 +286,16 @@ namespace vault::algorithm {
         fsst_key k = make_inline_key(sv);
         instructions.push_back(k.value);
       } else {
-        // Deduplicate
         auto [idx, is_new] = dedup(sv);
 
         if (is_new) {
           if (sv.size() > kMaxPointerLength) {
             throw std::length_error("String too large");
           }
-          // Generator contract: sv points to stable memory (Existing or Arena)
           compression_ptrs.push_back(
             reinterpret_cast<unsigned char const*>(sv.data()));
           compression_lens.push_back(sv.size());
         }
-
         instructions.push_back(idx);
       }
     }
@@ -368,6 +365,52 @@ namespace vault::algorithm {
     }
 
     return result_dict;
+  }
+
+  // --- Factories: R-Value Based (Stable Buffer) ---
+
+  fsst_dictionary fsst_dictionary::build(RValueGenerator gen,
+    Deduplicator                                         dedup,
+    std::function<void(fsst_key)>                        emit_key,
+    sample_ratio                                         ratio)
+  {
+    // Stable buffer for incoming strings
+    // Deque guarantees that references to elements are stable
+    std::deque<std::string> stable_buffer;
+
+    // Adapt to Generator (string_view) interface
+    auto view_gen = [&]() mutable -> std::optional<std::string_view> {
+      auto opt_s = gen();
+      if (!opt_s) {
+        return std::nullopt;
+      }
+
+      stable_buffer.push_back(std::move(*opt_s));
+      return std::string_view{stable_buffer.back()};
+    };
+
+    // Delegate to the core logic
+    return build(
+      std::move(view_gen), std::move(dedup), std::move(emit_key), ratio);
+  }
+
+  fsst_dictionary fsst_dictionary::build_from_unique(RValueGenerator gen,
+    std::function<void(fsst_key)>                                    emit_key,
+    sample_ratio                                                     ratio)
+  {
+    std::deque<std::string> stable_buffer;
+
+    auto view_gen = [&]() mutable -> std::optional<std::string_view> {
+      auto opt_s = gen();
+      if (!opt_s) {
+        return std::nullopt;
+      }
+
+      stable_buffer.push_back(std::move(*opt_s));
+      return std::string_view{stable_buffer.back()};
+    };
+
+    return build_from_unique(std::move(view_gen), std::move(emit_key), ratio);
   }
 
   // --- Convenience Overloads ---
