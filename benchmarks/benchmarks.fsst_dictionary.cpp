@@ -23,6 +23,7 @@
 #include <vault/algorithm/fsst_dictionary.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <random>
 #include <string>
@@ -35,7 +36,6 @@ namespace {
   enum DataType { kRandom32 = 0, kHex32 = 1, kURL = 2 };
 
   // --- Generators ---
-
   auto generate_random_strings(std::size_t count, std::size_t length)
     -> std::vector<std::string>
   {
@@ -138,6 +138,7 @@ static void BM_Construction_Map(benchmark::State& state)
     std::vector<vault::algorithm::fsst_key> keys;
     keys.reserve(input.size());
 
+    // Explicitly use default sample ratio (which is 1.0 / Level 9)
     auto dict = vault::algorithm::make_fsst_dictionary<MapType>(
       input, std::back_inserter(keys));
 
@@ -178,7 +179,7 @@ static void BM_Construction_Legacy(benchmark::State& state)
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
 
-// --- Benchmark: Lookups (Sequential / Original) ---
+// --- Benchmark: Lookups ---
 
 static void BM_Lookup_Sequential(benchmark::State& state)
 {
@@ -187,7 +188,6 @@ static void BM_Lookup_Sequential(benchmark::State& state)
   auto const input     = generate_data(count, type);
   auto const raw_bytes = total_raw_size(input);
 
-  // Use fastest build method for setup
   std::vector<vault::algorithm::fsst_key> keys;
   keys.reserve(input.size());
   auto dict = vault::algorithm::make_fsst_dictionary<boost::unordered_flat_map>(
@@ -202,10 +202,6 @@ static void BM_Lookup_Sequential(benchmark::State& state)
   state.SetItemsProcessed(state.iterations() * keys.size());
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
-
-// --- Benchmark: Lookups (Randomized Order) ---
-// This shuffles the keys to simulate "True Random Access"
-// defeating hardware prefetchers for large datasets.
 
 static void BM_Lookup_RandomOrder(benchmark::State& state)
 {
@@ -219,7 +215,6 @@ static void BM_Lookup_RandomOrder(benchmark::State& state)
   auto dict = vault::algorithm::make_fsst_dictionary<boost::unordered_flat_map>(
     input, std::back_inserter(keys));
 
-  // Shuffle the keys to force random access into the dictionary blob
   auto rng = std::mt19937{std::random_device{}()};
   std::shuffle(keys.begin(), keys.end(), rng);
 
@@ -233,11 +228,44 @@ static void BM_Lookup_RandomOrder(benchmark::State& state)
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
 
-// --- Registration Logic ---
+// --- Benchmark: Sampling Ratios ---
 
-// Combinations:
-// Counts: 10k, 100k, 1M, 10M
-// Types:  Random, Hex, URL
+static void BM_SamplingRatio(benchmark::State& state)
+{
+  auto const denom     = static_cast<double>(state.range(0));
+  auto const type      = static_cast<int>(state.range(1));
+  auto const ratio_val = static_cast<float>(1.0 / denom);
+
+  // Wrap in new type
+  vault::algorithm::fsst_dictionary::sample_ratio ratio{ratio_val};
+
+  std::size_t count     = 1'000'000;
+  auto const  input     = generate_data(count, type);
+  auto const  raw_bytes = total_raw_size(input);
+
+  for (auto _ : state) {
+    std::vector<vault::algorithm::fsst_key> keys;
+    keys.reserve(input.size());
+
+    // Use Boost Flat Map + explicit Sample Ratio
+    auto dict =
+      vault::algorithm::make_fsst_dictionary<boost::unordered_flat_map>(
+        input, std::back_inserter(keys), {}, ratio);
+
+    benchmark::DoNotOptimize(dict);
+    benchmark::DoNotOptimize(keys);
+
+    auto total_compressed_size = static_cast<double>(dict.size_in_bytes())
+      + static_cast<double>(keys.size() * sizeof(vault::algorithm::fsst_key));
+
+    state.counters["Ratio"] =
+      static_cast<double>(raw_bytes) / total_compressed_size;
+  }
+  state.SetItemsProcessed(state.iterations() * count);
+  state.SetBytesProcessed(state.iterations() * raw_bytes);
+}
+
+// --- Registration Logic ---
 
 static void CustomArgs(benchmark::internal::Benchmark* b)
 {
@@ -247,6 +275,17 @@ static void CustomArgs(benchmark::internal::Benchmark* b)
   for (auto c : counts) {
     for (auto t : types) {
       b->Args({c, t});
+    }
+  }
+}
+
+static void SamplingArgs(benchmark::internal::Benchmark* b)
+{
+  // Inverse powers of 2: 1/1, 1/2, ... 1/8192
+  std::vector<int64_t> types = {kRandom32, kHex32, kURL};
+  for (int64_t denom = 1; denom <= 8192; denom *= 2) {
+    for (auto t : types) {
+      b->Args({denom, t});
     }
   }
 }
@@ -261,10 +300,11 @@ BENCHMARK_TEMPLATE(BM_Construction_Map, std::unordered_map)->Apply(CustomArgs);
 BENCHMARK_TEMPLATE(BM_Construction_Map, boost::unordered_flat_map)
   ->Apply(CustomArgs);
 
-// 4. Lookup Performance (Sequential)
+// 4. Lookup Performance
 BENCHMARK(BM_Lookup_Sequential)->Apply(CustomArgs);
-
-// 5. Lookup Performance (True Random)
 BENCHMARK(BM_Lookup_RandomOrder)->Apply(CustomArgs);
+
+// 5. Sampling Ratios
+BENCHMARK(BM_SamplingRatio)->Apply(SamplingArgs);
 
 BENCHMARK_MAIN();

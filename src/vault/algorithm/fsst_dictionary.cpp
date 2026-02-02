@@ -3,8 +3,11 @@
 #include <vault/algorithm/fsst_dictionary.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <random>
 #include <stdexcept>
+#include <vector>
 
 #include <fsst.h>
 
@@ -66,24 +69,60 @@ namespace vault::algorithm {
   // --- Private Static Helper: Core FSST Logic ---
 
   std::pair<std::shared_ptr<fsst_dictionary::impl>, std::vector<fsst_key>>
-  fsst_dictionary::compress_core(
-    std::size_t count, std::size_t* lens, unsigned char const** ptrs)
+  fsst_dictionary::compress_core(std::size_t count,
+    std::size_t*                             lens,
+    unsigned char const**                    ptrs,
+    float                                    sample_ratio)
   {
-    // Correctly pass ptrs without const_cast (signature allows const unsigned
-    // char**)
-    auto encoder = fsst_create(count, lens, ptrs, 0);
+    if (sample_ratio <= 0.0f || sample_ratio > 1.0f) {
+      throw std::invalid_argument("sample_ratio must be in (0, 1]");
+    }
+
+    fsst_encoder_t* encoder = nullptr;
+    std::size_t     target_samples =
+      static_cast<std::size_t>(std::ceil(count * sample_ratio));
+    target_samples = std::max(target_samples, std::size_t{1024});
+
+    if (target_samples >= count) {
+      encoder = fsst_create(count, lens, ptrs, 0);
+    } else {
+      auto indices = std::vector<std::size_t>(count);
+      std::iota(indices.begin(), indices.end(), 0);
+
+      auto sampled_indices = std::vector<std::size_t>{};
+      sampled_indices.resize(target_samples);
+
+      auto rng = std::mt19937{std::random_device{}()};
+      std::sample(indices.begin(),
+        indices.end(),
+        sampled_indices.begin(),
+        target_samples,
+        rng);
+
+      auto training_ptrs = std::vector<unsigned char const*>{};
+      auto training_lens = std::vector<std::size_t>{};
+      training_ptrs.reserve(target_samples);
+      training_lens.reserve(target_samples);
+
+      for (auto idx : sampled_indices) {
+        training_ptrs.push_back(ptrs[idx]);
+        training_lens.push_back(lens[idx]);
+      }
+
+      encoder = fsst_create(
+        target_samples, training_lens.data(), training_ptrs.data(), 0);
+    }
+
     if (!encoder) {
       throw std::runtime_error("Failed to create FSST encoder");
     }
 
-    // Allocate impl via make_shared
     auto impl_ptr = std::make_shared<fsst_dictionary::impl>();
 
     unsigned char buf[FSST_MAXHEADER];
     fsst_export(encoder, buf);
     fsst_import(&impl_ptr->decoder, buf);
 
-    // Heuristic reserve
     impl_ptr->data_blob.reserve(count * 8);
 
     auto keys = std::vector<fsst_key>{};
@@ -139,7 +178,8 @@ namespace vault::algorithm {
   // --- Factory: Build from Unique ---
 
   std::pair<fsst_dictionary, std::vector<fsst_key>>
-  fsst_dictionary::build_from_unique(std::span<std::string const> unique_inputs)
+  fsst_dictionary::build_from_unique(
+    std::span<std::string const> unique_inputs, sample_ratio ratio)
   {
     if (unique_inputs.empty()) {
       return {fsst_dictionary{}, {}};
@@ -160,16 +200,31 @@ namespace vault::algorithm {
       lens.push_back(s.size());
     }
 
-    auto [impl_ptr, keys] =
-      compress_core(unique_inputs.size(), lens.data(), ptrs.data());
+    auto [impl_ptr, keys] = compress_core(
+      unique_inputs.size(), lens.data(), ptrs.data(), ratio.value);
 
     return {fsst_dictionary(std::move(impl_ptr)), std::move(keys)};
   }
 
+  std::pair<fsst_dictionary, std::vector<fsst_key>>
+  fsst_dictionary::build_from_unique(
+    std::span<std::string const> unique_inputs, compression_level level)
+  {
+    static constexpr auto max_compression_level =
+      std::ranges::size(compression_levels);
+
+    level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
+
+    // We now construct a sample_ratio from the level's value
+    sample_ratio ratio{compression_levels[level.value].value};
+    return build_from_unique(unique_inputs, ratio);
+  }
+
   // --- Factory: Standard Build (Sort/Unique) ---
 
-  fsst_dictionary fsst_dictionary::build(
-    std::span<std::string const> inputs, std::function<void(fsst_key)> emit_key)
+  fsst_dictionary fsst_dictionary::build(std::span<std::string const> inputs,
+    std::function<void(fsst_key)>                                     emit_key,
+    sample_ratio                                                      ratio)
   {
     if (inputs.empty()) {
       return fsst_dictionary{};
@@ -180,7 +235,7 @@ namespace vault::algorithm {
     auto [last, end] = std::ranges::unique(unique);
     unique.erase(last, end);
 
-    auto [dict, keys] = build_from_unique(unique);
+    auto [dict, keys] = build_from_unique(unique, ratio);
 
     if (emit_key) {
       for (const auto& s : inputs) {
@@ -191,13 +246,36 @@ namespace vault::algorithm {
     return dict;
   }
 
+  fsst_dictionary fsst_dictionary::build(std::span<std::string const> inputs,
+    std::function<void(fsst_key)>                                     emit_key,
+    compression_level                                                 level)
+  {
+    static constexpr auto max_compression_level =
+      std::ranges::size(compression_levels);
+
+    level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
+    sample_ratio ratio{compression_levels[level.value].value};
+    return build(inputs, emit_key, ratio);
+  }
+
   std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
-    std::span<std::string const> inputs)
+    std::span<std::string const> inputs, sample_ratio ratio)
   {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(inputs.size());
-    auto dict = build(inputs, [&](fsst_key k) { keys.push_back(k); });
+    auto dict = build(inputs, [&](fsst_key k) { keys.push_back(k); }, ratio);
     return {std::move(dict), std::move(keys)};
+  }
+
+  std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
+    std::span<std::string const> inputs, compression_level level)
+  {
+    static constexpr auto max_compression_level =
+      std::ranges::size(compression_levels);
+
+    level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
+    sample_ratio ratio{compression_levels[level.value].value};
+    return build(inputs, ratio);
   }
 
 } // namespace vault::algorithm
