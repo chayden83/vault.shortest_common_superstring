@@ -1,21 +1,3 @@
-// clang-format off
-
-// ----------------------------------------------------------------------------------------------
-// Benchmark                                    Time             CPU   Iterations UserCounters...
-// ----------------------------------------------------------------------------------------------
-// BM_DictionaryBuild_Random/10000/16     8583156 ns      8581712 ns           72 Ratio=0.796234 Savings=-0.255912 bytes_per_second=17.7806Mi/s items_per_second=1.16527M/s
-// BM_DictionaryBuild_Random/10000/32     8784097 ns      8783706 ns           79 Ratio=0.997792 Savings=-2.2125m bytes_per_second=34.7434Mi/s items_per_second=1.13847M/s
-// BM_DictionaryBuild_Random/10000/64    10554485 ns     10553685 ns           68 Ratio=1.143 Savings=0.125109 bytes_per_second=57.833Mi/s items_per_second=947.536k/s
-// BM_DictionaryBuild_Hex/10000/32        7703802 ns      7702676 ns           88 Ratio=1.28942 Savings=0.224459 bytes_per_second=39.6194Mi/s items_per_second=1.29825M/s
-// BM_DictionaryBuild_URLs/10000          8203324 ns      8199358 ns           84 Ratio=1.75453 Savings=0.430045 bytes_per_second=55.4347Mi/s items_per_second=1.21961M/s
-// BM_DictionaryBuild_Repeated/100000    63951450 ns     63942915 ns           10 items_per_second=1.56389M/s
-// BM_DictionaryLookup_Random/10000/16     534975 ns       534896 ns         1304 bytes_per_second=285.266Mi/s items_per_second=18.6952M/s
-// BM_DictionaryLookup_Random/10000/64    1012327 ns      1012180 ns          723 bytes_per_second=603.007Mi/s items_per_second=9.87966M/s
-// BM_DictionaryLookup_URLs/10000          631243 ns       631134 ns          979 items_per_second=15.8445M/s
-// BM_DictionaryLookup_Large               138517 ns       138505 ns         4760 bytes_per_second=1.3771Gi/s items_per_second=721.998k/s
-
-// clang-format on
-
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <benchmark/benchmark.h>
@@ -33,7 +15,12 @@
 namespace {
 
   // --- Enums for Data Types ---
-  enum DataType { kRandom32 = 0, kHex32 = 1, kURL = 2 };
+  enum DataType {
+    kRandom32 = 0,
+    kHex32    = 1,
+    kURL      = 2,
+    kZipf     = 3 // New: Random content, Zipfian lengths (1-128)
+  };
 
   // --- Generators ---
   auto generate_random_strings(std::size_t count, std::size_t length)
@@ -96,6 +83,42 @@ namespace {
     return result;
   }
 
+  // New: Zipfian Length Generator
+  // Generates strings with lengths 1..max_len following 1/k distribution.
+  // Content is random lowercase alpha.
+  auto generate_zipf_strings(std::size_t count, std::size_t max_len = 128)
+    -> std::vector<std::string>
+  {
+    auto result = std::vector<std::string>{};
+    result.reserve(count);
+
+    // 1. Prepare Zipf weights: w[i] = 1/(i+1)
+    // Using std::discrete_distribution which handles weight normalization.
+    auto weights = std::vector<double>{};
+    weights.reserve(max_len);
+    for (std::size_t i = 1; i <= max_len; ++i) {
+      weights.push_back(1.0 / static_cast<double>(i));
+    }
+
+    auto len_dist =
+      std::discrete_distribution<std::size_t>(weights.begin(), weights.end());
+    auto rng       = std::mt19937{std::random_device{}()};
+    auto char_dist = std::uniform_int_distribution<int>{'a', 'z'};
+
+    for (std::size_t i = 0; i < count; ++i) {
+      // len_dist returns 0..(max_len-1). We want 1..max_len.
+      std::size_t len = len_dist(rng) + 1;
+
+      auto s = std::string{};
+      s.reserve(len);
+      for (std::size_t k = 0; k < len; ++k) {
+        s.push_back(static_cast<char>(char_dist(rng)));
+      }
+      result.push_back(std::move(s));
+    }
+    return result;
+  }
+
   auto generate_data(std::size_t count, int type) -> std::vector<std::string>
   {
     switch (type) {
@@ -105,6 +128,8 @@ namespace {
       return generate_hex_strings(count, 32);
     case kURL:
       return generate_urls(count);
+    case kZipf:
+      return generate_zipf_strings(count);
     default:
       return {};
     }
@@ -236,7 +261,6 @@ static void BM_SamplingRatio(benchmark::State& state)
   auto const type      = static_cast<int>(state.range(1));
   auto const ratio_val = static_cast<float>(1.0 / denom);
 
-  // Wrap in new type
   vault::algorithm::fsst_dictionary::sample_ratio ratio{ratio_val};
 
   std::size_t count     = 1'000'000;
@@ -247,7 +271,6 @@ static void BM_SamplingRatio(benchmark::State& state)
     std::vector<vault::algorithm::fsst_key> keys;
     keys.reserve(input.size());
 
-    // Use Boost Flat Map + explicit Sample Ratio
     auto dict =
       vault::algorithm::make_fsst_dictionary<boost::unordered_flat_map>(
         input, std::back_inserter(keys), {}, ratio);
@@ -270,7 +293,7 @@ static void BM_SamplingRatio(benchmark::State& state)
 static void CustomArgs(benchmark::internal::Benchmark* b)
 {
   std::vector<int64_t> counts = {10'000, 100'000, 1'000'000, 10'000'000};
-  std::vector<int64_t> types  = {kRandom32, kHex32, kURL};
+  std::vector<int64_t> types  = {kRandom32, kHex32, kURL, kZipf}; // Added kZipf
 
   for (auto c : counts) {
     for (auto t : types) {
@@ -281,8 +304,7 @@ static void CustomArgs(benchmark::internal::Benchmark* b)
 
 static void SamplingArgs(benchmark::internal::Benchmark* b)
 {
-  // Inverse powers of 2: 1/1, 1/2, ... 1/8192
-  std::vector<int64_t> types = {kRandom32, kHex32, kURL};
+  std::vector<int64_t> types = {kRandom32, kHex32, kURL, kZipf}; // Added kZipf
   for (int64_t denom = 1; denom <= 8192; denom *= 2) {
     for (auto t : types) {
       b->Args({denom, t});

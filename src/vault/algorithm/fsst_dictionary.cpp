@@ -13,6 +13,83 @@
 
 namespace vault::algorithm {
 
+  namespace {
+    // --- Key Layout Constants ---
+    constexpr std::size_t kInlineFlagShift = 63;
+    constexpr std::size_t kInlineLenShift  = 56;
+    constexpr std::size_t kInlineLenMask   = 0x7F; // 7 bits
+
+    constexpr std::size_t kPointerLenShift   = 40;
+    constexpr std::size_t kPointerLenMask    = 0x7F'FFFF;        // 23 bits
+    constexpr std::size_t kPointerOffsetMask = 0xFF'FFFF'FFFFuz; // 40 bits
+
+    constexpr std::size_t kByteMask = 0xFF;
+
+    // Derived Limits
+    constexpr std::size_t kMaxPointerLength = kPointerLenMask;
+    constexpr std::size_t kMaxPointerOffset = kPointerOffsetMask;
+    constexpr std::size_t kMaxInlineLength  = 7;
+
+    // --- Internal Helpers ---
+
+    auto create_pointer_key(std::size_t offset, std::size_t length) -> fsst_key
+    {
+      if (length > kMaxPointerLength) {
+        throw std::length_error("fsst_key: string exceeds 8MB limit");
+      }
+      return fsst_key{
+        (length << kPointerLenShift) | (offset & kPointerOffsetMask)};
+    }
+
+    auto key_is_inline(fsst_key k) -> bool
+    {
+      return (k.value >> kInlineFlagShift) & 1;
+    }
+
+    auto extract_inline_string(fsst_key k) -> std::string
+    {
+      std::string s;
+      std::size_t len = (k.value >> kInlineLenShift) & kInlineLenMask;
+      s.resize(len);
+      for (std::size_t i = 0; i < len; ++i) {
+        s[i] = static_cast<char>((k.value >> (i * 8)) & kByteMask);
+      }
+      return s;
+    }
+
+    auto decode_pointer_key(fsst_key k) -> std::pair<std::size_t, std::size_t>
+    {
+      std::size_t len = (k.value >> kPointerLenShift) & kPointerLenMask;
+      std::size_t off = k.value & kPointerOffsetMask;
+      return {off, len};
+    }
+
+  } // namespace
+
+  // --- Public Helper Implementations ---
+
+  bool fsst_dictionary::is_inline_candidate(std::string_view s) noexcept
+  {
+    return s.size() <= kMaxInlineLength;
+  }
+
+  fsst_key fsst_dictionary::make_inline_key(std::string_view s)
+  {
+    if (s.size() > kMaxInlineLength) {
+      throw std::length_error("fsst_key: inline string too long");
+    }
+    std::uint64_t payload = 0;
+    for (std::size_t i = 0; i < s.size(); ++i) {
+      payload |= (static_cast<std::uint64_t>(static_cast<unsigned char>(s[i]))
+        << (i * 8));
+    }
+    payload |= (static_cast<std::uint64_t>(s.size()) << kInlineLenShift);
+    payload |= (1uz << kInlineFlagShift);
+    return fsst_key{payload};
+  }
+
+  // --- Dictionary Implementation ---
+
   struct fsst_dictionary::impl {
     std::vector<unsigned char> data_blob;
     fsst_decoder_t             decoder;
@@ -42,22 +119,25 @@ namespace vault::algorithm {
 
   std::optional<std::string> fsst_dictionary::operator[](fsst_key key) const
   {
+    if (key_is_inline(key)) {
+      return extract_inline_string(key);
+    }
     if (empty()) {
       return std::nullopt;
     }
-    if (key.offset + key.length > p_impl->data_blob.size()) {
+
+    auto [offset, length] = decode_pointer_key(key);
+    if (offset + length > p_impl->data_blob.size()) {
       return std::nullopt;
     }
 
-    auto const* compressed_ptr = p_impl->data_blob.data() + key.offset;
-    auto        compressed_len = key.length;
-
-    auto result = std::string{};
-    result.resize(std::max(std::size_t{64}, compressed_len * 5));
+    auto const* compressed_ptr = p_impl->data_blob.data() + offset;
+    auto        result         = std::string{};
+    result.resize(std::max(std::size_t{64}, length * 5));
 
     auto actual_size =
       fsst_decompress(const_cast<fsst_decoder_t*>(&p_impl->decoder),
-        compressed_len,
+        length,
         const_cast<unsigned char*>(compressed_ptr),
         result.size(),
         reinterpret_cast<unsigned char*>(result.data()));
@@ -66,7 +146,7 @@ namespace vault::algorithm {
     return result;
   }
 
-  // --- Private Static Helper: Core FSST Logic ---
+  // --- Core FSST Compression ---
 
   std::pair<std::shared_ptr<fsst_dictionary::impl>, std::vector<fsst_key>>
   fsst_dictionary::compress_core(std::size_t count,
@@ -76,6 +156,9 @@ namespace vault::algorithm {
   {
     if (sample_ratio <= 0.0f || sample_ratio > 1.0f) {
       throw std::invalid_argument("sample_ratio must be in (0, 1]");
+    }
+    if (count == 0) {
+      return {std::make_shared<fsst_dictionary::impl>(), {}};
     }
 
     fsst_encoder_t* encoder = nullptr;
@@ -108,7 +191,6 @@ namespace vault::algorithm {
         training_ptrs.push_back(ptrs[idx]);
         training_lens.push_back(lens[idx]);
       }
-
       encoder = fsst_create(
         target_samples, training_lens.data(), training_ptrs.data(), 0);
     }
@@ -128,18 +210,24 @@ namespace vault::algorithm {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(count);
 
-    auto compression_buffer = std::vector<unsigned char>{};
-    auto max_len            = std::size_t{0};
+    // FIX: Use aligned buffer (vector of u64) to prevent UBSAN errors in
+    // fsst_compress
+    auto max_len = std::size_t{0};
     for (size_t i = 0; i < count; ++i) {
       max_len = std::max(max_len, lens[i]);
     }
-    compression_buffer.resize(2 * max_len + 16);
 
-    constexpr auto MAX_OFFSET = std::size_t{1} << 40;
-    constexpr auto MAX_LENGTH = std::size_t{1} << 24;
+    std::size_t buffer_req = 2 * max_len + 16;
+    // Round up to nearest 8 bytes for vector<u64> sizing
+    std::vector<unsigned long long> aligned_buf((buffer_req + 7) / 8);
+    unsigned char*                  comp_buf_ptr =
+      reinterpret_cast<unsigned char*>(aligned_buf.data());
+    std::size_t comp_buf_len = aligned_buf.size() * 8;
+
+    constexpr auto MAX_OFFSET = std::size_t{1} << 40; // 1 TB
 
     for (size_t i = 0; i < count; ++i) {
-      if (impl_ptr->data_blob.size() >= MAX_OFFSET) {
+      if (impl_ptr->data_blob.size() >= kMaxPointerOffset) {
         fsst_destroy(encoder);
         throw std::length_error("fsst_dictionary: Dictionary size limit");
       }
@@ -153,29 +241,28 @@ namespace vault::algorithm {
         1,
         &src_len,
         &src_ptr,
-        compression_buffer.size(),
-        compression_buffer.data(),
+        comp_buf_len,
+        comp_buf_ptr,
         &dst_len,
         &dst_ptr);
 
-      if (dst_len >= MAX_LENGTH) {
+      if (dst_len > kMaxPointerLength) {
         fsst_destroy(encoder);
         throw std::length_error("fsst_dictionary: Compressed string limit");
       }
 
       auto offset = impl_ptr->data_blob.size();
-      impl_ptr->data_blob.insert(impl_ptr->data_blob.end(),
-        compression_buffer.begin(),
-        compression_buffer.begin() + dst_len);
+      impl_ptr->data_blob.insert(
+        impl_ptr->data_blob.end(), comp_buf_ptr, comp_buf_ptr + dst_len);
 
-      keys.push_back({offset, dst_len});
+      keys.push_back(create_pointer_key(offset, dst_len));
     }
 
     fsst_destroy(encoder);
     return {std::move(impl_ptr), std::move(keys)};
   }
 
-  // --- Factory: Build from Unique ---
+  // --- Factories (Delegators) ---
 
   std::pair<fsst_dictionary, std::vector<fsst_key>>
   fsst_dictionary::build_from_unique(
@@ -190,20 +277,35 @@ namespace vault::algorithm {
     ptrs.reserve(unique_inputs.size());
     lens.reserve(unique_inputs.size());
 
-    constexpr auto MAX_LEN = std::size_t{1} << 24;
-
-    for (const auto& s : unique_inputs) {
-      if (s.size() >= MAX_LEN) {
-        throw std::length_error("String too large");
+    for (size_t i = 0; i < unique_inputs.size(); ++i) {
+      const auto& s = unique_inputs[i];
+      if (is_inline_candidate(s)) {
+        // Skip: handled later
+      } else {
+        if (s.size() > kMaxPointerLength) {
+          throw std::length_error("String too large");
+        }
+        ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
+        lens.push_back(s.size());
       }
-      ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
-      lens.push_back(s.size());
     }
 
-    auto [impl_ptr, keys] = compress_core(
-      unique_inputs.size(), lens.data(), ptrs.data(), ratio.value);
+    auto [impl_ptr, large_keys] =
+      compress_core(ptrs.size(), lens.data(), ptrs.data(), ratio.value);
 
-    return {fsst_dictionary(std::move(impl_ptr)), std::move(keys)};
+    std::vector<fsst_key> final_keys;
+    final_keys.reserve(unique_inputs.size());
+
+    size_t large_counter = 0;
+    for (const auto& s : unique_inputs) {
+      if (is_inline_candidate(s)) {
+        final_keys.push_back(make_inline_key(s));
+      } else {
+        final_keys.push_back(large_keys[large_counter++]);
+      }
+    }
+
+    return {fsst_dictionary(std::move(impl_ptr)), std::move(final_keys)};
   }
 
   std::pair<fsst_dictionary, std::vector<fsst_key>>
@@ -214,13 +316,9 @@ namespace vault::algorithm {
       std::ranges::size(compression_levels);
 
     level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
-
-    // We now construct a sample_ratio from the level's value
     sample_ratio ratio{compression_levels[level.value].value};
     return build_from_unique(unique_inputs, ratio);
   }
-
-  // --- Factory: Standard Build (Sort/Unique) ---
 
   fsst_dictionary fsst_dictionary::build(std::span<std::string const> inputs,
     std::function<void(fsst_key)>                                     emit_key,
@@ -252,7 +350,6 @@ namespace vault::algorithm {
   {
     static constexpr auto max_compression_level =
       std::ranges::size(compression_levels);
-
     level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
     sample_ratio ratio{compression_levels[level.value].value};
     return build(inputs, emit_key, ratio);
@@ -272,7 +369,6 @@ namespace vault::algorithm {
   {
     static constexpr auto max_compression_level =
       std::ranges::size(compression_levels);
-
     level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
     sample_ratio ratio{compression_levels[level.value].value};
     return build(inputs, ratio);
