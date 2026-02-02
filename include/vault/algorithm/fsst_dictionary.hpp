@@ -7,15 +7,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <range/v3/range/conversion.hpp>
@@ -42,7 +40,9 @@ namespace vault::algorithm {
     };
 
     // Callback types for type-erased construction
-    using Generator = std::function<std::optional<std::string>()>;
+    using RValueGenerator = std::function<std::optional<std::string>()>;
+    using LValueGenerator = std::function<std::string const*()>;
+
     using Deduplicator =
       std::function<std::pair<std::uint64_t, bool>(std::string_view)>;
 
@@ -59,10 +59,13 @@ namespace vault::algorithm {
       {1.0f}};
 
     [[nodiscard]] fsst_dictionary();
+
     [[nodiscard]] fsst_dictionary(const fsst_dictionary&)     = default;
     [[nodiscard]] fsst_dictionary(fsst_dictionary&&) noexcept = default;
-    fsst_dictionary& operator=(const fsst_dictionary&)        = default;
-    fsst_dictionary& operator=(fsst_dictionary&&) noexcept    = default;
+
+    fsst_dictionary& operator=(const fsst_dictionary&)     = default;
+    fsst_dictionary& operator=(fsst_dictionary&&) noexcept = default;
+
     ~fsst_dictionary();
 
     [[nodiscard]] std::optional<std::string> operator[](fsst_key key) const;
@@ -73,37 +76,91 @@ namespace vault::algorithm {
     [[nodiscard]] static bool is_inline_candidate(std::string_view s) noexcept;
     [[nodiscard]] static fsst_key make_inline_key(std::string_view s);
 
-    // --- Factories ---
+    // --- Helper for Level to Ratio Conversion ---
+    [[nodiscard]] static constexpr inline sample_ratio level_to_ratio(
+      compression_level level)
+    {
+      static constexpr auto max_compression_level =
+        std::ranges::size(fsst_dictionary::compression_levels);
 
-    [[nodiscard]] static fsst_dictionary build(Generator gen,
-      Deduplicator                                       dedup,
-      std::function<void(fsst_key)>                      emit_key,
+      level = fsst_dictionary::compression_level{
+        std::clamp(level.value, 0uz, max_compression_level - 1)};
+
+      return fsst_dictionary::compression_levels[level.value];
+    }
+
+    // --- Factories ---
+    [[nodiscard]] static fsst_dictionary build(LValueGenerator gen,
+      Deduplicator                                             dedup,
+      std::function<void(fsst_key)>                            emit_key,
       sample_ratio ratio = sample_ratio{1.});
 
-    [[nodiscard]] static fsst_dictionary build(
-      std::span<std::string const>  inputs,
+    [[nodiscard]] static fsst_dictionary build_from_unique(LValueGenerator gen,
       std::function<void(fsst_key)> emit_key,
-      sample_ratio                  sample_ratio_ = sample_ratio{1.});
-
-    [[nodiscard]] static fsst_dictionary build(
-      std::span<std::string const>  inputs,
-      std::function<void(fsst_key)> emit_key,
-      compression_level             level);
+      sample_ratio                  ratio = sample_ratio{1.});
 
     [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
-    build(std::span<std::string const> inputs,
-      sample_ratio                     sample_ratio = compression_levels[9]);
-
-    [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
-    build(std::span<std::string const> inputs, compression_level level);
-
-    [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
-    build_from_unique(std::span<std::string const> unique_inputs,
-      sample_ratio sample_ratio_ = sample_ratio{1.});
+    build(LValueGenerator gen,
+      Deduplicator        dedup,
+      sample_ratio        ratio = sample_ratio{1.});
 
     [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
     build_from_unique(
-      std::span<std::string const> unique_inputs, compression_level level);
+      LValueGenerator gen, sample_ratio ratio = sample_ratio{1.});
+
+    [[nodiscard]] static inline fsst_dictionary build(LValueGenerator gen,
+      Deduplicator                                                    dedup,
+      std::function<void(fsst_key)>                                   emit_key,
+      compression_level                                               level)
+    {
+      return build(std::move(gen),
+        std::move(dedup),
+        std::move(emit_key),
+        level_to_ratio(level));
+    }
+
+    [[nodiscard]] static inline fsst_dictionary build_from_unique(
+      LValueGenerator               gen,
+      std::function<void(fsst_key)> emit_key,
+      compression_level             level)
+    {
+      return build_from_unique(
+        std::move(gen), std::move(emit_key), level_to_ratio(level));
+    }
+
+    [[nodiscard]] static inline std::pair<fsst_dictionary,
+      std::vector<fsst_key>>
+    build(LValueGenerator gen, Deduplicator dedup, compression_level level)
+    {
+      return build(std::move(gen), std::move(dedup), level_to_ratio(level));
+    }
+
+    [[nodiscard]] static inline std::pair<fsst_dictionary,
+      std::vector<fsst_key>>
+    build_from_unique(LValueGenerator gen, compression_level level)
+    {
+      return build_from_unique(std::move(gen), level_to_ratio(level));
+    }
+
+    template <typename... Args>
+    [[nodiscard]] static auto build(RValueGenerator gen, Args&&... args)
+    {
+      auto strings = std::vector<std::string>{};
+
+      for (auto string = std::invoke(gen); string.has_value();
+        string         = std::invoke(gen)) {
+        strings.emplace_back(*std::move(string));
+      }
+
+      auto first = std::ranges::begin(strings);
+      auto last  = std::ranges::end(strings);
+
+      auto lgen = [=]() mutable -> std::string const* {
+        return first != last ? std::addressof(*first++) : nullptr;
+      };
+
+      return build(std::move(lgen), std::forward<Args>(args)...);
+    }
 
   private:
     class impl;
@@ -118,108 +175,6 @@ namespace vault::algorithm {
       unsigned char const**   ptrs,
       float                   sample_ratio);
   };
-
-  // --- Core Overload (Direct Sink) ---
-
-  template <template <typename,
-              typename,
-              typename,
-              typename,
-              typename...> typename MapType = std::unordered_map,
-    std::ranges::range R,
-    typename Proj = std::identity>
-  [[nodiscard]] auto make_fsst_dictionary(R&& strings,
-    std::function<void(fsst_key)>             sink, // Direct callback
-    Proj                                      proj = {},
-    fsst_dictionary::sample_ratio sample_ratio = fsst_dictionary::sample_ratio{
-      1.}) -> fsst_dictionary
-  {
-    auto it  = std::ranges::begin(strings);
-    auto end = std::ranges::end(strings);
-
-    auto generator = [it, end, proj]() mutable -> std::optional<std::string> {
-      if (it == end) {
-        return std::nullopt;
-      }
-      std::string s(std::invoke(proj, *it));
-      ++it;
-      return s;
-    };
-
-    auto seen = MapType<std::string_view,
-      std::size_t,
-      std::hash<std::string_view>,
-      std::equal_to<>>{};
-
-    if constexpr (requires { std::ranges::size(strings); }) {
-      if constexpr (requires { seen.reserve(1); }) {
-        seen.reserve(std::ranges::size(strings));
-      }
-    }
-
-    std::size_t next_index = 0;
-    auto        deduplicator =
-      [&](std::string_view sv) -> std::pair<std::uint64_t, bool> {
-      auto [iter, inserted] = seen.emplace(sv, next_index);
-      if (inserted) {
-        return {next_index++, true};
-      }
-      return {iter->second, false};
-    };
-
-    return fsst_dictionary::build(generator, deduplicator, sink, sample_ratio);
-  }
-
-  // --- Iterator Adaptor Overload ---
-
-  template <template <typename,
-              typename,
-              typename,
-              typename,
-              typename...> typename MapType = std::unordered_map,
-    std::ranges::range R,
-    typename Out, // Iterator type
-    typename Proj = std::identity>
-    requires(!std::convertible_to<Out, std::function<void(fsst_key)>>)
-  [[nodiscard]] auto make_fsst_dictionary(R&& strings,
-    Out                                       out,
-    Proj                                      proj = {},
-    fsst_dictionary::sample_ratio sample_ratio = fsst_dictionary::sample_ratio{
-      1.}) -> fsst_dictionary
-  {
-    return make_fsst_dictionary<MapType>(
-      std::forward<R>(strings),
-      [&](fsst_key k) { *out++ = k; }, // Wrap iterator in lambda
-      proj,
-      sample_ratio);
-  }
-
-  // --- Compression Level Overload ---
-
-  template <template <typename,
-              typename,
-              typename,
-              typename,
-              typename...> typename MapType = std::unordered_map,
-    std::ranges::range R,
-    typename Out,
-    typename Proj = std::identity>
-  [[nodiscard]] auto make_fsst_dictionary(
-    R&& strings, Out out, Proj proj, fsst_dictionary::compression_level level)
-    -> fsst_dictionary
-  {
-    static constexpr auto max_compression_level =
-      std::ranges::size(fsst_dictionary::compression_levels);
-
-    level = fsst_dictionary::compression_level{
-      std::clamp(level.value, 0uz, max_compression_level - 1)};
-
-    auto sample_ratio = fsst_dictionary::compression_levels[level.value];
-
-    return make_fsst_dictionary<MapType>(
-      std::forward<R>(strings), out, proj, sample_ratio);
-  }
-
 } // namespace vault::algorithm
 
 #endif // VAULT_ALGORITHM_FSST_DICTIONARY_HPP

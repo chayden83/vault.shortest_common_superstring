@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <deque>
-#include <random>
+#include <numeric> // Required for std::iota
+#include <random>  // Required for std::mt19937, std::random_device
 #include <stdexcept>
 #include <vector>
 
@@ -258,61 +258,54 @@ namespace vault::algorithm {
     return {std::move(impl_ptr), std::move(keys)};
   }
 
-  // --- Factories (Delegators) ---
+  // --- Core Build Implementation ---
 
-  fsst_dictionary fsst_dictionary::build(Generator gen,
-    Deduplicator                                   dedup,
-    std::function<void(fsst_key)>                  emit_key,
-    sample_ratio                                   ratio)
+  fsst_dictionary fsst_dictionary::build(LValueGenerator gen,
+    Deduplicator                                         dedup,
+    std::function<void(fsst_key)>                        emit_key,
+    sample_ratio                                         ratio)
   {
-    std::vector<std::uint64_t> key_or_index;
-    std::deque<std::string>    unique_large_strings;
+    std::vector<std::uint64_t>        instructions;
+    std::vector<unsigned char const*> compression_ptrs;
+    std::vector<std::size_t>          compression_lens;
 
     while (true) {
-      auto opt_s = gen();
-      if (!opt_s) {
+      std::string const* s_ptr = gen();
+      if (!s_ptr) {
         break;
       }
 
-      std::string_view sv = *opt_s;
+      std::string_view sv = *s_ptr;
 
       if (is_inline_candidate(sv)) {
         fsst_key k = make_inline_key(sv);
-        key_or_index.push_back(k.value);
+        instructions.push_back(k.value);
       } else {
-        unique_large_strings.emplace_back(std::move(*opt_s));
-        std::string_view stable_view = unique_large_strings.back();
+        // Deduplicate
+        auto [idx, is_new] = dedup(sv);
 
-        auto [ret_idx, ret_is_new] = dedup(stable_view);
-
-        if (ret_is_new) {
-          key_or_index.push_back(ret_idx);
-        } else {
-          unique_large_strings.pop_back();
-          key_or_index.push_back(ret_idx);
+        if (is_new) {
+          if (sv.size() > kMaxPointerLength) {
+            throw std::length_error("String too large");
+          }
+          // LValueGenerator guarantees s_ptr is stable
+          compression_ptrs.push_back(
+            reinterpret_cast<unsigned char const*>(s_ptr->data()));
+          compression_lens.push_back(s_ptr->size());
         }
+
+        instructions.push_back(idx);
       }
     }
 
-    std::vector<unsigned char const*> ptrs;
-    std::vector<std::size_t>          lens;
-    ptrs.reserve(unique_large_strings.size());
-    lens.reserve(unique_large_strings.size());
-
-    for (const auto& s : unique_large_strings) {
-      if (s.size() > kMaxPointerLength) {
-        throw std::length_error("String too large");
-      }
-      ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
-      lens.push_back(s.size());
-    }
-
-    auto [impl_ptr, large_keys] =
-      compress_core(ptrs.size(), lens.data(), ptrs.data(), ratio.value);
+    auto [impl_ptr, large_keys] = compress_core(compression_ptrs.size(),
+      compression_lens.data(),
+      compression_ptrs.data(),
+      ratio.value);
 
     fsst_dictionary result_dict(std::move(impl_ptr));
 
-    for (std::uint64_t val : key_or_index) {
+    for (std::uint64_t val : instructions) {
       if (val & (1ULL << 63)) {
         emit_key(fsst_key{val});
       } else {
@@ -323,103 +316,77 @@ namespace vault::algorithm {
     return result_dict;
   }
 
-  std::pair<fsst_dictionary, std::vector<fsst_key>>
-  fsst_dictionary::build_from_unique(
-    std::span<std::string const> unique_inputs, sample_ratio ratio)
+  fsst_dictionary fsst_dictionary::build_from_unique(LValueGenerator gen,
+    std::function<void(fsst_key)>                                    emit_key,
+    sample_ratio                                                     ratio)
   {
-    if (unique_inputs.empty()) {
-      return {fsst_dictionary{}, {}};
-    }
+    std::vector<std::uint64_t>        instructions;
+    std::vector<unsigned char const*> compression_ptrs;
+    std::vector<std::size_t>          compression_lens;
+    std::size_t                       current_ptr_idx = 0;
 
-    auto ptrs = std::vector<unsigned char const*>{};
-    auto lens = std::vector<std::size_t>{};
-    ptrs.reserve(unique_inputs.size());
-    lens.reserve(unique_inputs.size());
+    while (true) {
+      std::string const* s_ptr = gen();
+      if (!s_ptr) {
+        break;
+      }
 
-    for (size_t i = 0; i < unique_inputs.size(); ++i) {
-      const auto& s = unique_inputs[i];
-      if (is_inline_candidate(s)) {
-        // skip
+      std::string_view sv = *s_ptr;
+
+      if (is_inline_candidate(sv)) {
+        fsst_key k = make_inline_key(sv);
+        instructions.push_back(k.value);
       } else {
-        if (s.size() > kMaxPointerLength) {
+        if (sv.size() > kMaxPointerLength) {
           throw std::length_error("String too large");
         }
-        ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
-        lens.push_back(s.size());
+        compression_ptrs.push_back(
+          reinterpret_cast<unsigned char const*>(s_ptr->data()));
+        compression_lens.push_back(s_ptr->size());
+
+        instructions.push_back(current_ptr_idx++);
       }
     }
 
-    auto [impl_ptr, large_keys] =
-      compress_core(ptrs.size(), lens.data(), ptrs.data(), ratio.value);
+    auto [impl_ptr, large_keys] = compress_core(compression_ptrs.size(),
+      compression_lens.data(),
+      compression_ptrs.data(),
+      ratio.value);
 
-    std::vector<fsst_key> final_keys;
-    final_keys.reserve(unique_inputs.size());
+    fsst_dictionary result_dict(std::move(impl_ptr));
 
-    size_t large_counter = 0;
-    for (const auto& s : unique_inputs) {
-      if (is_inline_candidate(s)) {
-        final_keys.push_back(make_inline_key(s));
+    for (std::uint64_t val : instructions) {
+      if (val & (1ULL << 63)) {
+        emit_key(fsst_key{val});
       } else {
-        final_keys.push_back(large_keys[large_counter++]);
+        emit_key(large_keys[static_cast<std::size_t>(val)]);
       }
     }
 
-    return {fsst_dictionary(std::move(impl_ptr)), std::move(final_keys)};
+    return result_dict;
   }
 
-  std::pair<fsst_dictionary, std::vector<fsst_key>>
-  fsst_dictionary::build_from_unique(
-    std::span<std::string const> unique_inputs, compression_level level)
-  {
-    static constexpr auto max_compression_level =
-      std::ranges::size(compression_levels);
-
-    level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
-    sample_ratio ratio{compression_levels[level.value].value};
-    return build_from_unique(unique_inputs, ratio);
-  }
-
-  fsst_dictionary fsst_dictionary::build(std::span<std::string const> inputs,
-    std::function<void(fsst_key)>                                     emit_key,
-    sample_ratio                                                      ratio)
-  {
-    // Pass callback directly, no iterator shim needed!
-    return make_fsst_dictionary<std::unordered_map>(
-      inputs, emit_key, std::identity{}, ratio);
-  }
-
-  fsst_dictionary fsst_dictionary::build(std::span<std::string const> inputs,
-    std::function<void(fsst_key)>                                     emit_key,
-    compression_level                                                 level)
-  {
-    static constexpr auto max_compression_level =
-      std::ranges::size(compression_levels);
-    level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
-    sample_ratio ratio{compression_levels[level.value].value};
-    return build(inputs, emit_key, ratio);
-  }
+  // --- Collection Returning Overloads ---
 
   std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
-    std::span<std::string const> inputs, sample_ratio ratio)
+    LValueGenerator gen, Deduplicator dedup, sample_ratio ratio)
   {
-    auto keys = std::vector<fsst_key>{};
-    keys.reserve(inputs.size());
-    // We still need the iterator adapter HERE because vector doesn't have a
-    // callback interface. So we use the template overload that accepts
-    // iterators.
-    auto dict = make_fsst_dictionary<std::unordered_map>(
-      inputs, std::back_inserter(keys), std::identity{}, ratio);
+    std::vector<fsst_key> keys;
+    auto                  dict = build(
+      std::move(gen),
+      std::move(dedup),
+      [&keys](fsst_key k) { keys.push_back(k); },
+      ratio);
     return {std::move(dict), std::move(keys)};
   }
 
-  std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
-    std::span<std::string const> inputs, compression_level level)
+  std::pair<fsst_dictionary, std::vector<fsst_key>>
+  fsst_dictionary::build_from_unique(LValueGenerator gen, sample_ratio ratio)
   {
-    static constexpr auto max_compression_level =
-      std::ranges::size(compression_levels);
-    level.value = std::clamp(level.value, 0uz, max_compression_level - 1);
-    sample_ratio ratio{compression_levels[level.value].value};
-    return build(inputs, ratio);
+    std::vector<fsst_key> keys;
+    auto                  dict = build_from_unique(
+      std::move(gen), [&keys](fsst_key k) { keys.push_back(k); }, ratio);
+    return {std::move(dict), std::move(keys)};
   }
 
 } // namespace vault::algorithm
