@@ -4,7 +4,6 @@
 #define VAULT_ALGORITHM_FSST_DICTIONARY_HPP
 
 #include <algorithm> // for std::clamp
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -141,8 +140,6 @@ namespace vault::algorithm {
     /// @brief Tries to find and decompress the value for `key` into an existing
     /// container.
     /// @tparam ByteContainer A vector-like container (resize, data, size).
-    /// @param dict The dictionary instance.
-    /// @param key The key to look up.
     /// @param out The container to write into. Its content will be overwritten.
     /// @return true if found, false if key is invalid.
     /// @note This function reuses `out`'s existing capacity if sufficient,
@@ -169,7 +166,8 @@ namespace vault::algorithm {
         return false; // Not Found
       }
 
-      // Invariant: Conservative estimate must be sufficient
+      // Invariant: conservative length estimate must effectively prevent -1
+      // (too small).
       assert(res >= 0 && "Conservative memory estimate was insufficient");
 
       out.resize(static_cast<std::size_t>(res));
@@ -180,8 +178,6 @@ namespace vault::algorithm {
     /// container.
     /// @tparam ByteContainer A container type (e.g., std::string,
     /// std::vector<byte>).
-    /// @param dict The dictionary instance.
-    /// @param key The key to look up.
     /// @return The decompressed value, or std::nullopt if the key is invalid.
     template <typename ByteContainer>
     friend inline auto try_find(fsst_dictionary_base const& dict, fsst_key key)
@@ -285,6 +281,7 @@ namespace vault::algorithm {
       auto end = std::ranges::end(range);
 
       if constexpr (is_contiguous_lvalue) {
+        // Path A: Zero Copy (Views)
         auto gen =
           Generator{[it, end]() mutable -> std::optional<std::string_view> {
             if (it == end) {
@@ -299,6 +296,7 @@ namespace vault::algorithm {
         return build(std::move(gen), std::forward<Args>(args)...);
 
       } else {
+        // Path B: R-Value (Buffering)
         auto gen =
           RValueGenerator{[it, end]() mutable -> std::optional<std::string> {
             if (it == end) {
@@ -402,7 +400,6 @@ namespace vault::algorithm {
   public:
     using fsst_dictionary_base::fsst_dictionary_base;
 
-    /// @brief Explicit conversion from base.
     explicit fsst_dictionary(fsst_dictionary_base&& base)
         : fsst_dictionary_base(std::move(base))
     {}
@@ -418,7 +415,6 @@ namespace vault::algorithm {
 
     template <typename... Args> [[nodiscard]] static auto build(Args&&... args)
     {
-      // Check if the base build returns a pair or just the dictionary
       using BaseResult =
         decltype(fsst_dictionary_base::build(std::forward<Args>(args)...));
 
@@ -426,7 +422,6 @@ namespace vault::algorithm {
         return fsst_dictionary(
           fsst_dictionary_base::build(std::forward<Args>(args)...));
       } else {
-        // It's a pair<fsst_dictionary_base, vector<fsst_key>>
         auto [base, keys] =
           fsst_dictionary_base::build(std::forward<Args>(args)...);
         return std::make_pair(
