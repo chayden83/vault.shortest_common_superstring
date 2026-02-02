@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <numeric> // Required for std::iota
-#include <random>  // Required for std::mt19937, std::random_device
+#include <numeric>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
@@ -162,6 +162,7 @@ namespace vault::algorithm {
       return {std::make_shared<fsst_dictionary::impl>(), {}};
     }
 
+    // 1. Train Encoder
     fsst_encoder_t* encoder = nullptr;
     std::size_t     target_samples =
       static_cast<std::size_t>(std::ceil(count * sample_ratio));
@@ -170,6 +171,7 @@ namespace vault::algorithm {
     if (target_samples >= count) {
       encoder = fsst_create(count, lens, ptrs, 0);
     } else {
+      // Reservoir/Random sampling for training
       auto indices = std::vector<std::size_t>(count);
       std::iota(indices.begin(), indices.end(), 0);
 
@@ -202,20 +204,28 @@ namespace vault::algorithm {
 
     auto impl_ptr = std::make_shared<fsst_dictionary::impl>();
 
+    // 2. Export Decoder
     alignas(8) unsigned char buf[FSST_MAXHEADER];
     fsst_export(encoder, buf);
     fsst_import(&impl_ptr->decoder, buf);
 
-    impl_ptr->data_blob.reserve(count * 8);
+    // 3. OPTIMIZATION: Calculate total input size to reserve blob capacity
+    std::size_t total_input_size = 0;
+    std::size_t max_len          = 0;
+    for (size_t i = 0; i < count; ++i) {
+      total_input_size += lens[i];
+      max_len = std::max(max_len, lens[i]);
+    }
+
+    // FSST usually compresses, so input size is a safe upper bound.
+    // We add a small buffer for safety.
+    impl_ptr->data_blob.reserve(total_input_size + 1024);
 
     auto keys = std::vector<fsst_key>{};
     keys.reserve(count);
 
-    auto max_len = std::size_t{0};
-    for (size_t i = 0; i < count; ++i) {
-      max_len = std::max(max_len, lens[i]);
-    }
-
+    // 4. Batch Compress
+    // Aligned buffer for UB-safe compression
     std::size_t                     buffer_req = 2 * max_len + 16;
     std::vector<unsigned long long> aligned_buf((buffer_req + 7) / 8);
     unsigned char*                  comp_buf_ptr =
@@ -233,6 +243,7 @@ namespace vault::algorithm {
       auto  dst_len = std::size_t{0};
       auto* dst_ptr = static_cast<unsigned char*>(nullptr);
 
+      // Compress into aligned temporary buffer
       fsst_compress(encoder,
         1,
         &src_len,
@@ -248,17 +259,23 @@ namespace vault::algorithm {
       }
 
       auto offset = impl_ptr->data_blob.size();
+
+      // Append to blob (This will NOT reallocate due to aggressive reserve
+      // above)
       impl_ptr->data_blob.insert(
         impl_ptr->data_blob.end(), comp_buf_ptr, comp_buf_ptr + dst_len);
 
       keys.push_back(create_pointer_key(offset, dst_len));
     }
 
+    // 5. Shrink to fit (optional, trade-off memory for tight fit)
+    impl_ptr->data_blob.shrink_to_fit();
+
     fsst_destroy(encoder);
     return {std::move(impl_ptr), std::move(keys)};
   }
 
-  // --- Core Build Implementation ---
+  // --- Factories (Core Implementations) ---
 
   fsst_dictionary fsst_dictionary::build(LValueGenerator gen,
     Deduplicator                                         dedup,
@@ -281,19 +298,17 @@ namespace vault::algorithm {
         fsst_key k = make_inline_key(sv);
         instructions.push_back(k.value);
       } else {
-        // Deduplicate
         auto [idx, is_new] = dedup(sv);
 
         if (is_new) {
           if (sv.size() > kMaxPointerLength) {
             throw std::length_error("String too large");
           }
-          // LValueGenerator guarantees s_ptr is stable
+          // LValueGenerator contract: s_ptr is stable.
           compression_ptrs.push_back(
             reinterpret_cast<unsigned char const*>(s_ptr->data()));
           compression_lens.push_back(s_ptr->size());
         }
-
         instructions.push_back(idx);
       }
     }
@@ -366,7 +381,7 @@ namespace vault::algorithm {
     return result_dict;
   }
 
-  // --- Collection Returning Overloads ---
+  // --- Convenience Overloads ---
 
   std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
     LValueGenerator gen, Deduplicator dedup, sample_ratio ratio)
