@@ -13,9 +13,11 @@
 
 using namespace vault::algorithm;
 
+// Alias for convenience in tests (matches user's likely usage)
+using StringDict = fsst_dictionary<std::string>;
+
 namespace {
-  // Reusable deduplicator factory
-  auto make_dedup() -> fsst_dictionary::Deduplicator
+  auto make_dedup() -> fsst_dictionary_base::Deduplicator
   {
     auto map =
       std::make_shared<std::unordered_map<std::string_view, std::uint64_t>>();
@@ -25,7 +27,6 @@ namespace {
     };
   }
 
-  // Helper to generate distinct strings
   auto generate_strings(std::size_t count) -> std::vector<std::string>
   {
     auto result = std::vector<std::string>{};
@@ -45,16 +46,16 @@ TEST_CASE("fsst_dictionary static helpers", "[fsst][sso]")
 {
   SECTION("is_inline_candidate identifies strings <= 7 bytes")
   {
-    CHECK(fsst_dictionary::is_inline_candidate(""));
-    CHECK(fsst_dictionary::is_inline_candidate("1234567"));
-    CHECK_FALSE(fsst_dictionary::is_inline_candidate("12345678"));
+    CHECK(fsst_dictionary_base::is_inline_candidate(""));
+    CHECK(fsst_dictionary_base::is_inline_candidate("1234567"));
+    CHECK_FALSE(fsst_dictionary_base::is_inline_candidate("12345678"));
   }
 
   SECTION("make_inline_key creates valid keys for short strings")
   {
     auto const s      = std::string{"tiny"};
-    auto const k      = fsst_dictionary::make_inline_key(s);
-    auto const dict   = fsst_dictionary{};
+    auto const k      = fsst_dictionary_base::make_inline_key(s);
+    auto const dict   = StringDict{};
     auto const result = dict[k];
     REQUIRE(result.has_value());
     CHECK(*result == "tiny");
@@ -63,7 +64,7 @@ TEST_CASE("fsst_dictionary static helpers", "[fsst][sso]")
   SECTION("make_inline_key throws on strings > 7 bytes")
   {
     CHECK_THROWS_AS(
-      fsst_dictionary::make_inline_key("too_long"), std::length_error);
+      fsst_dictionary_base::make_inline_key("too_long"), std::length_error);
   }
 }
 
@@ -79,7 +80,8 @@ TEST_CASE("fsst_dictionary construction strategies", "[fsst][build]")
   SECTION("build() with deduplicator correctly maps duplicates")
   {
     auto keys = std::vector<fsst_key>{};
-    auto dict = fsst_dictionary::build(
+    // Use the Typed Dictionary Factory
+    auto dict = StringDict::build(
       inputs, make_dedup(), [&](fsst_key k) { keys.push_back(k); });
 
     REQUIRE(keys.size() == 5);
@@ -95,7 +97,7 @@ TEST_CASE("fsst_dictionary construction strategies", "[fsst][build]")
   SECTION("build_from_unique() treats every input as new")
   {
     auto keys = std::vector<fsst_key>{};
-    auto dict = fsst_dictionary::build_from_unique(
+    auto dict = StringDict::build_from_unique(
       inputs, [&](fsst_key k) { keys.push_back(k); });
 
     REQUIRE(keys.size() == 5);
@@ -103,7 +105,7 @@ TEST_CASE("fsst_dictionary construction strategies", "[fsst][build]")
     auto const long_inputs =
       std::vector<std::string>{"long_string_value_1", "long_string_value_1"};
     auto long_keys = std::vector<fsst_key>{};
-    auto long_dict = fsst_dictionary::build_from_unique(
+    auto long_dict = StringDict::build_from_unique(
       long_inputs, [&](fsst_key k) { long_keys.push_back(k); });
 
     CHECK(long_keys[0] != long_keys[1]);
@@ -113,7 +115,7 @@ TEST_CASE("fsst_dictionary construction strategies", "[fsst][build]")
 
   SECTION("Convenience overloads returning std::pair")
   {
-    auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+    auto [dict, keys] = StringDict::build(inputs, make_dedup());
     REQUIRE(keys.size() == 5);
     CHECK(*dict[keys[0]] == "apple");
   }
@@ -131,7 +133,7 @@ TEST_CASE("fsst_dictionary data boundaries", "[fsst][data]")
     auto const s8     = std::string("12345678");
     auto const inputs = std::vector<std::string>{s7, s8};
 
-    auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+    auto [dict, keys] = StringDict::build(inputs, make_dedup());
 
     REQUIRE(keys.size() == 2);
     CHECK(*dict[keys[0]] == s7);
@@ -145,7 +147,7 @@ TEST_CASE("fsst_dictionary data boundaries", "[fsst][data]")
     auto const binary = "a\0b\0c"s;
     auto const inputs = std::vector<std::string>{binary};
 
-    auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+    auto [dict, keys] = StringDict::build(inputs, make_dedup());
 
     REQUIRE(keys.size() == 1);
     auto const res = dict[keys[0]];
@@ -157,7 +159,7 @@ TEST_CASE("fsst_dictionary data boundaries", "[fsst][data]")
   SECTION("Empty string handling")
   {
     auto const inputs = std::vector<std::string>{"", "non-empty", ""};
-    auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+    auto [dict, keys] = StringDict::build(inputs, make_dedup());
 
     REQUIRE(keys.size() == 3);
     CHECK(keys[0] == keys[2]);
@@ -175,7 +177,7 @@ TEST_CASE("fsst_dictionary range adapters", "[fsst][ranges]")
   SECTION("Contiguous L-Value Range (std::vector<std::string>)")
   {
     auto const inputs = generate_strings(100);
-    auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+    auto [dict, keys] = StringDict::build(inputs, make_dedup());
     CHECK(keys.size() == 100);
     CHECK(*dict[keys[99]] == "entry_99");
   }
@@ -186,7 +188,7 @@ TEST_CASE("fsst_dictionary range adapters", "[fsst][ranges]")
     list.push_back({'h', 'e', 'l', 'l', 'o'});
     list.push_back({'w', 'o', 'r', 'l', 'd'});
 
-    auto [dict, keys] = fsst_dictionary::build(list, make_dedup());
+    auto [dict, keys] = StringDict::build(list, make_dedup());
 
     REQUIRE(keys.size() == 2);
     CHECK(*dict[keys[0]] == "hello");
@@ -200,7 +202,7 @@ TEST_CASE("fsst_dictionary range adapters", "[fsst][ranges]")
       return "transformed_" + std::to_string(i);
     });
 
-    auto [dict, keys] = fsst_dictionary::build(range, make_dedup());
+    auto [dict, keys] = StringDict::build(range, make_dedup());
 
     REQUIRE(keys.size() == 3);
     CHECK(*dict[keys[0]] == "transformed_1");
@@ -217,18 +219,18 @@ TEST_CASE("fsst_dictionary configuration", "[fsst][config]")
 
   SECTION("Explicit Sample Ratio")
   {
-    auto ratio        = fsst_dictionary::sample_ratio{0.1f};
-    auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup(), ratio);
+    auto ratio        = fsst_dictionary_base::sample_ratio{0.1f};
+    auto [dict, keys] = StringDict::build(inputs, make_dedup(), ratio);
     CHECK(keys.size() == 1000);
   }
 
   SECTION("Compression Level (0-9)")
   {
-    auto [dict0, keys0] = fsst_dictionary::build(
-      inputs, make_dedup(), fsst_dictionary::compression_level{0});
+    auto [dict0, keys0] = StringDict::build(
+      inputs, make_dedup(), fsst_dictionary_base::compression_level{0});
 
-    auto [dict9, keys9] = fsst_dictionary::build(
-      inputs, make_dedup(), fsst_dictionary::compression_level{9});
+    auto [dict9, keys9] = StringDict::build(
+      inputs, make_dedup(), fsst_dictionary_base::compression_level{9});
 
     CHECK(keys0.size() == 1000);
     CHECK(keys9.size() == 1000);
@@ -236,8 +238,8 @@ TEST_CASE("fsst_dictionary configuration", "[fsst][config]")
 
   SECTION("Invalid Sample Ratio throws")
   {
-    auto bad_ratio = fsst_dictionary::sample_ratio{1.5f};
-    CHECK_THROWS_AS(fsst_dictionary::build(inputs, make_dedup(), bad_ratio),
+    auto bad_ratio = fsst_dictionary_base::sample_ratio{1.5f};
+    CHECK_THROWS_AS(StringDict::build(inputs, make_dedup(), bad_ratio),
       std::invalid_argument);
   }
 }
@@ -249,7 +251,7 @@ TEST_CASE("fsst_dictionary configuration", "[fsst][config]")
 TEST_CASE("fsst_dictionary lifecycle", "[fsst][rule_of_5]")
 {
   auto const inputs     = std::vector<std::string>{"persistence", "check"};
-  auto [src_dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+  auto [src_dict, keys] = StringDict::build(inputs, make_dedup());
 
   SECTION("Copy construction")
   {
@@ -267,14 +269,14 @@ TEST_CASE("fsst_dictionary lifecycle", "[fsst][rule_of_5]")
 
   SECTION("Copy assignment")
   {
-    auto other = fsst_dictionary{};
+    auto other = StringDict{};
     other      = src_dict;
     CHECK(*other[keys[0]] == "persistence");
   }
 
   SECTION("Move assignment")
   {
-    auto other = fsst_dictionary{};
+    auto other = StringDict{};
     other      = std::move(src_dict);
     CHECK(*other[keys[0]] == "persistence");
     CHECK(src_dict.empty());
@@ -288,13 +290,13 @@ TEST_CASE("fsst_dictionary lifecycle", "[fsst][rule_of_5]")
 TEST_CASE("fsst_dictionary error handling", "[fsst][errors]")
 {
   auto const inputs = std::vector<std::string>{"valid"};
-  auto [dict, keys] = fsst_dictionary::build(inputs, make_dedup());
+  auto [dict, keys] = StringDict::build(inputs, make_dedup());
 
   SECTION("Out of bounds lookup returns nullopt")
   {
     auto large_inputs = generate_strings(1000);
     auto [large_dict, large_keys] =
-      fsst_dictionary::build(large_inputs, make_dedup());
+      StringDict::build(large_inputs, make_dedup());
 
     // Using a valid pointer key from a large dict on a small dict guarantees
     // OOB.
@@ -305,16 +307,58 @@ TEST_CASE("fsst_dictionary error handling", "[fsst][errors]")
 
   SECTION("Empty dictionary lookups")
   {
-    auto empty_dict = fsst_dictionary{};
+    auto empty_dict = StringDict{};
     CHECK(empty_dict.empty());
     CHECK(empty_dict.size_in_bytes() == 0);
 
-    auto inline_key = fsst_dictionary::make_inline_key("hi");
+    auto inline_key = fsst_dictionary_base::make_inline_key("hi");
     CHECK(*empty_dict[inline_key] == "hi");
 
-    // Fix: Explicit vector to avoid template deduction error
-    auto [d, k] = fsst_dictionary::build(
+    auto [d, k] = StringDict::build(
       std::vector<std::string>{"long_string_to_force_pointer"}, make_dedup());
     CHECK_FALSE(empty_dict[k[0]].has_value());
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 8. try_find API (Generic & Reference)
+// -----------------------------------------------------------------------------
+
+TEST_CASE("fsst_dictionary try_find API", "[fsst][lookup]")
+{
+  auto const inputs = std::vector<std::string>{"apple", "banana", "cherry"};
+  auto [dict, keys] = StringDict::build(inputs, make_dedup());
+
+  SECTION("try_find (Value Overload) with std::string")
+  {
+    auto result = try_find<std::string>(dict, keys[0]);
+    REQUIRE(result.has_value());
+    CHECK(*result == "apple");
+  }
+
+  SECTION("try_find (Value Overload) with std::vector<char>")
+  {
+    auto result = try_find<std::vector<char>>(dict, keys[1]);
+    REQUIRE(result.has_value());
+    auto const expected = std::string("banana");
+    CHECK(std::ranges::equal(*result, expected));
+  }
+
+  SECTION("try_find (Reference Overload) reuses capacity")
+  {
+    auto buffer = std::string{};
+    buffer.reserve(128);
+    auto const original_cap = buffer.capacity();
+
+    // 1. First lookup
+    auto found = try_find(dict, keys[2], buffer);
+    CHECK(found);
+    CHECK(buffer == "cherry");
+    CHECK(buffer.capacity() >= original_cap); // Should reuse
+
+    // 2. Second lookup (overwrite)
+    found = try_find(dict, keys[0], buffer);
+    CHECK(found);
+    CHECK(buffer == "apple");
   }
 }

@@ -14,7 +14,8 @@
 
 namespace {
 
-  // --- Data Generators (Standard) ---
+  // ... (Data Generators unchanged) ...
+  // [Omitted for brevity, assume generate_random_strings etc. are present]
   auto generate_random_strings(std::size_t count, std::size_t length)
     -> std::vector<std::string>
   {
@@ -32,10 +33,6 @@ namespace {
     }
     return result;
   }
-
-  // ... (Other generators omitted for brevity, identical to previous) ...
-  // Assume generate_hex_strings, generate_urls, generate_zipf_strings exist
-  // here. Including them explicitly for correctness in final file output.
 
   auto generate_hex_strings(std::size_t count, std::size_t length)
     -> std::vector<std::string>
@@ -131,14 +128,14 @@ namespace {
       [](std::size_t sum, const std::string& s) { return sum + s.size(); });
   }
 
+  // Uses the typed dictionary template
   template <template <class...> class MapType>
-  auto build_with_map(const std::vector<std::string>& inputs,
-    vault::algorithm::fsst_dictionary::sample_ratio   ratio = {1.0})
+  auto build_with_map(const std::vector<std::string>&    inputs,
+    vault::algorithm::fsst_dictionary_base::sample_ratio ratio = {1.0})
   {
     auto it  = inputs.begin();
     auto end = inputs.end();
 
-    // Generator (Zero-Copy)
     auto gen = [it, end]() mutable -> std::optional<std::string_view> {
       if (it == end) {
         return std::nullopt;
@@ -158,7 +155,7 @@ namespace {
       return {iter->second, inserted};
     };
 
-    return vault::algorithm::fsst_dictionary::build(
+    return vault::algorithm::fsst_dictionary<std::string>::build(
       std::move(gen), std::move(dedup), ratio);
   }
 
@@ -190,7 +187,6 @@ static void BM_Construction_Map(benchmark::State& state)
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
 
-// ... (Lookups and Sampling Benchmarks match previous clean state) ...
 static void BM_Lookup_Sequential(benchmark::State& state)
 {
   auto const count     = static_cast<std::size_t>(state.range(0));
@@ -230,8 +226,8 @@ static void BM_SamplingRatio(benchmark::State& state)
   auto const denom     = static_cast<double>(state.range(0));
   auto const type      = static_cast<int>(state.range(1));
   auto const ratio_val = static_cast<float>(1.0 / denom);
-  vault::algorithm::fsst_dictionary::sample_ratio ratio{ratio_val};
-  std::size_t                                     count = 1'000'000;
+  vault::algorithm::fsst_dictionary_base::sample_ratio ratio{ratio_val};
+  std::size_t                                          count = 1'000'000;
   auto const input     = generate_data(count, type);
   auto const raw_bytes = total_raw_size(input);
   for (auto _ : state) {
