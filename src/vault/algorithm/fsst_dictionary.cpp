@@ -20,10 +20,9 @@ namespace vault::algorithm {
     constexpr std::size_t kInlineLenShift  = 56;
     constexpr std::size_t kInlineLenMask   = 0x7F; // 7 bits
 
-    constexpr std::size_t kPointerLenShift = 40;
-    constexpr std::size_t kPointerLenMask  = 0x7F'FFFF; // 23 bits
-    constexpr std::size_t kPointerOffsetMask =
-      0xFF'FFFF'FFFFULL; // 40 bits (Fixed literal)
+    constexpr std::size_t kPointerLenShift   = 40;
+    constexpr std::size_t kPointerLenMask    = 0x7F'FFFF;         // 23 bits
+    constexpr std::size_t kPointerOffsetMask = 0xFF'FFFF'FFFFULL; // 40 bits
 
     constexpr std::size_t kByteMask = 0xFF;
 
@@ -86,7 +85,7 @@ namespace vault::algorithm {
         << (i * 8));
     }
     payload |= (static_cast<std::uint64_t>(s.size()) << kInlineLenShift);
-    payload |= (1ULL << kInlineFlagShift); // Fixed literal
+    payload |= (1ULL << kInlineFlagShift);
     return fsst_key{payload};
   }
 
@@ -203,7 +202,6 @@ namespace vault::algorithm {
 
     auto impl_ptr = std::make_shared<fsst_dictionary::impl>();
 
-    // FIX: Force 8-byte alignment for fsst_export buffer
     alignas(8) unsigned char buf[FSST_MAXHEADER];
     fsst_export(encoder, buf);
     fsst_import(&impl_ptr->decoder, buf);
@@ -218,8 +216,7 @@ namespace vault::algorithm {
       max_len = std::max(max_len, lens[i]);
     }
 
-    std::size_t buffer_req = 2 * max_len + 16;
-    // Buffer alignment is crucial for FSST UBSAN compliance
+    std::size_t                     buffer_req = 2 * max_len + 16;
     std::vector<unsigned long long> aligned_buf((buffer_req + 7) / 8);
     unsigned char*                  comp_buf_ptr =
       reinterpret_cast<unsigned char*>(aligned_buf.data());
@@ -283,7 +280,6 @@ namespace vault::algorithm {
         fsst_key k = make_inline_key(sv);
         key_or_index.push_back(k.value);
       } else {
-        // Store in stable deque first so string_view is valid
         unique_large_strings.emplace_back(std::move(*opt_s));
         std::string_view stable_view = unique_large_strings.back();
 
@@ -292,7 +288,6 @@ namespace vault::algorithm {
         if (ret_is_new) {
           key_or_index.push_back(ret_idx);
         } else {
-          // Duplicate; remove local copy
           unique_large_strings.pop_back();
           key_or_index.push_back(ret_idx);
         }
@@ -318,7 +313,7 @@ namespace vault::algorithm {
     fsst_dictionary result_dict(std::move(impl_ptr));
 
     for (std::uint64_t val : key_or_index) {
-      if (val & (1ULL << 63)) { // Fixed literal
+      if (val & (1ULL << 63)) {
         emit_key(fsst_key{val});
       } else {
         emit_key(large_keys[static_cast<std::size_t>(val)]);
@@ -388,24 +383,9 @@ namespace vault::algorithm {
     std::function<void(fsst_key)>                                     emit_key,
     sample_ratio                                                      ratio)
   {
-    if (inputs.empty()) {
-      return fsst_dictionary{};
-    }
-
-    auto unique = inputs | std::ranges::to<std::vector>();
-    std::ranges::sort(unique);
-    auto [last, end] = std::ranges::unique(unique);
-    unique.erase(last, end);
-
-    auto [dict, keys] = build_from_unique(unique, ratio);
-
-    if (emit_key) {
-      for (const auto& s : inputs) {
-        auto it = std::lower_bound(unique.begin(), unique.end(), s);
-        emit_key(keys[std::distance(unique.begin(), it)]);
-      }
-    }
-    return dict;
+    // Pass callback directly, no iterator shim needed!
+    return make_fsst_dictionary<std::unordered_map>(
+      inputs, emit_key, std::identity{}, ratio);
   }
 
   fsst_dictionary fsst_dictionary::build(std::span<std::string const> inputs,
@@ -424,7 +404,11 @@ namespace vault::algorithm {
   {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(inputs.size());
-    auto dict = build(inputs, [&](fsst_key k) { keys.push_back(k); }, ratio);
+    // We still need the iterator adapter HERE because vector doesn't have a
+    // callback interface. So we use the template overload that accepts
+    // iterators.
+    auto dict = make_fsst_dictionary<std::unordered_map>(
+      inputs, std::back_inserter(keys), std::identity{}, ratio);
     return {std::move(dict), std::move(keys)};
   }
 

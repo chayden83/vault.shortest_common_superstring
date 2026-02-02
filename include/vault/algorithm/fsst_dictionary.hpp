@@ -75,15 +75,6 @@ namespace vault::algorithm {
 
     // --- Factories ---
 
-    /**
-     * @brief Type-erased build function.
-     * * @param gen Generates strings one by one. Returns nullopt when done.
-     * @param dedup Maps a string to a unique index.
-     * Returns {index, true} if the string is new.
-     * Returns {index, false} if the string was seen before.
-     * @param emit_key Callback to receive the final keys in order.
-     * @param sample_ratio Training sample ratio.
-     */
     [[nodiscard]] static fsst_dictionary build(Generator gen,
       Deduplicator                                       dedup,
       std::function<void(fsst_key)>                      emit_key,
@@ -128,7 +119,7 @@ namespace vault::algorithm {
       float                   sample_ratio);
   };
 
-  // --- Generic Template Interface ---
+  // --- Core Overload (Direct Sink) ---
 
   template <template <typename,
               typename,
@@ -136,15 +127,13 @@ namespace vault::algorithm {
               typename,
               typename...> typename MapType = std::unordered_map,
     std::ranges::range R,
-    typename Out,
     typename Proj = std::identity>
   [[nodiscard]] auto make_fsst_dictionary(R&& strings,
-    Out                                       out,
+    std::function<void(fsst_key)>             sink, // Direct callback
     Proj                                      proj = {},
     fsst_dictionary::sample_ratio sample_ratio = fsst_dictionary::sample_ratio{
       1.}) -> fsst_dictionary
   {
-    // 1. Prepare Generator
     auto it  = std::ranges::begin(strings);
     auto end = std::ranges::end(strings);
 
@@ -152,23 +141,16 @@ namespace vault::algorithm {
       if (it == end) {
         return std::nullopt;
       }
-      // Invoke projection and convert to string
       std::string s(std::invoke(proj, *it));
       ++it;
       return s;
     };
 
-    // 2. Prepare Deduplicator
-    // The map stores string_view -> index.
-    // Note: The map keys must point to stable storage. The core 'build'
-    // function in the .cpp file will ensure strings are stored stably before
-    // calling this.
     auto seen = MapType<std::string_view,
       std::size_t,
       std::hash<std::string_view>,
       std::equal_to<>>{};
 
-    // Hint size if possible
     if constexpr (requires { std::ranges::size(strings); }) {
       if constexpr (requires { seen.reserve(1); }) {
         seen.reserve(std::ranges::size(strings));
@@ -179,17 +161,40 @@ namespace vault::algorithm {
     auto        deduplicator =
       [&](std::string_view sv) -> std::pair<std::uint64_t, bool> {
       auto [iter, inserted] = seen.emplace(sv, next_index);
-
       if (inserted) {
         return {next_index++, true};
       }
       return {iter->second, false};
     };
 
-    // 3. Delegate to core implementation
-    return fsst_dictionary::build(
-      generator, deduplicator, [&](fsst_key k) { *out++ = k; }, sample_ratio);
+    return fsst_dictionary::build(generator, deduplicator, sink, sample_ratio);
   }
+
+  // --- Iterator Adaptor Overload ---
+
+  template <template <typename,
+              typename,
+              typename,
+              typename,
+              typename...> typename MapType = std::unordered_map,
+    std::ranges::range R,
+    typename Out, // Iterator type
+    typename Proj = std::identity>
+    requires(!std::convertible_to<Out, std::function<void(fsst_key)>>)
+  [[nodiscard]] auto make_fsst_dictionary(R&& strings,
+    Out                                       out,
+    Proj                                      proj = {},
+    fsst_dictionary::sample_ratio sample_ratio = fsst_dictionary::sample_ratio{
+      1.}) -> fsst_dictionary
+  {
+    return make_fsst_dictionary<MapType>(
+      std::forward<R>(strings),
+      [&](fsst_key k) { *out++ = k; }, // Wrap iterator in lambda
+      proj,
+      sample_ratio);
+  }
+
+  // --- Compression Level Overload ---
 
   template <template <typename,
               typename,
