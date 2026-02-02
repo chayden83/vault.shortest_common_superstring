@@ -15,6 +15,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <range/v3/range/conversion.hpp>
@@ -40,6 +41,11 @@ namespace vault::algorithm {
       std::size_t value = 9;
     };
 
+    // Callback types for type-erased construction
+    using Generator = std::function<std::optional<std::string>()>;
+    using Deduplicator =
+      std::function<std::pair<std::uint64_t, bool>(std::string_view)>;
+
     static constexpr inline sample_ratio const compression_levels[10] = {
       {1.0f / 1024.0f},
       {1.0f / 512.0f},
@@ -64,11 +70,24 @@ namespace vault::algorithm {
     [[nodiscard]] std::size_t                size_in_bytes() const;
 
     // --- Helpers for Key Generation (SSO) ---
-    // Exposed so templates can use them, but implementation is in .cpp
     [[nodiscard]] static bool is_inline_candidate(std::string_view s) noexcept;
     [[nodiscard]] static fsst_key make_inline_key(std::string_view s);
 
     // --- Factories ---
+
+    /**
+     * @brief Type-erased build function.
+     * * @param gen Generates strings one by one. Returns nullopt when done.
+     * @param dedup Maps a string to a unique index.
+     * Returns {index, true} if the string is new.
+     * Returns {index, false} if the string was seen before.
+     * @param emit_key Callback to receive the final keys in order.
+     * @param sample_ratio Training sample ratio.
+     */
+    [[nodiscard]] static fsst_dictionary build(Generator gen,
+      Deduplicator                                       dedup,
+      std::function<void(fsst_key)>                      emit_key,
+      sample_ratio ratio = sample_ratio{1.});
 
     [[nodiscard]] static fsst_dictionary build(
       std::span<std::string const>  inputs,
@@ -125,75 +144,51 @@ namespace vault::algorithm {
     fsst_dictionary::sample_ratio sample_ratio = fsst_dictionary::sample_ratio{
       1.}) -> fsst_dictionary
   {
-    // Temporary storage for mapping: Input Index -> (Inline Key OR Large String
-    // Index) We use uint64_t to store either the fsst_key.value (if inline) or
-    // the index. We can distinguish them because Inline Keys always have the
-    // MSB (bit 63) set. Indices (0...N) will have MSB 0 (assuming < 9
-    // quintillion strings).
-    std::vector<std::uint64_t> key_or_index;
+    // 1. Prepare Generator
+    auto it  = std::ranges::begin(strings);
+    auto end = std::ranges::end(strings);
 
-    // We only materialize "Large" strings into the arena.
-    // Small strings are converted to keys immediately and discarded.
-    auto unique_large_strings = std::vector<std::string>{};
+    auto generator = [it, end, proj]() mutable -> std::optional<std::string> {
+      if (it == end) {
+        return std::nullopt;
+      }
+      // Invoke projection and convert to string
+      std::string s(std::invoke(proj, *it));
+      ++it;
+      return s;
+    };
 
-    // Map Large String View -> Unique Index
+    // 2. Prepare Deduplicator
+    // The map stores string_view -> index.
+    // Note: The map keys must point to stable storage. The core 'build'
+    // function in the .cpp file will ensure strings are stored stably before
+    // calling this.
     auto seen = MapType<std::string_view,
       std::size_t,
       std::hash<std::string_view>,
       std::equal_to<>>{};
 
-    // Helper to estimate size if possible
+    // Hint size if possible
     if constexpr (requires { std::ranges::size(strings); }) {
-      key_or_index.reserve(std::ranges::size(strings));
-    }
-
-    for (auto&& s_raw : strings) {
-      // Apply projection to get the string-like object, then view it.
-      // We do NOT construct a std::string yet.
-      auto             projected = std::invoke(proj, s_raw);
-      std::string_view sv{projected};
-
-      if (fsst_dictionary::is_inline_candidate(sv)) {
-        // CASE A: Small String (SSO)
-        // Create key immediately. No heap alloc, no map lookup.
-        fsst_key k = fsst_dictionary::make_inline_key(sv);
-        key_or_index.push_back(k.value);
-      } else {
-        // CASE B: Large String
-        // Check map.
-        auto it = seen.find(sv);
-        if (it == seen.end()) {
-          // New unique large string.
-          // NOW we allocate the std::string copy.
-          std::size_t new_idx = unique_large_strings.size();
-          unique_large_strings.emplace_back(sv);
-
-          // Add to map. The key points to the stable string in the vector.
-          seen.emplace(unique_large_strings.back(), new_idx);
-
-          key_or_index.push_back(new_idx);
-        } else {
-          // Duplicate large string.
-          key_or_index.push_back(it->second);
-        }
+      if constexpr (requires { seen.reserve(1); }) {
+        seen.reserve(std::ranges::size(strings));
       }
     }
 
-    // Compress only the large strings
-    auto [dict, large_keys] =
-      fsst_dictionary::build_from_unique(unique_large_strings, sample_ratio);
+    std::size_t next_index = 0;
+    auto        deduplicator =
+      [&](std::string_view sv) -> std::pair<std::uint64_t, bool> {
+      auto [iter, inserted] = seen.emplace(sv, next_index);
 
-    // Emit final sequence
-    for (std::uint64_t val : key_or_index) {
-      // Check MSB to see if it's an Inline Key or an Index
-      if (val & (1UZ << 63)) {
-        *out++ = fsst_key{val};
-      } else {
-        *out++ = large_keys[static_cast<std::size_t>(val)];
+      if (inserted) {
+        return {next_index++, true};
       }
-    }
+      return {iter->second, false};
+    };
 
-    return dict;
+    // 3. Delegate to core implementation
+    return fsst_dictionary::build(
+      generator, deduplicator, [&](fsst_key k) { *out++ = k; }, sample_ratio);
   }
 
   template <template <typename,
@@ -214,7 +209,7 @@ namespace vault::algorithm {
     level = fsst_dictionary::compression_level{
       std::clamp(level.value, 0uz, max_compression_level - 1)};
 
-    auto sample_ratio = fsst_dictionary::compression_levels[level.value].value;
+    auto sample_ratio = fsst_dictionary::compression_levels[level.value];
 
     return make_fsst_dictionary<MapType>(
       std::forward<R>(strings), out, proj, sample_ratio);

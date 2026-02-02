@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <random>
 #include <stdexcept>
 #include <vector>
@@ -19,9 +20,10 @@ namespace vault::algorithm {
     constexpr std::size_t kInlineLenShift  = 56;
     constexpr std::size_t kInlineLenMask   = 0x7F; // 7 bits
 
-    constexpr std::size_t kPointerLenShift   = 40;
-    constexpr std::size_t kPointerLenMask    = 0x7F'FFFF;        // 23 bits
-    constexpr std::size_t kPointerOffsetMask = 0xFF'FFFF'FFFFuz; // 40 bits
+    constexpr std::size_t kPointerLenShift = 40;
+    constexpr std::size_t kPointerLenMask  = 0x7F'FFFF; // 23 bits
+    constexpr std::size_t kPointerOffsetMask =
+      0xFF'FFFF'FFFFULL; // 40 bits (Fixed literal)
 
     constexpr std::size_t kByteMask = 0xFF;
 
@@ -37,8 +39,8 @@ namespace vault::algorithm {
       if (length > kMaxPointerLength) {
         throw std::length_error("fsst_key: string exceeds 8MB limit");
       }
-      return fsst_key{
-        (length << kPointerLenShift) | (offset & kPointerOffsetMask)};
+      return fsst_key{(static_cast<std::uint64_t>(length) << kPointerLenShift)
+        | (offset & kPointerOffsetMask)};
     }
 
     auto key_is_inline(fsst_key k) -> bool
@@ -84,7 +86,7 @@ namespace vault::algorithm {
         << (i * 8));
     }
     payload |= (static_cast<std::uint64_t>(s.size()) << kInlineLenShift);
-    payload |= (1uz << kInlineFlagShift);
+    payload |= (1ULL << kInlineFlagShift); // Fixed literal
     return fsst_key{payload};
   }
 
@@ -201,7 +203,8 @@ namespace vault::algorithm {
 
     auto impl_ptr = std::make_shared<fsst_dictionary::impl>();
 
-    unsigned char buf[FSST_MAXHEADER];
+    // FIX: Force 8-byte alignment for fsst_export buffer
+    alignas(8) unsigned char buf[FSST_MAXHEADER];
     fsst_export(encoder, buf);
     fsst_import(&impl_ptr->decoder, buf);
 
@@ -210,21 +213,17 @@ namespace vault::algorithm {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(count);
 
-    // FIX: Use aligned buffer (vector of u64) to prevent UBSAN errors in
-    // fsst_compress
     auto max_len = std::size_t{0};
     for (size_t i = 0; i < count; ++i) {
       max_len = std::max(max_len, lens[i]);
     }
 
     std::size_t buffer_req = 2 * max_len + 16;
-    // Round up to nearest 8 bytes for vector<u64> sizing
+    // Buffer alignment is crucial for FSST UBSAN compliance
     std::vector<unsigned long long> aligned_buf((buffer_req + 7) / 8);
     unsigned char*                  comp_buf_ptr =
       reinterpret_cast<unsigned char*>(aligned_buf.data());
     std::size_t comp_buf_len = aligned_buf.size() * 8;
-
-    constexpr auto MAX_OFFSET = std::size_t{1} << 40; // 1 TB
 
     for (size_t i = 0; i < count; ++i) {
       if (impl_ptr->data_blob.size() >= kMaxPointerOffset) {
@@ -264,6 +263,71 @@ namespace vault::algorithm {
 
   // --- Factories (Delegators) ---
 
+  fsst_dictionary fsst_dictionary::build(Generator gen,
+    Deduplicator                                   dedup,
+    std::function<void(fsst_key)>                  emit_key,
+    sample_ratio                                   ratio)
+  {
+    std::vector<std::uint64_t> key_or_index;
+    std::deque<std::string>    unique_large_strings;
+
+    while (true) {
+      auto opt_s = gen();
+      if (!opt_s) {
+        break;
+      }
+
+      std::string_view sv = *opt_s;
+
+      if (is_inline_candidate(sv)) {
+        fsst_key k = make_inline_key(sv);
+        key_or_index.push_back(k.value);
+      } else {
+        // Store in stable deque first so string_view is valid
+        unique_large_strings.emplace_back(std::move(*opt_s));
+        std::string_view stable_view = unique_large_strings.back();
+
+        auto [ret_idx, ret_is_new] = dedup(stable_view);
+
+        if (ret_is_new) {
+          key_or_index.push_back(ret_idx);
+        } else {
+          // Duplicate; remove local copy
+          unique_large_strings.pop_back();
+          key_or_index.push_back(ret_idx);
+        }
+      }
+    }
+
+    std::vector<unsigned char const*> ptrs;
+    std::vector<std::size_t>          lens;
+    ptrs.reserve(unique_large_strings.size());
+    lens.reserve(unique_large_strings.size());
+
+    for (const auto& s : unique_large_strings) {
+      if (s.size() > kMaxPointerLength) {
+        throw std::length_error("String too large");
+      }
+      ptrs.push_back(reinterpret_cast<unsigned char const*>(s.data()));
+      lens.push_back(s.size());
+    }
+
+    auto [impl_ptr, large_keys] =
+      compress_core(ptrs.size(), lens.data(), ptrs.data(), ratio.value);
+
+    fsst_dictionary result_dict(std::move(impl_ptr));
+
+    for (std::uint64_t val : key_or_index) {
+      if (val & (1ULL << 63)) { // Fixed literal
+        emit_key(fsst_key{val});
+      } else {
+        emit_key(large_keys[static_cast<std::size_t>(val)]);
+      }
+    }
+
+    return result_dict;
+  }
+
   std::pair<fsst_dictionary, std::vector<fsst_key>>
   fsst_dictionary::build_from_unique(
     std::span<std::string const> unique_inputs, sample_ratio ratio)
@@ -280,7 +344,7 @@ namespace vault::algorithm {
     for (size_t i = 0; i < unique_inputs.size(); ++i) {
       const auto& s = unique_inputs[i];
       if (is_inline_candidate(s)) {
-        // Skip: handled later
+        // skip
       } else {
         if (s.size() > kMaxPointerLength) {
           throw std::length_error("String too large");
