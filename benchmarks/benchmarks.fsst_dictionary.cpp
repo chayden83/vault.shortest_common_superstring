@@ -14,7 +14,7 @@
 
 namespace {
 
-  // --- Data Generators ---
+  // --- Data Generators (Unchanged) ---
   auto generate_random_strings(std::size_t count, std::size_t length)
     -> std::vector<std::string>
   {
@@ -134,12 +134,17 @@ namespace {
   {
     auto it  = inputs.begin();
     auto end = inputs.end();
-    // Manual LValueGenerator: returns pointer to stable string in vector
-    auto gen = [it, end]() mutable -> std::string const* {
-      return it != end ? &(*it++) : nullptr;
+
+    // Generator returning optional string_view (Zero-Copy)
+    auto gen = [it, end]() mutable -> std::optional<std::string_view> {
+      if (it == end) {
+        return std::nullopt;
+      }
+      std::string_view sv = *it; // string to string_view
+      ++it;
+      return sv;
     };
 
-    // Manual Deduplicator using MapType
     auto map = MapType<std::string_view, std::size_t>{};
     map.reserve(inputs.size());
 
@@ -150,7 +155,6 @@ namespace {
       return {iter->second, inserted};
     };
 
-    // Return dict and keys using the pair overload
     return vault::algorithm::fsst_dictionary::build(
       std::move(gen), std::move(dedup), ratio);
   }
@@ -178,7 +182,6 @@ static void BM_Construction_Map(benchmark::State& state)
 
     auto total_compressed_size = static_cast<double>(dict.size_in_bytes())
       + static_cast<double>(keys.size() * sizeof(vault::algorithm::fsst_key));
-
     state.counters["Ratio"] =
       static_cast<double>(raw_bytes) / total_compressed_size;
   }
@@ -254,8 +257,6 @@ static void BM_SamplingRatio(benchmark::State& state)
   state.SetItemsProcessed(state.iterations() * count);
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
-
-// --- Registration ---
 
 static void CustomArgs(benchmark::internal::Benchmark* b)
 {
