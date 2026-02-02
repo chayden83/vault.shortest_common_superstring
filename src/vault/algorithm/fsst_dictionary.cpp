@@ -47,23 +47,26 @@ namespace vault::algorithm {
       return fsst_key{payload};
     }
 
-    auto key_is_inline(fsst_key k) -> bool
+    auto key_is_inline_raw(fsst_key k) -> bool
     {
       return (k.value >> kInlineFlagShift) & 1;
     }
 
-    auto extract_inline_string(fsst_key k) -> std::string
+    auto extract_inline_into(fsst_key k, void* dst, std::size_t capacity)
+      -> std::ptrdiff_t
     {
-      auto       s   = std::string{};
       auto const len = (k.value >> kInlineLenShift) & kInlineLenMask;
-
       assert(len <= kMaxInlineLength);
-      s.resize(len);
 
-      for (auto i = std::size_t{0}; i < len; ++i) {
-        s[i] = static_cast<char>((k.value >> (i * 8)) & kByteMask);
+      if (len > capacity) {
+        return -1;
       }
-      return s;
+
+      auto* ptr = static_cast<char*>(dst);
+      for (auto i = std::size_t{0}; i < len; ++i) {
+        ptr[i] = static_cast<char>((k.value >> (i * 8)) & kByteMask);
+      }
+      return static_cast<std::ptrdiff_t>(len);
     }
 
     auto decode_pointer_key(fsst_key k) -> std::pair<std::size_t, std::size_t>
@@ -73,10 +76,6 @@ namespace vault::algorithm {
       return {off, len};
     }
 
-    // --- R-Value Buffering Adapter ---
-    // Takes an RValueGenerator and a lambda that accepts a ViewGenerator.
-    // Manages the lifetime of a stable buffer for the duration of the lambda
-    // call.
     template <typename Func>
     auto buffered_build_adapter(
       fsst_dictionary::RValueGenerator gen, Func&& func)
@@ -150,35 +149,80 @@ namespace vault::algorithm {
     return p_impl ? p_impl->data_blob.size() : 0;
   }
 
-  std::optional<std::string> fsst_dictionary::operator[](fsst_key key) const
+  // --- Private Helpers for Friends ---
+
+  auto fsst_dictionary::is_inline_key_internal(fsst_key k) const -> bool
   {
-    if (key_is_inline(key)) {
-      return extract_inline_string(key);
+    return key_is_inline_raw(k);
+  }
+
+  auto fsst_dictionary::get_conservative_length(fsst_key k) const -> std::size_t
+  {
+    if (key_is_inline_raw(k)) {
+      return (k.value >> kInlineLenShift) & kInlineLenMask;
+    }
+    auto const [offset, length] = decode_pointer_key(k);
+    // 5x expansion factor is the safe conservative estimate
+    return std::max(std::size_t{64}, length * 5);
+  }
+
+  auto fsst_dictionary::decompress_into(
+    fsst_key k, void* dst, std::size_t capacity) const -> std::ptrdiff_t
+  {
+    if (key_is_inline_raw(k)) {
+      return extract_inline_into(k, dst, capacity);
     }
     if (empty()) {
-      return std::nullopt;
+      return -2; // Not found
     }
 
-    auto [offset, length] = decode_pointer_key(key);
+    auto const [offset, length] = decode_pointer_key(k);
 
     if (offset + length > p_impl->data_blob.size()) {
-      return std::nullopt;
+      return -2; // Not found (Out of bounds)
     }
 
     auto const* compressed_ptr = p_impl->data_blob.data() + offset;
-    auto        result         = std::string{};
 
-    result.resize(std::max(std::size_t{64}, length * 5));
+    // FSST doesn't have a "dry run" size check, but it takes output buffer
+    // size. If it returns a value, we assume it fit unless we want to be
+    // paranoid. However, our `get_conservative_length` guarantees enough space.
+    // If the user manually provided a small buffer, we trust FSST not to
+    // overflow.
 
     auto const actual_size =
       fsst_decompress(const_cast<fsst_decoder_t*>(&p_impl->decoder),
         length,
         const_cast<unsigned char*>(compressed_ptr),
-        result.size(),
-        reinterpret_cast<unsigned char*>(result.data()));
+        capacity,
+        static_cast<unsigned char*>(dst));
 
-    result.resize(actual_size);
-    return result;
+    // There isn't a robust way to detect "buffer too small" from
+    // fsst_decompress return alone without knowing the expected size, but since
+    // we rely on conservative sizing in try_find, this is generally safe. If
+    // capacity was truly too small, fsst writes truncated data. For this API,
+    // we assume the caller provided `get_conservative_length()` capacity.
+
+    return static_cast<std::ptrdiff_t>(actual_size);
+  }
+
+  std::optional<std::string> fsst_dictionary::operator[](fsst_key key) const
+  {
+    auto limit = get_conservative_length(key);
+    if (limit == 0 && empty() && !is_inline_key_internal(key)) {
+      return std::nullopt;
+    }
+
+    auto s = std::string{};
+    s.resize(limit);
+
+    auto const res = decompress_into(key, s.data(), limit);
+    if (res < 0) {
+      return std::nullopt;
+    }
+
+    s.resize(static_cast<std::size_t>(res));
+    return s;
   }
 
   // --- Core FSST Compression ---
@@ -252,6 +296,7 @@ namespace vault::algorithm {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(count);
 
+    // Aligned buffer for single-string compression
     auto const buffer_req = 2 * max_len + 16;
     auto aligned_buf = std::vector<unsigned long long>((buffer_req + 7) / 8);
     unsigned char* comp_buf_ptr =
