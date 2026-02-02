@@ -14,7 +14,7 @@
 
 namespace {
 
-  // --- Data Generators (Unchanged) ---
+  // --- Data Generators (Standard) ---
   auto generate_random_strings(std::size_t count, std::size_t length)
     -> std::vector<std::string>
   {
@@ -32,6 +32,10 @@ namespace {
     }
     return result;
   }
+
+  // ... (Other generators omitted for brevity, identical to previous) ...
+  // Assume generate_hex_strings, generate_urls, generate_zipf_strings exist
+  // here. Including them explicitly for correctness in final file output.
 
   auto generate_hex_strings(std::size_t count, std::size_t length)
     -> std::vector<std::string>
@@ -127,7 +131,6 @@ namespace {
       [](std::size_t sum, const std::string& s) { return sum + s.size(); });
   }
 
-  // --- Helper to adapt Vector + MapType to new Build API ---
   template <template <class...> class MapType>
   auto build_with_map(const std::vector<std::string>& inputs,
     vault::algorithm::fsst_dictionary::sample_ratio   ratio = {1.0})
@@ -135,12 +138,12 @@ namespace {
     auto it  = inputs.begin();
     auto end = inputs.end();
 
-    // Generator returning optional string_view (Zero-Copy)
+    // Generator (Zero-Copy)
     auto gen = [it, end]() mutable -> std::optional<std::string_view> {
       if (it == end) {
         return std::nullopt;
       }
-      std::string_view sv = *it; // string to string_view
+      auto&& sv = std::string_view(*it);
       ++it;
       return sv;
     };
@@ -160,8 +163,6 @@ namespace {
   }
 
 } // namespace
-
-// --- Benchmark: Construction (Map-Based) ---
 
 template <template <typename,
   typename,
@@ -189,21 +190,17 @@ static void BM_Construction_Map(benchmark::State& state)
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
 
-// --- Benchmark: Lookups ---
-
+// ... (Lookups and Sampling Benchmarks match previous clean state) ...
 static void BM_Lookup_Sequential(benchmark::State& state)
 {
   auto const count     = static_cast<std::size_t>(state.range(0));
   auto const type      = static_cast<int>(state.range(1));
   auto const input     = generate_data(count, type);
   auto const raw_bytes = total_raw_size(input);
-
-  auto [dict, keys] = build_with_map<boost::unordered_flat_map>(input);
-
+  auto [dict, keys]    = build_with_map<boost::unordered_flat_map>(input);
   for (auto _ : state) {
     for (const auto& key : keys) {
-      auto s = dict[key];
-      benchmark::DoNotOptimize(s);
+      benchmark::DoNotOptimize(dict[key]);
     }
   }
   state.SetItemsProcessed(state.iterations() * keys.size());
@@ -216,23 +213,17 @@ static void BM_Lookup_RandomOrder(benchmark::State& state)
   auto const type      = static_cast<int>(state.range(1));
   auto const input     = generate_data(count, type);
   auto const raw_bytes = total_raw_size(input);
-
-  auto [dict, keys] = build_with_map<boost::unordered_flat_map>(input);
-
-  auto rng = std::mt19937{std::random_device{}()};
+  auto [dict, keys]    = build_with_map<boost::unordered_flat_map>(input);
+  auto rng             = std::mt19937{std::random_device{}()};
   std::shuffle(keys.begin(), keys.end(), rng);
-
   for (auto _ : state) {
     for (const auto& key : keys) {
-      auto s = dict[key];
-      benchmark::DoNotOptimize(s);
+      benchmark::DoNotOptimize(dict[key]);
     }
   }
   state.SetItemsProcessed(state.iterations() * keys.size());
   state.SetBytesProcessed(state.iterations() * raw_bytes);
 }
-
-// --- Benchmark: Sampling Ratios ---
 
 static void BM_SamplingRatio(benchmark::State& state)
 {
@@ -240,15 +231,12 @@ static void BM_SamplingRatio(benchmark::State& state)
   auto const type      = static_cast<int>(state.range(1));
   auto const ratio_val = static_cast<float>(1.0 / denom);
   vault::algorithm::fsst_dictionary::sample_ratio ratio{ratio_val};
-
-  std::size_t count     = 1'000'000;
-  auto const  input     = generate_data(count, type);
-  auto const  raw_bytes = total_raw_size(input);
-
+  std::size_t                                     count = 1'000'000;
+  auto const input     = generate_data(count, type);
+  auto const raw_bytes = total_raw_size(input);
   for (auto _ : state) {
     auto [dict, keys] = build_with_map<boost::unordered_flat_map>(input, ratio);
     benchmark::DoNotOptimize(dict);
-    benchmark::DoNotOptimize(keys);
     auto total_compressed_size = static_cast<double>(dict.size_in_bytes())
       + static_cast<double>(keys.size() * sizeof(vault::algorithm::fsst_key));
     state.counters["Ratio"] =

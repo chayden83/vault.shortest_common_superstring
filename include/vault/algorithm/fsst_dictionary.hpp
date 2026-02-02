@@ -21,6 +21,8 @@
 
 namespace vault::algorithm {
 
+  /// @brief A lightweight, opaque handle to a string stored in an
+  /// fsst_dictionary.
   struct fsst_key {
     std::uint64_t value;
     bool          operator==(const fsst_key&) const = default;
@@ -28,7 +30,9 @@ namespace vault::algorithm {
 
   static_assert(sizeof(fsst_key) == 8, "fsst_key must be exactly 8 bytes");
 
-  struct fsst_dictionary {
+  /// @brief A high-performance, compressed string dictionary based on FSST.
+  class fsst_dictionary {
+  public:
     struct sample_ratio {
       float value = 1.0;
     };
@@ -37,10 +41,10 @@ namespace vault::algorithm {
       std::size_t value = 9;
     };
 
-    // Zero-Copy Generator: Returns a view into existing, stable memory.
+    /// @brief Generator for Views (Zero-Copy).
     using Generator = std::function<std::optional<std::string_view>()>;
 
-    // R-Value Generator: Returns a string (ownership transfer).
+    /// @brief Generator for R-Values (Ownership Transfer).
     using RValueGenerator = std::function<std::optional<std::string>()>;
 
     using Deduplicator =
@@ -69,59 +73,110 @@ namespace vault::algorithm {
     ~fsst_dictionary();
 
     [[nodiscard]] std::optional<std::string> operator[](fsst_key key) const;
-    [[nodiscard]] bool                       empty() const;
-    [[nodiscard]] std::size_t                size_in_bytes() const;
+
+    [[nodiscard]] bool        empty() const;
+    [[nodiscard]] std::size_t size_in_bytes() const;
+
+    // --- Helpers for Key Generation ---
 
     [[nodiscard]] static bool is_inline_candidate(std::string_view s) noexcept;
     [[nodiscard]] static fsst_key make_inline_key(std::string_view s);
 
-    [[nodiscard]] static constexpr inline sample_ratio level_to_ratio(
-      compression_level level)
+    [[nodiscard]] static constexpr inline auto level_to_ratio(
+      compression_level level) -> sample_ratio
     {
       static constexpr auto max_compression_level =
         std::ranges::size(fsst_dictionary::compression_levels);
 
-      level = fsst_dictionary::compression_level{
-        std::clamp(level.value, 0uz, max_compression_level - 1)};
+      auto const clamped_level =
+        std::clamp(level.value, 0uz, max_compression_level - 1);
 
-      return fsst_dictionary::compression_levels[level.value];
+      return fsst_dictionary::compression_levels[clamped_level];
     }
 
     // --- Core Factories (View Based) ---
-    [[nodiscard]] static fsst_dictionary build(Generator gen,
-      Deduplicator                                       dedup,
-      std::function<void(fsst_key)>                      emit_key,
-      sample_ratio ratio = sample_ratio{1.});
 
-    [[nodiscard]] static fsst_dictionary build_from_unique(Generator gen,
-      std::function<void(fsst_key)>                                  emit_key,
-      sample_ratio ratio = sample_ratio{1.});
+    [[nodiscard]] static auto build(Generator gen,
+      Deduplicator                            dedup,
+      std::function<void(fsst_key)>           emit_key,
+      sample_ratio ratio = sample_ratio{1.}) -> fsst_dictionary;
 
-    [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
-    build(
-      Generator gen, Deduplicator dedup, sample_ratio ratio = sample_ratio{1.});
+    [[nodiscard]] static auto build_from_unique(Generator gen,
+      std::function<void(fsst_key)>                       emit_key,
+      sample_ratio ratio = sample_ratio{1.}) -> fsst_dictionary;
 
-    [[nodiscard]] static std::pair<fsst_dictionary, std::vector<fsst_key>>
-    build_from_unique(Generator gen, sample_ratio ratio = sample_ratio{1.});
+    [[nodiscard]] static auto build(
+      Generator gen, Deduplicator dedup, sample_ratio ratio = sample_ratio{1.})
+      -> std::pair<fsst_dictionary, std::vector<fsst_key>>;
+
+    [[nodiscard]] static auto build_from_unique(
+      Generator gen, sample_ratio ratio = sample_ratio{1.})
+      -> std::pair<fsst_dictionary, std::vector<fsst_key>>;
 
     // --- R-Value Factories (String Based) ---
-    [[nodiscard]] static fsst_dictionary build(RValueGenerator gen,
-      Deduplicator                                             dedup,
-      std::function<void(fsst_key)>                            emit_key,
-      sample_ratio ratio = sample_ratio{1.});
 
-    [[nodiscard]] static fsst_dictionary build_from_unique(RValueGenerator gen,
-      std::function<void(fsst_key)> emit_key,
-      sample_ratio                  ratio = sample_ratio{1.});
+    [[nodiscard]] static auto build(RValueGenerator gen,
+      Deduplicator                                  dedup,
+      std::function<void(fsst_key)>                 emit_key,
+      sample_ratio ratio = sample_ratio{1.}) -> fsst_dictionary;
+
+    [[nodiscard]] static auto build_from_unique(RValueGenerator gen,
+      std::function<void(fsst_key)>                             emit_key,
+      sample_ratio ratio = sample_ratio{1.}) -> fsst_dictionary;
+
+    [[nodiscard]] static auto build(RValueGenerator gen,
+      Deduplicator                                  dedup,
+      sample_ratio                                  ratio = sample_ratio{1.})
+      -> std::pair<fsst_dictionary, std::vector<fsst_key>>;
+
+    [[nodiscard]] static auto build_from_unique(
+      RValueGenerator gen, sample_ratio ratio = sample_ratio{1.})
+      -> std::pair<fsst_dictionary, std::vector<fsst_key>>;
+
+    // --- Compression Level Overloads ---
+
+    [[nodiscard]] static inline auto build(Generator gen,
+      Deduplicator                                   dedup,
+      std::function<void(fsst_key)>                  emit_key,
+      compression_level                              level) -> fsst_dictionary
+    {
+      return build(std::move(gen),
+        std::move(dedup),
+        std::move(emit_key),
+        level_to_ratio(level));
+    }
+
+    [[nodiscard]] static inline auto build_from_unique(Generator gen,
+      std::function<void(fsst_key)>                              emit_key,
+      compression_level level) -> fsst_dictionary
+    {
+      return build_from_unique(
+        std::move(gen), std::move(emit_key), level_to_ratio(level));
+    }
+
+    [[nodiscard]] static inline auto build(
+      Generator gen, Deduplicator dedup, compression_level level)
+      -> std::pair<fsst_dictionary, std::vector<fsst_key>>
+    {
+      return build(std::move(gen), std::move(dedup), level_to_ratio(level));
+    }
+
+    [[nodiscard]] static inline auto build_from_unique(
+      Generator gen, compression_level level)
+      -> std::pair<fsst_dictionary, std::vector<fsst_key>>
+    {
+      return build_from_unique(std::move(gen), level_to_ratio(level));
+    }
 
     // --- Range Interface (Generalized) ---
+
     template <std::ranges::input_range R, typename... Args>
     [[nodiscard]] static auto build(R&& range, Args&&... args)
     {
       using ValueType = std::ranges::range_value_t<R>;
       using Reference = std::ranges::range_reference_t<R>;
 
-      constexpr bool is_contiguous_lvalue =
+      constexpr auto is_contiguous_lvalue =
         std::ranges::contiguous_range<ValueType>
         && std::is_lvalue_reference_v<Reference>;
 
@@ -129,36 +184,79 @@ namespace vault::algorithm {
       auto end = std::ranges::end(range);
 
       if constexpr (is_contiguous_lvalue) {
-        // --- Zero Copy Path ---
-        Generator gen = [it, end]() mutable -> std::optional<std::string_view> {
-          if (it == end) {
-            return std::nullopt;
-          }
-          auto&& val = *it;
-          ++it;
-          return std::string_view{
-            reinterpret_cast<const char*>(std::ranges::data(val)),
-            std::ranges::size(val)};
-        };
+        // Path A: Zero Copy (Views)
+        auto gen =
+          Generator{[it, end]() mutable -> std::optional<std::string_view> {
+            if (it == end) {
+              return std::nullopt;
+            }
+            auto&& val = *it;
+            ++it;
+            return std::string_view{
+              reinterpret_cast<const char*>(std::ranges::data(val)),
+              std::ranges::size(val)};
+          }};
         return build(std::move(gen), std::forward<Args>(args)...);
 
       } else {
-        // --- R-Value / Non-Contiguous Path --- We project the
-        // element to std::string and let the source file handle
-        // buffering.
-        RValueGenerator gen = [it,
-                                end]() mutable -> std::optional<std::string> {
-          if (it == end) {
-            return std::nullopt;
-          }
-          auto&& val = *it;
-          // Construct string from the byte range
-          std::string s(reinterpret_cast<const char*>(std::ranges::data(val)),
-            std::ranges::size(val));
-          ++it;
-          return s;
-        };
+        // Path B: R-Value (Buffering)
+        auto gen =
+          RValueGenerator{[it, end]() mutable -> std::optional<std::string> {
+            if (it == end) {
+              return std::nullopt;
+            }
+            auto&& val = *it;
+            auto   s =
+              std::string(reinterpret_cast<const char*>(std::ranges::data(val)),
+                std::ranges::size(val));
+            ++it;
+            return s;
+          }};
         return build(std::move(gen), std::forward<Args>(args)...);
+      }
+    }
+
+    template <std::ranges::input_range R, typename... Args>
+    [[nodiscard]] static auto build_from_unique(R&& range, Args&&... args)
+    {
+      using ValueType = std::ranges::range_value_t<R>;
+      using Reference = std::ranges::range_reference_t<R>;
+
+      constexpr auto is_contiguous_lvalue =
+        std::ranges::contiguous_range<ValueType>
+        && std::is_lvalue_reference_v<Reference>;
+
+      auto it  = std::ranges::begin(range);
+      auto end = std::ranges::end(range);
+
+      if constexpr (is_contiguous_lvalue) {
+        auto gen =
+          Generator{[it, end]() mutable -> std::optional<std::string_view> {
+            if (it == end) {
+              return std::nullopt;
+            }
+            auto&& val = *it;
+            ++it;
+            return std::string_view{
+              reinterpret_cast<const char*>(std::ranges::data(val)),
+              std::ranges::size(val)};
+          }};
+        return build_from_unique(std::move(gen), std::forward<Args>(args)...);
+
+      } else {
+        auto gen =
+          RValueGenerator{[it, end]() mutable -> std::optional<std::string> {
+            if (it == end) {
+              return std::nullopt;
+            }
+            auto&& val = *it;
+            auto   s =
+              std::string(reinterpret_cast<const char*>(std::ranges::data(val)),
+                std::ranges::size(val));
+            ++it;
+            return s;
+          }};
+        return build_from_unique(std::move(gen), std::forward<Args>(args)...);
       }
     }
 
@@ -169,11 +267,11 @@ namespace vault::algorithm {
     [[nodiscard]] explicit fsst_dictionary(
       std::shared_ptr<impl const> implementation);
 
-    [[nodiscard]] static std::pair<std::shared_ptr<impl>, std::vector<fsst_key>>
-    compress_core(std::size_t count,
-      std::size_t*            lens,
-      unsigned char const**   ptrs,
-      float                   sample_ratio);
+    [[nodiscard]] static auto compress_core(std::size_t count,
+      std::size_t*                                      lens,
+      unsigned char const**                             ptrs,
+      float                                             sample_ratio)
+      -> std::pair<std::shared_ptr<impl>, std::vector<fsst_key>>;
   };
 } // namespace vault::algorithm
 

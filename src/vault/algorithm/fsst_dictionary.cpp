@@ -3,9 +3,10 @@
 #include <vault/algorithm/fsst_dictionary.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
-#include <deque> // Added for buffering R-values
+#include <deque>
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -17,20 +18,19 @@ namespace vault::algorithm {
 
   namespace {
     // --- Key Layout Constants ---
-    constexpr std::size_t kInlineFlagShift = 63;
-    constexpr std::size_t kInlineLenShift  = 56;
-    constexpr std::size_t kInlineLenMask   = 0x7F; // 7 bits
+    constexpr auto kInlineFlagShift = 63uz;
+    constexpr auto kInlineLenShift  = 56uz;
+    constexpr auto kInlineLenMask   = 0x7Fuz;
 
-    constexpr std::size_t kPointerLenShift   = 40;
-    constexpr std::size_t kPointerLenMask    = 0x7F'FFFF;         // 23 bits
-    constexpr std::size_t kPointerOffsetMask = 0xFF'FFFF'FFFFULL; // 40 bits
+    constexpr auto kPointerLenShift   = 40uz;
+    constexpr auto kPointerLenMask    = 0x7F'FFFFuz;
+    constexpr auto kPointerOffsetMask = 0xFF'FFFF'FFFFULL;
 
-    constexpr std::size_t kByteMask = 0xFF;
+    constexpr auto kByteMask = 0xFFuz;
 
-    // Derived Limits
-    constexpr std::size_t kMaxPointerLength = kPointerLenMask;
-    constexpr std::size_t kMaxPointerOffset = kPointerOffsetMask;
-    constexpr std::size_t kMaxInlineLength  = 7;
+    constexpr auto kMaxPointerLength = kPointerLenMask;
+    constexpr auto kMaxPointerOffset = kPointerOffsetMask;
+    constexpr auto kMaxInlineLength  = 7uz;
 
     // --- Internal Helpers ---
 
@@ -39,8 +39,12 @@ namespace vault::algorithm {
       if (length > kMaxPointerLength) {
         throw std::length_error("fsst_key: string exceeds 8MB limit");
       }
-      return fsst_key{(static_cast<std::uint64_t>(length) << kPointerLenShift)
-        | (offset & kPointerOffsetMask)};
+      auto const payload =
+        (static_cast<std::uint64_t>(length) << kPointerLenShift)
+        | (offset & kPointerOffsetMask);
+
+      assert((payload & (1ULL << kInlineFlagShift)) == 0);
+      return fsst_key{payload};
     }
 
     auto key_is_inline(fsst_key k) -> bool
@@ -50,10 +54,13 @@ namespace vault::algorithm {
 
     auto extract_inline_string(fsst_key k) -> std::string
     {
-      std::string s;
-      std::size_t len = (k.value >> kInlineLenShift) & kInlineLenMask;
+      auto       s   = std::string{};
+      auto const len = (k.value >> kInlineLenShift) & kInlineLenMask;
+
+      assert(len <= kMaxInlineLength);
       s.resize(len);
-      for (std::size_t i = 0; i < len; ++i) {
+
+      for (auto i = std::size_t{0}; i < len; ++i) {
         s[i] = static_cast<char>((k.value >> (i * 8)) & kByteMask);
       }
       return s;
@@ -61,9 +68,31 @@ namespace vault::algorithm {
 
     auto decode_pointer_key(fsst_key k) -> std::pair<std::size_t, std::size_t>
     {
-      std::size_t len = (k.value >> kPointerLenShift) & kPointerLenMask;
-      std::size_t off = k.value & kPointerOffsetMask;
+      auto const len = (k.value >> kPointerLenShift) & kPointerLenMask;
+      auto const off = k.value & kPointerOffsetMask;
       return {off, len};
+    }
+
+    // --- R-Value Buffering Adapter ---
+    // Takes an RValueGenerator and a lambda that accepts a ViewGenerator.
+    // Manages the lifetime of a stable buffer for the duration of the lambda
+    // call.
+    template <typename Func>
+    auto buffered_build_adapter(
+      fsst_dictionary::RValueGenerator gen, Func&& func)
+    {
+      auto stable_buffer = std::deque<std::string>{};
+
+      auto view_gen = [&]() mutable -> std::optional<std::string_view> {
+        auto opt_s = gen();
+        if (!opt_s) {
+          return std::nullopt;
+        }
+        stable_buffer.push_back(std::move(*opt_s));
+        return std::string_view{stable_buffer.back()};
+      };
+
+      return func(std::move(view_gen));
     }
 
   } // namespace
@@ -80,13 +109,15 @@ namespace vault::algorithm {
     if (s.size() > kMaxInlineLength) {
       throw std::length_error("fsst_key: inline string too long");
     }
-    std::uint64_t payload = 0;
-    for (std::size_t i = 0; i < s.size(); ++i) {
+
+    auto payload = std::uint64_t{0};
+    for (auto i = std::size_t{0}; i < s.size(); ++i) {
       payload |= (static_cast<std::uint64_t>(static_cast<unsigned char>(s[i]))
         << (i * 8));
     }
     payload |= (static_cast<std::uint64_t>(s.size()) << kInlineLenShift);
     payload |= (1ULL << kInlineFlagShift);
+
     return fsst_key{payload};
   }
 
@@ -129,15 +160,17 @@ namespace vault::algorithm {
     }
 
     auto [offset, length] = decode_pointer_key(key);
+
     if (offset + length > p_impl->data_blob.size()) {
       return std::nullopt;
     }
 
     auto const* compressed_ptr = p_impl->data_blob.data() + offset;
     auto        result         = std::string{};
+
     result.resize(std::max(std::size_t{64}, length * 5));
 
-    auto actual_size =
+    auto const actual_size =
       fsst_decompress(const_cast<fsst_decoder_t*>(&p_impl->decoder),
         length,
         const_cast<unsigned char*>(compressed_ptr),
@@ -150,11 +183,11 @@ namespace vault::algorithm {
 
   // --- Core FSST Compression ---
 
-  std::pair<std::shared_ptr<fsst_dictionary::impl>, std::vector<fsst_key>>
-  fsst_dictionary::compress_core(std::size_t count,
-    std::size_t*                             lens,
-    unsigned char const**                    ptrs,
-    float                                    sample_ratio)
+  auto fsst_dictionary::compress_core(std::size_t count,
+    std::size_t*                                  lens,
+    unsigned char const**                         ptrs,
+    float                                         sample_ratio)
+    -> std::pair<std::shared_ptr<impl>, std::vector<fsst_key>>
   {
     if (sample_ratio <= 0.0f || sample_ratio > 1.0f) {
       throw std::invalid_argument("sample_ratio must be in (0, 1]");
@@ -163,8 +196,8 @@ namespace vault::algorithm {
       return {std::make_shared<fsst_dictionary::impl>(), {}};
     }
 
-    fsst_encoder_t* encoder = nullptr;
-    std::size_t     target_samples =
+    auto* encoder = static_cast<fsst_encoder_t*>(nullptr);
+    auto  target_samples =
       static_cast<std::size_t>(std::ceil(count * sample_ratio));
     target_samples = std::max(target_samples, std::size_t{1024});
 
@@ -189,7 +222,7 @@ namespace vault::algorithm {
       training_ptrs.reserve(target_samples);
       training_lens.reserve(target_samples);
 
-      for (auto idx : sampled_indices) {
+      for (auto const idx : sampled_indices) {
         training_ptrs.push_back(ptrs[idx]);
         training_lens.push_back(lens[idx]);
       }
@@ -207,9 +240,9 @@ namespace vault::algorithm {
     fsst_export(encoder, buf);
     fsst_import(&impl_ptr->decoder, buf);
 
-    std::size_t total_input_size = 0;
-    std::size_t max_len          = 0;
-    for (size_t i = 0; i < count; ++i) {
+    auto total_input_size = std::size_t{0};
+    auto max_len          = std::size_t{0};
+    for (auto i = std::size_t{0}; i < count; ++i) {
       total_input_size += lens[i];
       max_len = std::max(max_len, lens[i]);
     }
@@ -219,13 +252,13 @@ namespace vault::algorithm {
     auto keys = std::vector<fsst_key>{};
     keys.reserve(count);
 
-    std::size_t                     buffer_req = 2 * max_len + 16;
-    std::vector<unsigned long long> aligned_buf((buffer_req + 7) / 8);
-    unsigned char*                  comp_buf_ptr =
+    auto const buffer_req = 2 * max_len + 16;
+    auto aligned_buf = std::vector<unsigned long long>((buffer_req + 7) / 8);
+    unsigned char* comp_buf_ptr =
       reinterpret_cast<unsigned char*>(aligned_buf.data());
-    std::size_t comp_buf_len = aligned_buf.size() * 8;
+    auto const comp_buf_len = aligned_buf.size() * 8;
 
-    for (size_t i = 0; i < count; ++i) {
+    for (auto i = std::size_t{0}; i < count; ++i) {
       if (impl_ptr->data_blob.size() >= kMaxPointerOffset) {
         fsst_destroy(encoder);
         throw std::length_error("fsst_dictionary: Dictionary size limit");
@@ -250,7 +283,8 @@ namespace vault::algorithm {
         throw std::length_error("fsst_dictionary: Compressed string limit");
       }
 
-      auto offset = impl_ptr->data_blob.size();
+      auto const offset = impl_ptr->data_blob.size();
+
       impl_ptr->data_blob.insert(
         impl_ptr->data_blob.end(), comp_buf_ptr, comp_buf_ptr + dst_len);
 
@@ -265,14 +299,14 @@ namespace vault::algorithm {
 
   // --- Factories: View-Based (Zero Copy) ---
 
-  fsst_dictionary fsst_dictionary::build(Generator gen,
-    Deduplicator                                   dedup,
-    std::function<void(fsst_key)>                  emit_key,
-    sample_ratio                                   ratio)
+  auto fsst_dictionary::build(Generator gen,
+    Deduplicator                        dedup,
+    std::function<void(fsst_key)>       emit_key,
+    sample_ratio                        ratio) -> fsst_dictionary
   {
-    std::vector<std::uint64_t>        instructions;
-    std::vector<unsigned char const*> compression_ptrs;
-    std::vector<std::size_t>          compression_lens;
+    auto instructions     = std::vector<std::uint64_t>{};
+    auto compression_ptrs = std::vector<unsigned char const*>{};
+    auto compression_lens = std::vector<std::size_t>{};
 
     while (true) {
       auto opt_sv = gen();
@@ -280,13 +314,13 @@ namespace vault::algorithm {
         break;
       }
 
-      std::string_view sv = *opt_sv;
+      auto const sv = *opt_sv;
 
       if (is_inline_candidate(sv)) {
-        fsst_key k = make_inline_key(sv);
+        auto const k = make_inline_key(sv);
         instructions.push_back(k.value);
       } else {
-        auto [idx, is_new] = dedup(sv);
+        auto const [idx, is_new] = dedup(sv);
 
         if (is_new) {
           if (sv.size() > kMaxPointerLength) {
@@ -305,10 +339,10 @@ namespace vault::algorithm {
       compression_ptrs.data(),
       ratio.value);
 
-    fsst_dictionary result_dict(std::move(impl_ptr));
+    auto result_dict = fsst_dictionary(std::move(impl_ptr));
 
-    for (std::uint64_t val : instructions) {
-      if (val & (1ULL << 63)) {
+    for (auto const val : instructions) {
+      if (val & (1ULL << kInlineFlagShift)) {
         emit_key(fsst_key{val});
       } else {
         emit_key(large_keys[static_cast<std::size_t>(val)]);
@@ -318,13 +352,14 @@ namespace vault::algorithm {
     return result_dict;
   }
 
-  fsst_dictionary fsst_dictionary::build_from_unique(
+  auto fsst_dictionary::build_from_unique(
     Generator gen, std::function<void(fsst_key)> emit_key, sample_ratio ratio)
+    -> fsst_dictionary
   {
-    std::vector<std::uint64_t>        instructions;
-    std::vector<unsigned char const*> compression_ptrs;
-    std::vector<std::size_t>          compression_lens;
-    std::size_t                       current_ptr_idx = 0;
+    auto instructions     = std::vector<std::uint64_t>{};
+    auto compression_ptrs = std::vector<unsigned char const*>{};
+    auto compression_lens = std::vector<std::size_t>{};
+    auto current_ptr_idx  = std::size_t{0};
 
     while (true) {
       auto opt_sv = gen();
@@ -332,10 +367,10 @@ namespace vault::algorithm {
         break;
       }
 
-      std::string_view sv = *opt_sv;
+      auto const sv = *opt_sv;
 
       if (is_inline_candidate(sv)) {
-        fsst_key k = make_inline_key(sv);
+        auto const k = make_inline_key(sv);
         instructions.push_back(k.value);
       } else {
         if (sv.size() > kMaxPointerLength) {
@@ -354,10 +389,10 @@ namespace vault::algorithm {
       compression_ptrs.data(),
       ratio.value);
 
-    fsst_dictionary result_dict(std::move(impl_ptr));
+    auto result_dict = fsst_dictionary(std::move(impl_ptr));
 
-    for (std::uint64_t val : instructions) {
-      if (val & (1ULL << 63)) {
+    for (auto const val : instructions) {
+      if (val & (1ULL << kInlineFlagShift)) {
         emit_key(fsst_key{val});
       } else {
         emit_key(large_keys[static_cast<std::size_t>(val)]);
@@ -369,57 +404,34 @@ namespace vault::algorithm {
 
   // --- Factories: R-Value Based (Stable Buffer) ---
 
-  fsst_dictionary fsst_dictionary::build(RValueGenerator gen,
-    Deduplicator                                         dedup,
-    std::function<void(fsst_key)>                        emit_key,
-    sample_ratio                                         ratio)
+  auto fsst_dictionary::build(RValueGenerator gen,
+    Deduplicator                              dedup,
+    std::function<void(fsst_key)>             emit_key,
+    sample_ratio                              ratio) -> fsst_dictionary
   {
-    // Stable buffer for incoming strings
-    // Deque guarantees that references to elements are stable
-    std::deque<std::string> stable_buffer;
-
-    // Adapt to Generator (string_view) interface
-    auto view_gen = [&]() mutable -> std::optional<std::string_view> {
-      auto opt_s = gen();
-      if (!opt_s) {
-        return std::nullopt;
-      }
-
-      stable_buffer.push_back(std::move(*opt_s));
-      return std::string_view{stable_buffer.back()};
-    };
-
-    // Delegate to the core logic
-    return build(
-      std::move(view_gen), std::move(dedup), std::move(emit_key), ratio);
+    return buffered_build_adapter(std::move(gen), [&](Generator view_gen) {
+      return build(
+        std::move(view_gen), std::move(dedup), std::move(emit_key), ratio);
+    });
   }
 
-  fsst_dictionary fsst_dictionary::build_from_unique(RValueGenerator gen,
-    std::function<void(fsst_key)>                                    emit_key,
-    sample_ratio                                                     ratio)
+  auto fsst_dictionary::build_from_unique(RValueGenerator gen,
+    std::function<void(fsst_key)>                         emit_key,
+    sample_ratio ratio) -> fsst_dictionary
   {
-    std::deque<std::string> stable_buffer;
-
-    auto view_gen = [&]() mutable -> std::optional<std::string_view> {
-      auto opt_s = gen();
-      if (!opt_s) {
-        return std::nullopt;
-      }
-
-      stable_buffer.push_back(std::move(*opt_s));
-      return std::string_view{stable_buffer.back()};
-    };
-
-    return build_from_unique(std::move(view_gen), std::move(emit_key), ratio);
+    return buffered_build_adapter(std::move(gen), [&](Generator view_gen) {
+      return build_from_unique(std::move(view_gen), std::move(emit_key), ratio);
+    });
   }
 
-  // --- Convenience Overloads ---
+  // --- Convenience Overloads (View) ---
 
-  std::pair<fsst_dictionary, std::vector<fsst_key>> fsst_dictionary::build(
+  auto fsst_dictionary::build(
     Generator gen, Deduplicator dedup, sample_ratio ratio)
+    -> std::pair<fsst_dictionary, std::vector<fsst_key>>
   {
-    std::vector<fsst_key> keys;
-    auto                  dict = build(
+    auto keys = std::vector<fsst_key>{};
+    auto dict = build(
       std::move(gen),
       std::move(dedup),
       [&keys](fsst_key k) { keys.push_back(k); },
@@ -427,13 +439,32 @@ namespace vault::algorithm {
     return {std::move(dict), std::move(keys)};
   }
 
-  std::pair<fsst_dictionary, std::vector<fsst_key>>
-  fsst_dictionary::build_from_unique(Generator gen, sample_ratio ratio)
+  auto fsst_dictionary::build_from_unique(Generator gen, sample_ratio ratio)
+    -> std::pair<fsst_dictionary, std::vector<fsst_key>>
   {
-    std::vector<fsst_key> keys;
-    auto                  dict = build_from_unique(
+    auto keys = std::vector<fsst_key>{};
+    auto dict = build_from_unique(
       std::move(gen), [&keys](fsst_key k) { keys.push_back(k); }, ratio);
     return {std::move(dict), std::move(keys)};
+  }
+
+  // --- Convenience Overloads (R-Value) ---
+
+  auto fsst_dictionary::build(
+    RValueGenerator gen, Deduplicator dedup, sample_ratio ratio)
+    -> std::pair<fsst_dictionary, std::vector<fsst_key>>
+  {
+    return buffered_build_adapter(std::move(gen), [&](Generator view_gen) {
+      return build(std::move(view_gen), std::move(dedup), ratio);
+    });
+  }
+
+  auto fsst_dictionary::build_from_unique(RValueGenerator gen,
+    sample_ratio ratio) -> std::pair<fsst_dictionary, std::vector<fsst_key>>
+  {
+    return buffered_build_adapter(std::move(gen), [&](Generator view_gen) {
+      return build_from_unique(std::move(view_gen), ratio);
+    });
   }
 
 } // namespace vault::algorithm
