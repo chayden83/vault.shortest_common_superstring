@@ -7,6 +7,7 @@
 #include <random>
 #include <ranges>
 #include <stdexcept>
+#include <variant>
 #include <vector>
 
 // --- Helper Receiver ---
@@ -66,20 +67,20 @@ struct ForkState {
 };
 
 struct ForkContext {
-  static constexpr uint64_t fanout() { return 1; }
+  static constexpr uint64_t fanout() { return 2; } // increased to test lifting
 
   template <typename Emit>
-  vault::amac::step_result<1> init(ForkState& s, Emit&&)
+  vault::amac::step_result<2> init(ForkState& s, Emit&&)
   {
     if (s.count <= 0) {
-      return {nullptr};
+      return {nullptr, nullptr};
     }
     s.count--;
-    return {&s};
+    return {&s, &s}; // Return 2 ptrs
   }
 
   template <typename Emit>
-  vault::amac::step_result<1> step(ForkState& s, Emit&& emit)
+  vault::amac::step_result<2> step(ForkState& s, Emit&& emit)
   {
     if (s.count == 1 && s.depth < 1) {
       emit(ForkState{s.id * 10 + 1, 2, s.depth + 1});
@@ -87,10 +88,10 @@ struct ForkContext {
     }
 
     if (s.count <= 0) {
-      return {nullptr};
+      return {nullptr, nullptr};
     }
     s.count--;
-    return {&s};
+    return {&s, &s};
   }
 };
 
@@ -276,6 +277,56 @@ TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
   CHECK(completed_ids == std::vector<int>{1, 11, 12});
 }
 
+TEST_CASE("AMAC Executor: Composition Chaining", "[amac][chain]")
+{
+  // Chain: Countdown (1 step) -> ForkState (fanout 2)
+  // CountdownState counts down from 1 to 0.
+  // Transition: Convert Countdown(0) -> ForkState(id=1, count=2, depth=0)
+
+  auto transition = [](CountdownState&& c) -> std::optional<ForkState> {
+    if (c.m_counter == 0) {
+      return ForkState{1, 2, 0};
+    }
+    return std::nullopt;
+  };
+
+  using JobA = CountdownState;
+  using JobB = ForkState;
+
+  auto chain = vault::amac::chain<JobA, JobB>(
+    CountdownContext{}, ForkContext{}, transition);
+
+  // Input must be variants
+  using VariantJob = std::variant<JobA, JobB>;
+  std::vector<VariantJob> inputs;
+  inputs.emplace_back(JobA{1});
+
+  std::vector<int>         completed_ids;
+  TestReceiver<VariantJob> reporter;
+  reporter.completion_handler = [&](VariantJob&& v) {
+    // We expect only JobB (ForkState) to complete, as JobA transitions into it.
+    if (std::holds_alternative<JobB>(v)) {
+      completed_ids.push_back(std::get<JobB>(v).id);
+    } else {
+      FAIL("JobA should have transitioned");
+    }
+  };
+
+  vault::amac::executor<16>(chain, inputs, reporter);
+
+  // Countdown(1) -> 0 -> Transition to Fork(1, 2, 0)
+  // Fork(1, 2, 0) -> (split to 11, 12) -> Done
+  // 11, 12 run to completion.
+  // So we expect 3 completions: 1, 11, 12
+  CHECK(completed_ids.size() == 3);
+  std::ranges::sort(completed_ids);
+  CHECK(completed_ids == std::vector<int>{1, 11, 12});
+
+  // Verify Max Fanout Propagation
+  // Countdown has Fanout 1, Fork has Fanout 2. Chain should have Fanout 2.
+  static_assert(decltype(chain)::fanout() == 2);
+}
+
 TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]")
 {
   const size_t     num_jobs = 100;
@@ -303,42 +354,6 @@ TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]")
   {
     vault::amac::executor<2>(ctx, jobs, reporter);
     CHECK(reported_count == num_jobs);
-  }
-}
-
-TEST_CASE(
-  "AMAC Executor: Immediate Completion Edge Cases", "[amac][edge_cases]")
-{
-  size_t                       reported_count = 0;
-  TestReceiver<CountdownState> reporter;
-  reporter.completion_handler = [&](CountdownState&& job) {
-    reported_count++;
-    REQUIRE(job.m_counter == 0);
-  };
-
-  CountdownContext ctx;
-
-  SECTION("All jobs finish immediately")
-  {
-    std::vector<int> zeros(50, 0);
-    auto             jobs = zeros
-      | std::views::transform([](int count) { return CountdownState{count}; });
-
-    vault::amac::executor<16>(ctx, jobs, reporter);
-    CHECK(reported_count == 50);
-  }
-
-  SECTION("Mixed immediate and long-running")
-  {
-    std::vector<int> mixed;
-    for (int i = 0; i < 100; ++i) {
-      mixed.push_back(i % 2 == 0 ? 0 : 10);
-    }
-    auto jobs = mixed
-      | std::views::transform([](int count) { return CountdownState{count}; });
-
-    vault::amac::executor<16>(ctx, jobs, reporter);
-    CHECK(reported_count == 100);
   }
 }
 

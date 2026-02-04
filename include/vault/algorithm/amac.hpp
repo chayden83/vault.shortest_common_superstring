@@ -11,10 +11,12 @@
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 /**
@@ -62,6 +64,120 @@ namespace vault::amac {
     }
   };
 
+  // --- Chaining / Composition Support ---
+
+  namespace detail {
+    // Lifts a step_result<Small> to step_result<Big> by zero-padding.
+    template <std::size_t Big, std::size_t Small>
+    constexpr step_result<Big> lift_result(step_result<Small> const& src)
+    {
+      static_assert(Big >= Small, "Cannot lift to a smaller fanout");
+      step_result<Big> dst{}; // Zero-initialize (nullptrs)
+      for (std::size_t i = 0; i < Small; ++i) {
+        dst[i] = src[i];
+      }
+      return dst;
+    }
+  } // namespace detail
+
+  /**
+   * @brief A composite context that executes ContextA, then transitions to
+   * ContextB.
+   * * @tparam CtxA The initial context type.
+   * @tparam CtxB The subsequent context type.
+   * @tparam TransitionFn A callable: (CtxA::Job&&) -> std::optional<CtxB::Job>.
+   * @tparam JobA Valid job type for CtxA.
+   * @tparam JobB Valid job type for CtxB.
+   */
+  template <typename CtxA,
+    typename CtxB,
+    typename TransitionFn,
+    typename JobA,
+    typename JobB>
+  class chained_context {
+    CtxA         m_a;
+    CtxB         m_b;
+    TransitionFn m_trans;
+
+  public:
+    // The composite job state is a sum type of the sub-states.
+    using job_t = std::variant<JobA, JobB>;
+
+    // The composite fanout is the max of sub-fanouts to ensure return type
+    // consistency.
+    static constexpr std::size_t fanout()
+    {
+      return std::max(CtxA::fanout(), CtxB::fanout());
+    }
+
+    using result_t = step_result<fanout()>;
+
+    chained_context(CtxA a, CtxB b, TransitionFn t)
+        : m_a(std::move(a))
+        , m_b(std::move(b))
+        , m_trans(std::move(t))
+    {}
+
+    // Init: Dispatch to the correct sub-context
+    template <typename Emit> result_t init(job_t& j, Emit&& emit)
+    {
+      if (std::holds_alternative<JobA>(j)) {
+        return detail::lift_result<fanout()>(m_a.init(std::get<JobA>(j), emit));
+      } else {
+        return detail::lift_result<fanout()>(m_b.init(std::get<JobB>(j), emit));
+      }
+    }
+
+    // Step: Run A. If A finishes, try Transition to B. If B, Run B.
+    template <typename Emit> result_t step(job_t& j, Emit&& emit)
+    {
+      if (std::holds_alternative<JobA>(j)) {
+        auto& state_a = std::get<JobA>(j);
+        auto  res_a   = m_a.step(state_a, emit);
+
+        if (static_cast<bool>(res_a)) {
+          // A is still active
+          return detail::lift_result<fanout()>(res_a);
+        }
+
+        // A is done. Attempt Transition.
+        // We move state_a out to the transition function.
+        if (auto next_b = m_trans(std::move(state_a))) {
+          // Transition successful: Switch variant to B
+          j.template emplace<JobB>(std::move(*next_b));
+
+          // Immediately init B to avoid a pipeline bubble
+          return detail::lift_result<fanout()>(
+            m_b.init(std::get<JobB>(j), emit));
+        } else {
+          // Transition declined (chain complete).
+          return detail::lift_result<fanout()>(
+            res_a); // Returns nullptrs (Done)
+        }
+      } else {
+        // We are in State B
+        return detail::lift_result<fanout()>(m_b.step(std::get<JobB>(j), emit));
+      }
+    }
+  };
+
+  /**
+   * @brief Helper to create a chained context.
+   * * Usage: auto ctx = chain<JobA, JobB>(ctx_a, ctx_b, transition_fn);
+   */
+  template <typename JobA,
+    typename JobB,
+    typename CtxA,
+    typename CtxB,
+    typename TransitionFn>
+  constexpr auto chain(CtxA a, CtxB b, TransitionFn t)
+  {
+    return chained_context<CtxA, CtxB, TransitionFn, JobA, JobB>(
+      std::move(a), std::move(b), std::move(t));
+  }
+
+  // --- Executor ---
+
   template <uint8_t     TotalFanout   = 16,
     double_fault_policy FailurePolicy = double_fault_policy::terminate>
   class executor_fn {
@@ -83,7 +199,6 @@ namespace vault::amac {
       job_slot(job_slot const&)            = delete;
       job_slot& operator=(job_slot const&) = delete;
 
-      // Used for slot recycling (move assignment)
       job_slot& operator=(job_slot&& other)
       {
         if (this != std::addressof(other)) {
@@ -98,9 +213,6 @@ namespace vault::amac {
       }
     };
 
-    /**
-     * @brief RAII Guard for the initialized range of the pipeline.
-     */
     template <typename Iter> struct scope_guard {
       Iter&       first;
       Iter const& last;
@@ -116,8 +228,6 @@ namespace vault::amac {
         }
       }
     };
-
-    // --- Exception Safety Helpers ---
 
     template <typename Reporter, typename Job>
     static void safe_fail(Reporter& report, Job&& job, std::exception_ptr e)
@@ -173,46 +283,33 @@ namespace vault::amac {
 
       static constexpr auto const PIPELINE_SIZE =
         (TotalFanout + Context::fanout() - 1) / Context::fanout();
-
       using array_t = std::array<slot_t, PIPELINE_SIZE>;
       using iter_t  = typename array_t::iterator;
 
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
-      // Storage
       auto               pipeline = array_t{};
-      std::vector<job_t> backlog; // Spawned jobs (LIFO)
+      std::vector<job_t> backlog;
 
       auto emit = [&](
                     job_t&& spawned) { backlog.push_back(std::move(spawned)); };
 
-      // State Tracking
-      auto pipeline_begin = pipeline.begin();
-      // Points to one past the last *initialized* slot (High Water Mark)
+      auto pipeline_begin  = pipeline.begin();
       auto initialized_end = pipeline.begin();
-      // Points to one past the last *active* job (Working Set)
-      auto active_end = pipeline.begin();
+      auto active_end      = pipeline.begin();
 
-      // RAII: Owns [pipeline_begin, initialized_end)
       scope_guard<iter_t> guard{pipeline_begin, initialized_end};
 
-      // --- Helpers ---
-
-      // Places a job into the pipeline if it activates successfully
       auto try_activate_into_slot = [&](job_t&& job, iter_t slot) -> bool {
         if (try_execute(report, job, [&] { return ctx.init(job, emit); })) {
-          // Success: Job is active.
           if (slot < initialized_end) {
-            // Reuse existing slot (Move Assign)
             *slot->get() = std::move(job);
           } else {
-            // Initialize new slot (Construct)
             std::construct_at(slot->get(), std::move(job));
-            ++initialized_end; // Extend RAII scope
+            ++initialized_end;
           }
           return true;
         }
-        // Job finished or failed immediately; not added to pipeline.
         return false;
       };
 
@@ -221,11 +318,7 @@ namespace vault::amac {
           report, *slot.get(), [&] { return ctx.step(*slot.get(), emit); });
       };
 
-      // --- Unified Control Loop ---
-
       while (true) {
-        // 1. Refill Phase (Greedy)
-        // Fill all available slots up to PIPELINE_SIZE
         while (active_end != pipeline.end()) {
           if (!backlog.empty()) {
             if (try_activate_into_slot(std::move(backlog.back()), active_end)) {
@@ -238,22 +331,16 @@ namespace vault::amac {
             }
             ++ijobs_cursor;
           } else {
-            break; // No sources left
+            break;
           }
         }
 
-        // 2. Termination Check
-        // If pipeline is empty and we couldn't refill it, we are done.
         if (active_end == pipeline.begin()) {
           break;
         }
 
-        // 3. Execution Phase
-        // Step all active jobs and compact the array
         active_end = std::remove_if(pipeline_begin, active_end, is_inactive);
       }
-
-      // End of scope: 'guard' destroys [pipeline_begin, initialized_end).
     }
   };
 
