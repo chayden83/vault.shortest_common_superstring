@@ -37,7 +37,11 @@ struct CountdownState {
   int m_counter;
 };
 
+using CountdownJob = CountdownState;
+
 struct CountdownContext {
+  using job_t = CountdownJob;
+
   [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
 
   template <typename Emit>
@@ -67,7 +71,11 @@ struct ForkState {
   int depth;
 };
 
+using ForkJob = ForkState;
+
 struct ForkContext {
+  using job_t = ForkJob;
+
   static constexpr uint64_t fanout() { return 2; }
 
   template <typename Emit>
@@ -111,7 +119,11 @@ struct ResourceState {
   ResourceState& operator=(const ResourceState&) = delete;
 };
 
+using ResourceJob = ResourceState;
+
 struct ResourceContext {
+  using job_t = ResourceJob;
+
   [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
 
   template <typename Emit>
@@ -138,7 +150,11 @@ struct FragileState {
   bool should_throw;
 };
 
+using FragileJob = FragileState;
+
 struct FragileContext {
+  using job_t = FragileJob;
+
   static constexpr uint64_t fanout() { return 1; }
 
   template <typename Emit>
@@ -161,7 +177,11 @@ struct ThrowingReporterState {
   int id;
 };
 
+using ThrowingReporterJob = ThrowingReporterState;
+
 struct ThrowingReporterContext {
+  using job_t = ThrowingReporterJob;
+
   static constexpr uint64_t fanout() { return 1; }
 
   template <typename Emit>
@@ -203,7 +223,11 @@ struct TrackedState {
   TrackedState& operator=(const TrackedState&) = delete;
 };
 
+using TrackedJob = TrackedState;
+
 struct TriggerContext {
+  using job_t = TrackedJob;
+
   static constexpr uint64_t fanout() { return 1; }
 
   template <typename Emit>
@@ -278,42 +302,52 @@ TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
   CHECK(completed_ids == std::vector<int>{1, 11, 12});
 }
 
-TEST_CASE("AMAC Executor: Composition Chaining", "[amac][chain]")
+TEST_CASE("AMAC Executor: Multi-Stage Flattening", "[amac][chain]")
 {
-  auto transition = [](CountdownState&& c) -> std::optional<ForkState> {
+  // Chain: Countdown -> Resource -> Fork
+
+  auto t1 = [](CountdownJob&& c) -> std::optional<ResourceJob> {
     if (c.m_counter == 0) {
-      return ForkState{1, 2, 0};
+      return ResourceJob{10, 1};
     }
     return std::nullopt;
   };
 
-  using JobA = CountdownState;
-  using JobB = ForkState;
+  auto t2 = [](ResourceJob&& r) -> std::optional<ForkJob> {
+    if (r.m_steps_remaining == 0) {
+      return ForkJob{10, 2, 0};
+    }
+    return std::nullopt;
+  };
 
-  auto chain = vault::amac::chain<JobA, JobB>(
-    CountdownContext{}, ForkContext{}, transition);
+  // Chain construction should flatten
+  auto pipe1 = vault::amac::chain(CountdownContext{}, ResourceContext{}, t1);
 
-  using VariantJob = std::variant<JobA, JobB>;
-  std::vector<VariantJob> inputs;
-  inputs.emplace_back(JobA{1});
+  // pipe2 is pipeline<Countdown, Resource, Fork>
+  auto pipe2 = vault::amac::chain(std::move(pipe1), ForkContext{}, t2);
 
-  std::vector<int>         completed_ids;
-  TestReceiver<VariantJob> reporter;
-  reporter.completion_handler = [&](VariantJob&& v) {
-    if (std::holds_alternative<JobB>(v)) {
-      completed_ids.push_back(std::get<JobB>(v).id);
+  using CombinedJob = decltype(pipe2)::job_t;
+  static_assert(std::variant_size_v<CombinedJob> == 3,
+    "Pipeline should be flattened to 3 states");
+
+  std::vector<CombinedJob> inputs;
+  inputs.emplace_back(CountdownJob{1});
+
+  std::vector<int>          completed_ids;
+  TestReceiver<CombinedJob> reporter;
+  reporter.completion_handler = [&](CombinedJob&& v) {
+    if (std::holds_alternative<ForkJob>(v)) {
+      completed_ids.push_back(std::get<ForkJob>(v).id);
     } else {
-      FAIL("JobA should have transitioned");
+      FAIL("Intermediate jobs should have transitioned");
     }
   };
 
-  vault::amac::executor<16>(chain, inputs, reporter);
+  vault::amac::executor<16>(pipe2, inputs, reporter);
 
   CHECK(completed_ids.size() == 3);
   std::ranges::sort(completed_ids);
-  CHECK(completed_ids == std::vector<int>{1, 11, 12});
-
-  static_assert(decltype(chain)::fanout() == 2);
+  CHECK(completed_ids == std::vector<int>{10, 101, 102});
 }
 
 TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]")
