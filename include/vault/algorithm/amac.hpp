@@ -19,51 +19,19 @@
 
 /**
  * @defgroup vault_amac Asynchronous Memory Access Coordinator (AMAC)
- *
- * @brief A software-pipelining engine for hiding memory latency.
- *
- * This updated version separates "State" (the Job) from "Behavior" (the
- * Context).
- *
- * - **Job**: Mutable state unique to a specific task (e.g., current probe
- * index).
- * - **Context**: Immutable environment and logic shared by all jobs (e.g.,
- * hash table base address, step function logic).
  */
 
 namespace vault::amac::concepts {
 
-  /**
-   * @brief Validates the return type of context state transitions.
-   * @ingroup vault_amac
-   *
-   * A result must be explicitly convertible to bool (true = active,
-   * false = done) and satisfy the tuple protocol where every element
-   * is a `void const*`.
-   */
   template <typename T>
   concept step_result = std::constructible_from<bool, T> &&
     []<std::size_t... Is>(std::index_sequence<Is...>) {
       return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
     }(std::make_index_sequence<std::tuple_size_v<T>>{});
 
-  /**
-   * @brief Defines the requirements for a Job State.
-   * @ingroup vault_amac
-   *
-   * A Job is purely a data carrier. It must be movable (constructible and
-   * assignable) to support compaction and slot recycling.
-   */
   template <typename J>
   concept job = std::movable<J>;
 
-  /**
-   * @brief Defines the interface for the execution Context.
-   * @ingroup vault_amac
-   *
-   * The Context now supports Dynamic Job Creation via an 'emit' callback.
-   * The signature for emit is essentially `void(J&&)`.
-   */
   template <typename C, typename J>
   concept context =
     job<J> && requires(C& ctx, J& job, std::function<void(J&&)> emit) {
@@ -72,10 +40,6 @@ namespace vault::amac::concepts {
       { ctx.step(job, emit) } -> step_result;
     };
 
-  /**
-   * @brief Receiver-style interface for handling job outcomes.
-   * @ingroup vault_amac
-   */
   template <typename R, typename J>
   concept reporter = job<J> && requires(R& r, J&& job, std::exception_ptr e) {
     { r.on_completion(std::move(job)) };
@@ -86,28 +50,10 @@ namespace vault::amac::concepts {
 
 namespace vault::amac {
 
-  /**
-   * @brief Defines behavior when the reporter's on_failure method throws.
-   */
-  enum class double_fault_policy {
-    rethrow,  ///< Propagate the exception (aborts the batch, destroys active
-              ///< jobs).
-    suppress, ///< Catch and ignore the exception (orphans the failing job).
-    terminate ///< Call std::terminate() immediately.
-  };
+  enum class double_fault_policy { rethrow, suppress, terminate };
 
-  /**
-   * @brief A fixed-size collection of memory addresses to prefetch.
-   * @ingroup vault_amac
-   *
-   * @tparam N The number of simultaneous probes.
-   */
   template <std::size_t N>
   struct step_result : public std::array<void const*, N> {
-    /**
-     * @brief Checks if the job has further work to perform.
-     * @return true if at least one pointer in the result is non-null.
-     */
     [[nodiscard]] constexpr explicit operator bool() const noexcept
     {
       return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -116,14 +62,6 @@ namespace vault::amac {
     }
   };
 
-  /**
-   * @brief Functional executor for managing a batch of AMAC jobs.
-   * @ingroup vault_amac
-   *
-   * @tparam TotalFanout The interleaving degree. Typical values are 8-16.
-   * @tparam FailurePolicy Strategy for handling exceptions thrown by the
-   * reporter.
-   */
   template <uint8_t     TotalFanout   = 16,
     double_fault_policy FailurePolicy = double_fault_policy::terminate>
   class executor_fn {
@@ -135,20 +73,17 @@ namespace vault::amac {
       }(std::make_index_sequence<std::tuple_size_v<R>>{});
     }
 
-    /**
-     * @brief Internal storage wrapper to manage job lifecycles.
-     */
     template <typename J> class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
 
     public:
       using value_type = J;
 
-      [[nodiscard]] job_slot() = default;
-
+      [[nodiscard]] job_slot()             = default;
       job_slot(job_slot const&)            = delete;
       job_slot& operator=(job_slot const&) = delete;
 
+      // Used for slot recycling (move assignment)
       job_slot& operator=(job_slot&& other)
       {
         if (this != std::addressof(other)) {
@@ -164,7 +99,7 @@ namespace vault::amac {
     };
 
     /**
-     * @brief RAII Guard to clean up active jobs if an exception propagates.
+     * @brief RAII Guard for the initialized range of the pipeline.
      */
     template <typename Iter> struct scope_guard {
       Iter&       first;
@@ -174,7 +109,6 @@ namespace vault::amac {
       {
         using JobType =
           typename std::iterator_traits<Iter>::value_type::value_type;
-
         if constexpr (!std::is_trivially_destructible_v<JobType>) {
           for (; first != last; ++first) {
             std::destroy_at(first->get());
@@ -183,7 +117,7 @@ namespace vault::amac {
       }
     };
 
-    // --- Safety Helpers ---
+    // --- Exception Safety Helpers ---
 
     template <typename Reporter, typename Job>
     static void safe_fail(Reporter& report, Job&& job, std::exception_ptr e)
@@ -195,8 +129,6 @@ namespace vault::amac {
           std::terminate();
         } else if constexpr (FailurePolicy == double_fault_policy::rethrow) {
           throw;
-        } else {
-          // Suppress: do nothing
         }
       }
     }
@@ -211,11 +143,6 @@ namespace vault::amac {
       }
     }
 
-    /**
-     * @brief Executes a job step safely.
-     * @return true if the job is active (prefetch issued).
-     * @return false if the job is done (completed) or failed (exception).
-     */
     template <typename Reporter, typename Job, typename Action>
     static bool try_execute(Reporter& report, Job& job, Action&& action)
     {
@@ -243,103 +170,92 @@ namespace vault::amac {
     {
       using job_t  = std::ranges::range_value_t<Jobs>;
       using slot_t = job_slot<job_t>;
-      using iter_t = typename std::array<slot_t,
-        (TotalFanout + Context::fanout() - 1) / Context::fanout()>::iterator;
+
+      static constexpr auto const PIPELINE_SIZE =
+        (TotalFanout + Context::fanout() - 1) / Context::fanout();
+      using array_t = std::array<slot_t, PIPELINE_SIZE>;
+      using iter_t  = typename array_t::iterator;
 
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
-      static constexpr auto const JOB_COUNT =
-        (TotalFanout + Context::fanout() - 1) / Context::fanout();
-
-      auto jobs = std::array<slot_t, JOB_COUNT>{};
-
-      std::vector<job_t> backlog;
+      // Storage
+      auto               pipeline = array_t{};
+      std::vector<job_t> backlog; // Spawned jobs (LIFO)
 
       auto emit = [&](
                     job_t&& spawned) { backlog.push_back(std::move(spawned)); };
 
-      auto jobs_first = jobs.begin();
-      auto jobs_last  = jobs.begin();
+      // State Tracking
+      auto pipeline_begin = pipeline.begin();
+      // Points to one past the last *initialized* slot (High Water Mark)
+      auto initialized_end = pipeline.begin();
+      // Points to one past the last *active* job (Working Set)
+      auto active_end = pipeline.begin();
 
-      scope_guard<iter_t> guard{jobs_first, jobs_last};
+      // RAII: Owns [pipeline_begin, initialized_end)
+      scope_guard<iter_t> guard{pipeline_begin, initialized_end};
 
-      // Helper to activate a new job
-      // Takes job by forwarding reference.
-      // Callers must ensure they std::move() if passing a value intended to be
-      // moved.
-      auto activate_job = [&](auto&& job, auto slot_iter) {
+      // --- Helpers ---
+
+      // Places a job into the pipeline if it activates successfully
+      auto try_activate_into_slot = [&](job_t&& job, iter_t slot) -> bool {
         if (try_execute(report, job, [&] { return ctx.init(job, emit); })) {
-          if (slot_iter < jobs_last) {
-            *slot_iter->get() = std::forward<decltype(job)>(job);
+          // Success: Job is active.
+          if (slot < initialized_end) {
+            // Reuse existing slot (Move Assign)
+            *slot->get() = std::move(job);
           } else {
-            std::construct_at(
-              slot_iter->get(), std::forward<decltype(job)>(job));
-            ++jobs_last;
+            // Initialize new slot (Construct)
+            std::construct_at(slot->get(), std::move(job));
+            ++initialized_end; // Extend RAII scope
           }
           return true;
         }
+        // Job finished or failed immediately; not added to pipeline.
         return false;
       };
-
-      // 1. Setup Phase
-      while (jobs_last != jobs.end() and ijobs_cursor != ijobs_last) {
-        activate_job(*ijobs_cursor++, jobs_last);
-      }
 
       auto is_inactive = [&](auto& slot) {
         return !try_execute(
           report, *slot.get(), [&] { return ctx.step(*slot.get(), emit); });
       };
 
-      auto active_end = jobs_last;
+      // --- Unified Control Loop ---
 
-      // 2. Execution/Refill Phase
-      active_end = std::remove_if(jobs_first, active_end, is_inactive);
-
-      do {
-        // Refill Logic: Priority Queue (Backlog > Input)
-        while (active_end != jobs.end()) {
+      while (true) {
+        // 1. Refill Phase (Greedy)
+        // Fill all available slots up to PIPELINE_SIZE
+        while (active_end != pipeline.end()) {
           if (!backlog.empty()) {
-            // 1. Service Backlog
-            // Explicitly move from the backlog to satisfy move-only types
-            if (activate_job(std::move(backlog.back()), active_end)) {
+            if (try_activate_into_slot(std::move(backlog.back()), active_end)) {
               ++active_end;
             }
             backlog.pop_back();
           } else if (ijobs_cursor != ijobs_last) {
-            // 2. Service Input Range
-            if (activate_job(*ijobs_cursor++, active_end)) {
+            if (try_activate_into_slot(std::move(*ijobs_cursor), active_end)) {
               ++active_end;
             }
+            ++ijobs_cursor;
           } else {
-            break;
+            break; // No sources left
           }
         }
 
-        active_end = std::remove_if(jobs_first, active_end, is_inactive);
-
-      } while (ijobs_cursor != ijobs_last || !backlog.empty());
-
-      // 3. Drain Phase
-      while (active_end != jobs_first) {
-        active_end = std::remove_if(jobs_first, active_end, is_inactive);
-
-        // Refill from backlog ONLY (input is exhausted)
-        while (active_end != jobs.end() && !backlog.empty()) {
-          if (activate_job(std::move(backlog.back()), active_end)) {
-            ++active_end;
-          }
-          backlog.pop_back();
+        // 2. Termination Check
+        // If pipeline is empty and we couldn't refill it, we are done.
+        if (active_end == pipeline.begin()) {
+          break;
         }
+
+        // 3. Execution Phase
+        // Step all active jobs and compact the array
+        active_end = std::remove_if(pipeline_begin, active_end, is_inactive);
       }
 
-      // Cleanup handled by scope_guard
+      // End of scope: 'guard' destroys [pipeline_begin, initialized_end).
     }
   };
 
-  /**
-   * @brief Global instance of the executor.
-   */
   template <uint8_t     TotalFanout   = 16,
     double_fault_policy FailurePolicy = double_fault_policy::terminate>
   constexpr inline auto const executor =
@@ -347,7 +263,6 @@ namespace vault::amac {
 
 } // namespace vault::amac
 
-// Tuple protocol support for step_result
 template <std::size_t N> struct std::tuple_size<vault::amac::step_result<N>> {
   static constexpr inline auto const value = std::size_t{N};
 };
