@@ -8,7 +8,6 @@
 #include <cassert>
 #include <concepts>
 #include <exception>
-#include <functional>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -34,13 +33,21 @@ namespace vault::amac::concepts {
   template <typename J>
   concept job = std::movable<J>;
 
+  /**
+   * @brief Context concept.
+   * Requires init/step to accept a callback for emitting new jobs.
+   * We verify this by checking if it accepts a generic void(J&&) lambda.
+   */
   template <typename C, typename J>
-  concept context =
-    job<J> && requires(C& ctx, J& job, std::function<void(J&&)> emit) {
-      { C::fanout() } -> std::convertible_to<std::size_t>;
-      { ctx.init(job, emit) } -> step_result;
-      { ctx.step(job, emit) } -> step_result;
-    };
+  concept context = job<J> && requires(C& ctx, J& job) {
+    { C::fanout() } -> std::convertible_to<std::size_t>;
+    {
+      ctx.init(job, [](J&&) {})
+    } -> step_result;
+    {
+      ctx.step(job, [](J&&) {})
+    } -> step_result;
+  };
 
   template <typename R, typename J>
   concept reporter = job<J> && requires(R& r, J&& job, std::exception_ptr e) {
@@ -83,11 +90,6 @@ namespace vault::amac {
   /**
    * @brief A composite context that executes ContextA, then transitions to
    * ContextB.
-   * * @tparam CtxA The initial context type.
-   * @tparam CtxB The subsequent context type.
-   * @tparam TransitionFn A callable: (CtxA::Job&&) -> std::optional<CtxB::Job>.
-   * @tparam JobA Valid job type for CtxA.
-   * @tparam JobB Valid job type for CtxB.
    */
   template <typename CtxA,
     typename CtxB,
@@ -100,11 +102,8 @@ namespace vault::amac {
     TransitionFn m_trans;
 
   public:
-    // The composite job state is a sum type of the sub-states.
     using job_t = std::variant<JobA, JobB>;
 
-    // The composite fanout is the max of sub-fanouts to ensure return type
-    // consistency.
     static constexpr std::size_t fanout()
     {
       return std::max(CtxA::fanout(), CtxB::fanout());
@@ -118,52 +117,50 @@ namespace vault::amac {
         , m_trans(std::move(t))
     {}
 
-    // Init: Dispatch to the correct sub-context
     template <typename Emit> result_t init(job_t& j, Emit&& emit)
     {
-      if (std::holds_alternative<JobA>(j)) {
-        return detail::lift_result<fanout()>(m_a.init(std::get<JobA>(j), emit));
-      } else {
-        return detail::lift_result<fanout()>(m_b.init(std::get<JobB>(j), emit));
-      }
+      // Efficiently dispatch to the active state using std::visit
+      return std::visit(
+        [&](auto& state) {
+          using StateT = std::decay_t<decltype(state)>;
+          if constexpr (std::is_same_v<StateT, JobA>) {
+            return detail::lift_result<fanout()>(m_a.init(state, emit));
+          } else {
+            return detail::lift_result<fanout()>(m_b.init(state, emit));
+          }
+        },
+        j);
     }
 
-    // Step: Run A. If A finishes, try Transition to B. If B, Run B.
     template <typename Emit> result_t step(job_t& j, Emit&& emit)
     {
-      if (std::holds_alternative<JobA>(j)) {
-        auto& state_a = std::get<JobA>(j);
-        auto  res_a   = m_a.step(state_a, emit);
+      // Use get_if for single-check access
+      if (auto* state_a = std::get_if<JobA>(&j)) {
+        auto res_a = m_a.step(*state_a, emit);
 
         if (static_cast<bool>(res_a)) {
-          // A is still active
           return detail::lift_result<fanout()>(res_a);
         }
 
         // A is done. Attempt Transition.
-        // We move state_a out to the transition function.
-        if (auto next_b = m_trans(std::move(state_a))) {
+        if (auto next_b = m_trans(std::move(*state_a))) {
           // Transition successful: Switch variant to B
           j.template emplace<JobB>(std::move(*next_b));
-
-          // Immediately init B to avoid a pipeline bubble
           return detail::lift_result<fanout()>(
             m_b.init(std::get<JobB>(j), emit));
         } else {
           // Transition declined (chain complete).
-          return detail::lift_result<fanout()>(
-            res_a); // Returns nullptrs (Done)
+          return detail::lift_result<fanout()>(res_a);
         }
-      } else {
-        // We are in State B
-        return detail::lift_result<fanout()>(m_b.step(std::get<JobB>(j), emit));
       }
+
+      // State B (unchecked access since we know it's not A)
+      return detail::lift_result<fanout()>(m_b.step(std::get<JobB>(j), emit));
     }
   };
 
   /**
-   * @brief Helper to create a chained context.
-   * * Usage: auto ctx = chain<JobA, JobB>(ctx_a, ctx_b, transition_fn);
+   * @brief Factory for creating a chained context.
    */
   template <typename JobA,
     typename JobB,
@@ -181,6 +178,9 @@ namespace vault::amac {
   template <uint8_t     TotalFanout   = 16,
     double_fault_policy FailurePolicy = double_fault_policy::terminate>
   class executor_fn {
+
+    // -- Private Types & Helpers --
+
     template <concepts::step_result R>
     static constexpr void prefetch(R const& result)
     {
@@ -193,8 +193,7 @@ namespace vault::amac {
       std::byte storage[sizeof(J)];
 
     public:
-      using value_type = J;
-
+      using value_type                     = J;
       [[nodiscard]] job_slot()             = default;
       job_slot(job_slot const&)            = delete;
       job_slot& operator=(job_slot const&) = delete;
@@ -213,6 +212,9 @@ namespace vault::amac {
       }
     };
 
+    /**
+     * @brief RAII Guard. Owns the initialized range [first, last).
+     */
     template <typename Iter> struct scope_guard {
       Iter&       first;
       Iter const& last;
@@ -253,6 +255,10 @@ namespace vault::amac {
       }
     }
 
+    /**
+     * @brief Unified execution wrapper. Handles exceptions, prefetching, and
+     * reporting.
+     */
     template <typename Reporter, typename Job, typename Action>
     static bool try_execute(Reporter& report, Job& job, Action&& action)
     {
@@ -286,21 +292,28 @@ namespace vault::amac {
       using array_t = std::array<slot_t, PIPELINE_SIZE>;
       using iter_t  = typename array_t::iterator;
 
+      // -- Setup Storage --
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
-
-      auto               pipeline = array_t{};
+      auto               pipeline     = array_t{};
       std::vector<job_t> backlog;
 
       auto emit = [&](
                     job_t&& spawned) { backlog.push_back(std::move(spawned)); };
 
-      auto pipeline_begin  = pipeline.begin();
+      // -- State & Guard --
+      auto pipeline_begin = pipeline.begin();
+      // initialized_end: High-Water Mark for RAII destruction
       auto initialized_end = pipeline.begin();
-      auto active_end      = pipeline.begin();
+      // active_end: Boundary of currently running jobs
+      auto active_end = pipeline.begin();
 
       scope_guard<iter_t> guard{pipeline_begin, initialized_end};
 
+      // -- Helpers --
+
       auto try_activate_into_slot = [&](job_t&& job, iter_t slot) -> bool {
+        // Note: try_execute guarantees job is reported/failed if it returns
+        // false.
         if (try_execute(report, job, [&] { return ctx.init(job, emit); })) {
           if (slot < initialized_end) {
             *slot->get() = std::move(job);
@@ -318,7 +331,10 @@ namespace vault::amac {
           report, *slot.get(), [&] { return ctx.step(*slot.get(), emit); });
       };
 
+      // -- Control Loop --
+
       while (true) {
+        // 1. Greedy Refill (Backlog Priority)
         while (active_end != pipeline.end()) {
           if (!backlog.empty()) {
             if (try_activate_into_slot(std::move(backlog.back()), active_end)) {
@@ -331,14 +347,16 @@ namespace vault::amac {
             }
             ++ijobs_cursor;
           } else {
-            break;
+            break; // No work sources available
           }
         }
 
+        // 2. Termination
         if (active_end == pipeline.begin()) {
           break;
         }
 
+        // 3. Execution & Compaction
         active_end = std::remove_if(pipeline_begin, active_end, is_inactive);
       }
     }
