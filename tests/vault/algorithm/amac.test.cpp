@@ -4,7 +4,7 @@
 #include <vault/algorithm/amac.hpp>
 
 #include <algorithm>
-#include <functional>
+#include <memory>
 #include <random>
 #include <ranges>
 #include <stdexcept>
@@ -30,6 +30,43 @@ template <typename J> struct TestReceiver {
     }
   }
 };
+
+// --- Custom Allocator for Testing ---
+template <typename T> struct CountingAllocator {
+  using value_type = T;
+  int* alloc_counter;
+
+  CountingAllocator(int* counter)
+      : alloc_counter(counter)
+  {}
+
+  template <typename U>
+  CountingAllocator(const CountingAllocator<U>& other)
+      : alloc_counter(other.alloc_counter)
+  {}
+
+  T* allocate(std::size_t n)
+  {
+    if (alloc_counter) {
+      (*alloc_counter)++;
+    }
+    return std::allocator<T>().allocate(n);
+  }
+
+  void deallocate(T* p, std::size_t n) { std::allocator<T>().deallocate(p, n); }
+};
+
+template <typename T, typename U>
+bool operator==(const CountingAllocator<T>&, const CountingAllocator<U>&)
+{
+  return true;
+}
+
+template <typename T, typename U>
+bool operator!=(const CountingAllocator<T>&, const CountingAllocator<U>&)
+{
+  return false;
+}
 
 // --- Global Test State Definitions ---
 
@@ -302,10 +339,32 @@ TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
   CHECK(completed_ids == std::vector<int>{1, 11, 12});
 }
 
+TEST_CASE("AMAC Executor: Custom Allocator", "[amac][allocator]")
+{
+  int                          alloc_count = 0;
+  CountingAllocator<std::byte> alloc(&alloc_count);
+
+  // We use Forking, because normal execution doesn't use the backlog (no
+  // allocations).
+  std::vector<ForkState> inputs = {{1, 3, 0}};
+
+  TestReceiver<ForkState> reporter;
+  reporter.completion_handler = [&](ForkState&&) {};
+
+  ForkContext ctx;
+
+  // Explicitly specialize with the custom allocator type
+  vault::amac::executor<16,
+    vault::amac::double_fault_policy::terminate,
+    CountingAllocator<std::byte>>(ctx, inputs, reporter, alloc);
+
+  // The executor should have allocated the backlog vector's storage.
+  // ForkState splits once into 2 children -> push_back triggers allocation.
+  CHECK(alloc_count > 0);
+}
+
 TEST_CASE("AMAC Executor: Multi-Stage Flattening", "[amac][chain]")
 {
-  // Chain: Countdown -> Resource -> Fork
-
   auto t1 = [](CountdownJob&& c) -> std::optional<ResourceJob> {
     if (c.m_counter == 0) {
       return ResourceJob{10, 1};
@@ -320,10 +379,7 @@ TEST_CASE("AMAC Executor: Multi-Stage Flattening", "[amac][chain]")
     return std::nullopt;
   };
 
-  // Chain construction should flatten
   auto pipe1 = vault::amac::chain(CountdownContext{}, ResourceContext{}, t1);
-
-  // pipe2 is pipeline<Countdown, Resource, Fork>
   auto pipe2 = vault::amac::chain(std::move(pipe1), ForkContext{}, t2);
 
   using CombinedJob = decltype(pipe2)::job_t;
