@@ -8,15 +8,21 @@
 #include <concepts>
 #include <functional>
 #include <iterator>
-#include <memory>
 #include <ranges>
 #include <stdexcept>
 #include <vector>
 
 #include <vault/algorithm/amac.hpp>
 
-// Note: Explicit prefetch macros removed; prefetching is handled by the AMAC
-// executor.
+#if defined(__GNUC__) || defined(__clang__)
+#define LAYOUT_PREFETCH(ptr) __builtin_prefetch(ptr, 0, 3)
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#define LAYOUT_PREFETCH(ptr)                                                   \
+  _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0)
+#else
+#define LAYOUT_PREFETCH(ptr)
+#endif
 
 #if defined(__AVX2__)
 #define LAYOUT_USE_AVX2 1
@@ -37,9 +43,10 @@ namespace eytzinger {
     || std::same_as<Comp, std::greater<>>
     || std::same_as<Comp, std::ranges::greater>;
 
-  // --- Internal Declarations ---
-  // These are implemented in implicit_btree_layout_policy.cpp
+  // --- Internal Declarations (Implemented in .cpp) ---
+
   namespace detail {
+    // Topology / Math Helpers
     [[nodiscard]] std::size_t btree_child_block_index(
       std::size_t block_idx, std::size_t child_slot, std::size_t B);
     [[nodiscard]] std::size_t btree_sorted_rank_to_index(
@@ -52,6 +59,7 @@ namespace eytzinger {
       std::ptrdiff_t i, std::size_t n, std::size_t B);
 
 #ifdef LAYOUT_USE_AVX2
+    // Fast Path Full-Loop Implementations
     [[nodiscard]] std::size_t search_loop_lb_uint64_less(
       const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
     [[nodiscard]] std::size_t search_loop_ub_uint64_less(
@@ -61,6 +69,7 @@ namespace eytzinger {
     [[nodiscard]] std::size_t search_loop_ub_int64_less(
       const int64_t* base, std::size_t n, int64_t key, std::size_t B);
 
+    // SIMD Block Searcher Trampolines
     [[nodiscard]] std::size_t simd_lb_int64_less(const int64_t* b, int64_t k);
     std::size_t               simd_ub_int64_less(const int64_t* b, int64_t k);
     [[nodiscard]] std::size_t simd_lb_uint64_less(
@@ -259,11 +268,97 @@ namespace eytzinger {
       static constexpr bool value = std::contiguous_iterator<I>;
     };
 
-    // --- Public Logic (Iterators/Index Math) ---
+    // --- Private Helper Implementations (Generic Logic) ---
 
+  private:
+    template <typename T, typename Comp, typename Proj>
+    static constexpr std::size_t lower_bound_generic(
+      const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj)
+    {
+      assert(base != nullptr || n == 0);
+      std::size_t k          = 0;
+      std::size_t result_idx = n;
+
+      while (true) {
+        std::size_t block_start = k * B;
+        if (block_start >= n) {
+          break;
+        }
+        assert(k < n && "Runaway index detection");
+
+        std::size_t child_start = detail::btree_child_block_index(k, 0, B) * B;
+        LAYOUT_PREFETCH(&base[child_start]);
+
+        if (block_start + B <= n) {
+          std::size_t idx_in_block = block_searcher<T, Comp, B>::lower_bound(
+            base + block_start, value, comp, proj);
+
+          if (idx_in_block < B) {
+            result_idx = block_start + idx_in_block;
+          }
+          k = detail::btree_child_block_index(k, idx_in_block, B);
+        } else {
+          std::size_t count       = n - block_start;
+          std::size_t idx_in_tail = scalar_block_searcher::lower_bound_n(
+            base + block_start, count, value, comp, proj);
+
+          if (idx_in_tail < count) {
+            result_idx = block_start + idx_in_tail;
+            k          = detail::btree_child_block_index(k, idx_in_tail, B);
+          } else {
+            k = detail::btree_child_block_index(k, count, B);
+          }
+        }
+      }
+      return result_idx;
+    }
+
+    template <typename T, typename Comp, typename Proj>
+    static constexpr std::size_t upper_bound_generic(
+      const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj)
+    {
+      assert(base != nullptr || n == 0);
+      std::size_t k          = 0;
+      std::size_t result_idx = n;
+
+      while (true) {
+        std::size_t block_start = k * B;
+        if (block_start >= n) {
+          break;
+        }
+        assert(k < n && "Runaway index detection");
+
+        std::size_t child_start = detail::btree_child_block_index(k, 0, B) * B;
+        LAYOUT_PREFETCH(&base[child_start]);
+
+        if (block_start + B <= n) {
+          std::size_t idx_in_block = block_searcher<T, Comp, B>::upper_bound(
+            base + block_start, value, comp, proj);
+
+          if (idx_in_block < B) {
+            result_idx = block_start + idx_in_block;
+          }
+          k = detail::btree_child_block_index(k, idx_in_block, B);
+        } else {
+          std::size_t count       = n - block_start;
+          std::size_t idx_in_tail = scalar_block_searcher::upper_bound_n(
+            base + block_start, count, value, comp, proj);
+
+          if (idx_in_tail < count) {
+            result_idx = block_start + idx_in_tail;
+            k          = detail::btree_child_block_index(k, idx_in_tail, B);
+          } else {
+            k = detail::btree_child_block_index(k, count, B);
+          }
+        }
+      }
+      return result_idx;
+    }
+
+  public:
     struct sorted_rank_to_index_fn {
-      [[nodiscard]] constexpr std::size_t operator()(
-        std::size_t rank, std::size_t n) const
+      [[nodiscard]] static constexpr std::size_t operator()(
+        std::size_t rank, std::size_t n)
       {
         assert(rank < n && "Rank out of bounds");
         return detail::btree_sorted_rank_to_index(rank, n, B);
@@ -271,8 +366,8 @@ namespace eytzinger {
     };
 
     struct index_to_sorted_rank_fn {
-      [[nodiscard]] constexpr std::size_t operator()(
-        std::size_t index, std::size_t n) const
+      [[nodiscard]] static constexpr std::size_t operator()(
+        std::size_t index, std::size_t n)
       {
         assert(index < n && "Index out of bounds");
         return detail::btree_index_to_sorted_rank(index, n, B);
@@ -280,8 +375,8 @@ namespace eytzinger {
     };
 
     struct next_index_fn {
-      [[nodiscard]] constexpr std::ptrdiff_t operator()(
-        std::ptrdiff_t i, std::size_t n_sz) const
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
+        std::ptrdiff_t i, std::size_t n_sz)
       {
         assert(i >= 0 && i < static_cast<std::ptrdiff_t>(n_sz));
         std::ptrdiff_t res = detail::btree_next_index(i, n_sz, B);
@@ -290,8 +385,8 @@ namespace eytzinger {
     };
 
     struct prev_index_fn {
-      [[nodiscard]] constexpr std::ptrdiff_t operator()(
-        std::ptrdiff_t i, std::size_t n_sz) const
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
+        std::ptrdiff_t i, std::size_t n_sz)
       {
         // Handle n_sz (end) as -1 for detail impl
         std::ptrdiff_t input_i = (i == static_cast<std::ptrdiff_t>(n_sz)) ? -1
@@ -309,6 +404,31 @@ namespace eytzinger {
     static constexpr inline prev_index_fn prev_index{};
 
     struct permute_fn {
+      template <std::random_access_iterator I, std::sentinel_for<I> S>
+      static constexpr void operator()(I first, S last)
+      {
+        const auto n = static_cast<std::size_t>(std::distance(first, last));
+        if (n <= 1) {
+          return;
+        }
+        using ValueT = std::iter_value_t<I>;
+        std::vector<ValueT> temp;
+        temp.resize(n);
+        I current_source = first;
+        fill_in_order(temp, current_source, 0, n);
+
+        assert(
+          std::distance(first, current_source) == static_cast<std::ptrdiff_t>(n)
+          && "Not all elements consumed");
+        std::ranges::move(temp, first);
+      }
+
+      template <std::ranges::random_access_range R>
+      static constexpr void operator()(R&& range)
+      {
+        operator()(std::ranges::begin(range), std::ranges::end(range));
+      }
+
     private:
       template <typename SrcIter, typename TempVec>
       static constexpr void fill_in_order(TempVec& temp,
@@ -336,32 +456,6 @@ namespace eytzinger {
           }
         }
       }
-
-    public:
-      template <std::random_access_iterator I, std::sentinel_for<I> S>
-      static constexpr void operator()(I first, S last)
-      {
-        const auto n = static_cast<std::size_t>(std::distance(first, last));
-        if (n <= 1) {
-          return;
-        }
-        using ValueT = std::iter_value_t<I>;
-        std::vector<ValueT> temp;
-        temp.resize(n);
-        I current_source = first;
-        fill_in_order(temp, current_source, 0, n);
-
-        assert(
-          std::distance(first, current_source) == static_cast<std::ptrdiff_t>(n)
-          && "Not all elements consumed");
-        std::ranges::move(temp, first);
-      }
-
-      template <std::ranges::random_access_range R>
-      static constexpr void operator()(R&& range)
-      {
-        operator()(std::ranges::begin(range), std::ranges::end(range));
-      }
     };
 
     static constexpr inline permute_fn permute{};
@@ -375,6 +469,7 @@ namespace eytzinger {
         if (n >= size) {
           throw std::out_of_range("eytzinger index out of range");
         }
+        // Assert redundant with exception but good for debug
         assert(n < size);
         return *(first + sorted_rank_to_index(n, size));
       }
@@ -389,16 +484,14 @@ namespace eytzinger {
 
     static constexpr inline get_nth_sorted_fn get_nth_sorted{};
 
-    // --- Wrappers for Synchronous Use ---
-
     struct lower_bound_fn {
       template <std::random_access_iterator I,
         std::sentinel_for<I>                S,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] constexpr I operator()(
-        I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const
+      [[nodiscard]] static constexpr I operator()(
+        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
       {
         if (first == last) {
           return last;
@@ -421,35 +514,8 @@ namespace eytzinger {
         } else
 #endif
         {
-          // Generic fallback logic
-          std::size_t k          = 0;
-          std::size_t result_idx = n;
-          while (true) {
-            std::size_t block_start = k * B;
-            if (block_start >= n) {
-              break;
-            }
-
-            if (block_start + B <= n) {
-              std::size_t idx = block_searcher<T, Comp, B>::lower_bound(
-                base + block_start, value, comp, proj);
-              if (idx < B) {
-                result_idx = block_start + idx;
-              }
-              k = detail::btree_child_block_index(k, idx, B);
-            } else {
-              std::size_t count = n - block_start;
-              std::size_t idx   = scalar_block_searcher::lower_bound_n(
-                base + block_start, count, value, comp, proj);
-              if (idx < count) {
-                result_idx = block_start + idx;
-                k          = detail::btree_child_block_index(k, idx, B);
-              } else {
-                k = detail::btree_child_block_index(k, count, B);
-              }
-            }
-          }
-          return (result_idx == n) ? last : (first + result_idx);
+          std::size_t idx = lower_bound_generic(base, n, value, comp, proj);
+          return (idx == n) ? last : (first + idx);
         }
       }
 
@@ -457,8 +523,8 @@ namespace eytzinger {
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(
-        R&& range, const T& value, Comp comp = {}, Proj proj = {}) const
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
+        R&& range, const T& value, Comp comp = {}, Proj proj = {})
       {
         return operator()(std::ranges::begin(range),
           std::ranges::end(range),
@@ -474,8 +540,8 @@ namespace eytzinger {
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] constexpr I operator()(
-        I first, S last, const T& value, Comp comp = {}, Proj proj = {}) const
+      [[nodiscard]] static constexpr I operator()(
+        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
       {
         if (first == last) {
           return last;
@@ -498,35 +564,8 @@ namespace eytzinger {
         } else
 #endif
         {
-          // Generic fallback logic
-          std::size_t k          = 0;
-          std::size_t result_idx = n;
-          while (true) {
-            std::size_t block_start = k * B;
-            if (block_start >= n) {
-              break;
-            }
-
-            if (block_start + B <= n) {
-              std::size_t idx = block_searcher<T, Comp, B>::upper_bound(
-                base + block_start, value, comp, proj);
-              if (idx < B) {
-                result_idx = block_start + idx;
-              }
-              k = detail::btree_child_block_index(k, idx, B);
-            } else {
-              std::size_t count = n - block_start;
-              std::size_t idx   = scalar_block_searcher::upper_bound_n(
-                base + block_start, count, value, comp, proj);
-              if (idx < count) {
-                result_idx = block_start + idx;
-                k          = detail::btree_child_block_index(k, idx, B);
-              } else {
-                k = detail::btree_child_block_index(k, count, B);
-              }
-            }
-          }
-          return (result_idx == n) ? last : (first + result_idx);
+          std::size_t idx = upper_bound_generic(base, n, value, comp, proj);
+          return (idx == n) ? last : (first + idx);
         }
       }
 
@@ -534,8 +573,8 @@ namespace eytzinger {
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] constexpr std::ranges::iterator_t<R> operator()(
-        R&& range, const T& value, Comp comp = {}, Proj proj = {}) const
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
+        R&& range, const T& value, Comp comp = {}, Proj proj = {})
       {
         return operator()(std::ranges::begin(range),
           std::ranges::end(range),
@@ -548,123 +587,149 @@ namespace eytzinger {
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
 
-    // --- AMAC Implementation ---
+    template <typename HaystackIter,
+      typename NeedleIter,
+      typename Comp,
+      search_bound Bound>
+    struct search_job {
+      [[nodiscard]] static constexpr uint64_t fanout()
+      {
+        return implicit_btree_layout_policy::FANOUT;
+      }
 
-    template <typename HaystackIter, typename NeedleIter> struct search_state {
+      using ValT = std::iter_value_t<HaystackIter>;
+
       HaystackIter begin_it;
       std::size_t  n;
-      NeedleIter   needle_iter;
+      NeedleIter   needle_iter; // Storing iterator
+      Comp         comp;
       std::size_t  k = 0;
       std::size_t  result_idx;
-    };
 
-    template <typename Compare> struct search_context {
-      [[no_unique_address]] Compare compare_;
+      [[nodiscard]] search_job(
+        HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
+          : begin_it(first)
+          , n(size)
+          , needle_iter(n_iter)
+          , comp(c)
+          , result_idx(size)
+      {}
 
-      static constexpr uint64_t fanout() { return FANOUT; }
-
-      // Accessor for the reporter
-      template <typename State>
-      [[nodiscard]] auto get_result(State const& s) const
+      [[nodiscard]] vault::amac::job_step_result<1> init()
       {
-        return (s.result_idx == s.n) ? (s.begin_it + s.n)
-                                     : (s.begin_it + s.result_idx);
-      }
-
-      template <typename State, typename Emit>
-      [[nodiscard]] constexpr vault::amac::step_result<FANOUT> init(
-        State& s, Emit&&) const
-      {
-        if (s.n == 0) {
+        if (n == 0) {
           return {nullptr};
         }
-        return {std::to_address(s.begin_it)};
+        return {std::to_address(begin_it)};
       }
 
-      template <typename State, typename Emit>
-      [[nodiscard]] constexpr vault::amac::step_result<FANOUT> step(
-        State& s, Emit&& emit) const
+      [[nodiscard]] vault::amac::job_step_result<1> step()
       {
-        using ValT              = std::iter_value_t<decltype(s.begin_it)>;
-        std::size_t block_start = s.k * B;
-
-        if (block_start >= s.n) {
+        std::size_t block_start = k * B;
+        if (block_start >= n) {
           return {nullptr};
         }
 
-        if (block_start + B <= s.n) {
-          const auto* block_ptr = std::to_address(s.begin_it + block_start);
-          std::size_t idx       = block_searcher<ValT, Compare, B>::lower_bound(
-            block_ptr, *s.needle_iter, compare_, std::identity{});
+        if (block_start + B <= n) {
+          std::size_t idx_in_block = [&] {
+            if constexpr (Bound == search_bound::upper) {
+              return block_searcher<ValT, Comp, B>::upper_bound(
+                std::to_address(begin_it + block_start),
+                *needle_iter,
+                comp,
+                std::identity{});
+            } else {
+              return block_searcher<ValT, Comp, B>::lower_bound(
+                std::to_address(begin_it + block_start),
+                *needle_iter,
+                comp,
+                std::identity{});
+            }
+          }();
 
-          if (idx < B) {
-            s.result_idx = block_start + idx;
+          if (idx_in_block < B) {
+            result_idx = block_start + idx_in_block;
           }
-          s.k = detail::btree_child_block_index(s.k, idx, B);
+          k = detail::btree_child_block_index(k, idx_in_block, B);
         } else {
-          std::size_t count     = s.n - block_start;
-          const auto* block_ptr = std::to_address(s.begin_it + block_start);
-          std::size_t idx       = scalar_block_searcher::lower_bound_n(
-            block_ptr, count, *s.needle_iter, compare_, std::identity{});
+          std::size_t count       = n - block_start;
+          std::size_t idx_in_tail = [&] {
+            if constexpr (Bound == search_bound::upper) {
+              return scalar_block_searcher::upper_bound_n(
+                std::to_address(begin_it + block_start),
+                count,
+                *needle_iter,
+                comp,
+                std::identity{});
+            } else {
+              return scalar_block_searcher::lower_bound_n(
+                std::to_address(begin_it + block_start),
+                count,
+                *needle_iter,
+                comp,
+                std::identity{});
+            }
+          }();
 
-          if (idx < count) {
-            s.result_idx = block_start + idx;
-            s.k          = detail::btree_child_block_index(s.k, idx, B);
+          if (idx_in_tail < count) {
+            result_idx = block_start + idx_in_tail;
+            k          = detail::btree_child_block_index(k, idx_in_tail, B);
           } else {
-            s.k = detail::btree_child_block_index(s.k, count, B);
+            k = detail::btree_child_block_index(k, count, B);
           }
         }
 
-        if (s.k * B >= s.n) {
+        if (k * B >= n) {
           return {nullptr};
         }
-        return {std::to_address(s.begin_it + (s.k * B))};
+
+        return {std::to_address(begin_it + (k * B))};
       }
+
+      [[nodiscard]] HaystackIter haystack_cursor() const
+      {
+        return (result_idx == n) ? (begin_it + n) : (begin_it + result_idx);
+      }
+
+      [[nodiscard]] NeedleIter needle_cursor() const { return needle_iter; }
     };
 
-    struct search_state_fn {
-      template <std::ranges::random_access_range Haystack, typename NeedleIter>
-      [[nodiscard]] constexpr auto operator()(
-        Haystack const& haystack, NeedleIter needle) const
+    struct lower_bound_job_fn {
+      template <std::ranges::random_access_range Haystack,
+        typename Comp,
+        typename NeedleIter>
+      [[nodiscard]] static auto operator()(
+        Haystack&& haystack, Comp comp, NeedleIter needle)
       {
-        using HaystackI =
-          std::ranges::iterator_t<std::remove_reference_t<Haystack const>>;
-        return search_state<HaystackI, NeedleIter>{
-          std::ranges::begin(haystack),
+        return search_job<std::ranges::iterator_t<Haystack>,
+          NeedleIter,
+          Comp,
+          search_bound::lower>(std::ranges::begin(haystack),
           std::ranges::size(haystack),
           needle,
-          0,                          // k
-          std::ranges::size(haystack) // result_idx = n
-        };
+          comp);
       }
     };
 
-    struct lower_bound_context_fn {
-      template <typename Compare = std::ranges::less>
-      [[nodiscard]] constexpr auto operator()(Compare compare = {}) const
+    struct upper_bound_job_fn {
+      template <std::ranges::random_access_range Haystack,
+        typename Comp,
+        typename NeedleIter>
+      [[nodiscard]] static auto operator()(
+        Haystack&& haystack, Comp comp, NeedleIter needle)
       {
-        return search_context<Compare>{compare};
+        return search_job<std::ranges::iterator_t<Haystack>,
+          NeedleIter,
+          Comp,
+          search_bound::upper>(std::ranges::begin(haystack),
+          std::ranges::size(haystack),
+          needle,
+          comp);
       }
     };
 
-    struct upper_bound_context_fn {
-      template <typename Compare = std::ranges::less>
-      [[nodiscard]] constexpr auto operator()(Compare compare = {}) const
-      {
-        // Fix: Invert condition for Upper Bound.
-        // LB predicate: elem < val (false -> elem >= val)
-        // UB predicate: elem <= val (false -> elem > val)
-        // elem <= val  <==>  !(val < elem)  <==> !comp(val, elem)
-        auto adapted = [=](auto const& node, auto const& needle) {
-          return !std::invoke(compare, needle, node);
-        };
-        return search_context<decltype(adapted)>{adapted};
-      }
-    };
-
-    static constexpr inline search_state_fn        make_state{};
-    static constexpr inline lower_bound_context_fn lower_bound_context{};
-    static constexpr inline upper_bound_context_fn upper_bound_context{};
+    static constexpr inline lower_bound_job_fn lower_bound_job{};
+    static constexpr inline upper_bound_job_fn upper_bound_job{};
   };
 
 } // namespace eytzinger

@@ -25,18 +25,6 @@ namespace std {
 
 namespace eytzinger {
 
-  // --- Helper: Reporter Adapter ---
-  // Wraps a lambda to satisfy vault::amac::concepts::reporter
-  template <typename SuccessFn> struct LambdaReporter {
-    SuccessFn success_fn;
-
-    void on_completion(auto&& job) { success_fn(std::move(job)); }
-
-    void on_failure(auto&&, std::exception_ptr e) { std::rethrow_exception(e); }
-  };
-
-  template <typename Fn> LambdaReporter(Fn) -> LambdaReporter<Fn>;
-
   template <typename K,
     typename V,
     std::strict_weak_order<K, K> Compare = std::less<>,
@@ -370,29 +358,22 @@ namespace eytzinger {
     void batch_lower_bound(
       Executor&& executor, Needles&& needles, OutputIt output) const
     {
-      auto ctx = policy_type::lower_bound_context(compare_);
+      auto job_factory = std::bind_front(policy_type::lower_bound_job,
+        std::ranges::subrange(unordered_keys()),
+        compare_);
 
-      auto jobs =
-        std::views::iota(std::ranges::begin(needles), std::ranges::end(needles))
-        | std::views::transform([&](auto needle_it) {
-            return policy_type::make_state(
-              std::ranges::subrange(keys_), needle_it);
-          });
+      auto reporter = [&, this](auto const& job) mutable {
+        auto offset = std::ranges::distance(
+          std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-      auto reporter_lambda = [&, this](auto&& job) mutable {
-        auto           kit       = ctx.get_result(job);
-        const_iterator result_it = end();
-        if (kit != keys_.end()) {
-          auto offset = std::ranges::distance(keys_.begin(), kit);
-          result_it   = const_iterator{*this, offset};
-        }
-        // Fix: Use needle_iter (iterator), dereferencing it if you need value,
-        // or passing iterator out
-        *output++ = std::pair{job.needle_iter, result_it};
+        *output++ =
+          std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
 
-      LambdaReporter reporter{std::move(reporter_lambda)};
-      executor(ctx, jobs, reporter);
+      auto needle_cursors = std::views::iota(
+        std::ranges::begin(needles), std::ranges::end(needles));
+
+      executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
     template <typename Executor,
@@ -404,29 +385,22 @@ namespace eytzinger {
     void batch_upper_bound(
       Executor&& executor, Needles&& needles, OutputIt output) const
     {
-      auto ctx = policy_type::upper_bound_context(compare_);
+      auto job_factory = std::bind_front(policy_type::upper_bound_job,
+        std::ranges::subrange(unordered_keys()),
+        compare_);
 
-      auto jobs =
-        std::views::iota(std::ranges::begin(needles), std::ranges::end(needles))
-        | std::views::transform([&](auto needle_it) {
-            return policy_type::make_state(
-              std::ranges::subrange(keys_), needle_it);
-          });
+      auto reporter = [&, this](auto const& job) mutable {
+        auto offset = std::ranges::distance(
+          std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-      auto reporter_lambda = [&, this](auto&& job) mutable {
-        auto kit = ctx.get_result(job);
-
-        const_iterator result_it = end();
-        if (kit != keys_.end()) {
-          auto offset = std::ranges::distance(keys_.begin(), kit);
-          result_it   = const_iterator{*this, offset};
-        }
-
-        *output++ = std::pair{job.needle_iter, result_it};
+        *output++ =
+          std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
 
-      LambdaReporter reporter{std::move(reporter_lambda)};
-      executor(ctx, jobs, reporter);
+      auto needle_cursors = std::views::iota(
+        std::ranges::begin(needles), std::ranges::end(needles));
+
+      executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
     template <typename Executor,
@@ -438,29 +412,31 @@ namespace eytzinger {
     void batch_find(
       Executor&& executor, Needles&& needles, OutputIt output) const
     {
-      auto ctx = policy_type::lower_bound_context(compare_);
+      auto job_factory = std::bind_front(policy_type::lower_bound_job,
+        std::ranges::subrange(unordered_keys()),
+        compare_);
 
-      auto jobs =
-        std::views::iota(std::ranges::begin(needles), std::ranges::end(needles))
-        | std::views::transform([&](auto needle_it) {
-            return policy_type::make_state(
-              std::ranges::subrange(keys_), needle_it);
-          });
+      auto reporter = [&, this](auto const& job) mutable {
+        auto result = std::pair{job.needle_cursor(), end()};
 
-      auto reporter_lambda = [&, this](auto&& job) mutable {
-        auto           kit       = ctx.get_result(job);
-        const_iterator result_it = end();
+        if (job.haystack_cursor() == unordered_keys().end()) {
+          // pass
+        } else if (compare_(*job.needle_cursor(), *job.haystack_cursor())) {
+          // pass
+        } else {
+          auto offset = std::ranges::distance(
+            std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        if (kit != keys_.end() && !compare_(*job.needle_iter, *kit)) {
-          auto offset = std::ranges::distance(keys_.begin(), kit);
-          result_it   = const_iterator{*this, offset};
+          result.second = const_iterator{*this, offset};
         }
 
-        *output++ = std::pair{job.needle_iter, result_it};
+        *output++ = std::move(result);
       };
 
-      LambdaReporter reporter{std::move(reporter_lambda)};
-      executor(ctx, jobs, reporter);
+      auto needle_cursors = std::views::iota(
+        std::ranges::begin(needles), std::ranges::end(needles));
+
+      executor(std::views::transform(needle_cursors, job_factory), reporter);
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept

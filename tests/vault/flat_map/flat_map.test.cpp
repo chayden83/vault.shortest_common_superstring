@@ -12,11 +12,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
-#include <iterator>
 #include <limits>
 #include <random>
 #include <set>
-#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -57,7 +55,6 @@ std::vector<T> generate_unique_data(size_t n, uint64_t seed = 42)
     auto     max_v = std::numeric_limits<T>::max();
     uint64_t range =
       static_cast<uint64_t>(max_v) - static_cast<uint64_t>(min_v) + 1;
-
     if (static_cast<uint64_t>(n) > range) {
       n = static_cast<size_t>(range);
     }
@@ -137,6 +134,7 @@ template <typename MapType> struct MapTestDriver {
     }
   }
 
+  // Diagnostic helper to print indices on mismatch
   void check_iterators(typename MapType::const_iterator got,
     typename MapType::const_iterator                    expected,
     const KeyT&                                         needle,
@@ -146,10 +144,11 @@ template <typename MapType> struct MapTestDriver {
       long got_idx = (got == map.end()) ? -1 : std::distance(map.begin(), got);
       long exp_idx =
         (expected == map.end()) ? -1 : std::distance(map.begin(), expected);
+
       std::stringstream ss;
       ss << op << " Failed for needle: " << needle << "\n"
          << "  Expected Index: " << exp_idx << "\n"
-         << "  Got Index:       " << got_idx << "\n";
+         << "  Got Index:      " << got_idx << "\n";
       FAIL_CHECK(ss.str());
     }
   }
@@ -173,10 +172,10 @@ template <typename MapType> struct MapTestDriver {
     std::vector<ResultPair> results;
     results.reserve(needles.size());
 
-    // 1. Batch Find - Using executor<> (variable template default)
+    // 1. Batch Find
     results.clear();
     map.batch_find(
-      vault::amac::executor<>, needles, std::back_inserter(results));
+      vault::amac::coordinator<>, needles, std::back_inserter(results));
     for (auto [nit, mit] : results) {
       check_iterators(mit, map.find(*nit), *nit, "Batch Find");
     }
@@ -184,7 +183,7 @@ template <typename MapType> struct MapTestDriver {
     // 2. Batch Lower Bound
     results.clear();
     map.batch_lower_bound(
-      vault::amac::executor<>, needles, std::back_inserter(results));
+      vault::amac::coordinator<>, needles, std::back_inserter(results));
     for (auto [nit, mit] : results) {
       check_iterators(mit, map.lower_bound(*nit), *nit, "Batch LowerBound");
     }
@@ -192,7 +191,7 @@ template <typename MapType> struct MapTestDriver {
     // 3. Batch Upper Bound
     results.clear();
     map.batch_upper_bound(
-      vault::amac::executor<>, needles, std::back_inserter(results));
+      vault::amac::coordinator<>, needles, std::back_inserter(results));
     for (auto [nit, mit] : results) {
       check_iterators(mit, map.upper_bound(*nit), *nit, "Batch UpperBound");
     }
