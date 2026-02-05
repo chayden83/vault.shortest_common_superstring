@@ -33,6 +33,11 @@ namespace vault::amac::concepts {
   template <typename J>
   concept job = std::movable<J>;
 
+  /**
+   * @brief Context concept.
+   * Requires init/step to accept a callback for emitting new jobs.
+   * We verify this by checking if it accepts a generic void(J&&) lambda.
+   */
   template <typename C, typename J>
   concept context = job<J> && requires(C& ctx, J& job) {
     { C::fanout() } -> std::convertible_to<std::size_t>;
@@ -66,131 +71,106 @@ namespace vault::amac {
     }
   };
 
+  // --- Chaining / Composition Support ---
+
   namespace detail {
     // Lifts a step_result<Small> to step_result<Big> by zero-padding.
     template <std::size_t Big, std::size_t Small>
     constexpr step_result<Big> lift_result(step_result<Small> const& src)
     {
       static_assert(Big >= Small, "Cannot lift to a smaller fanout");
-      step_result<Big> dst{};
+      step_result<Big> dst{}; // Zero-initialize (nullptrs)
       for (std::size_t i = 0; i < Small; ++i) {
         dst[i] = src[i];
       }
       return dst;
     }
-
-    // Compile-time Jump Table for Index-Based Dispatch
-    template <std::size_t N, typename Op>
-    constexpr decltype(auto) dispatch_index(std::size_t i, Op&& op)
-    {
-      return
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) -> decltype(auto) {
-          using ResultT = decltype(op.template operator()<0>());
-          static constexpr ResultT (*table[])(Op&&) = {
-            [](Op&& o) { return o.template operator()<Is>(); }...};
-          return table[i](std::forward<Op>(op));
-        }(std::make_index_sequence<N>{});
-    }
   } // namespace detail
 
   /**
-   * @brief A variadic pipeline context that executes contexts sequentially.
-   * Flattens the state into a single std::variant<JobA, JobB, JobC...>.
+   * @brief A composite context that executes ContextA, then transitions to
+   * ContextB.
    */
-  template <typename ContextTuple, typename TransitionTuple>
-  class pipeline_context {
-    ContextTuple    m_contexts;
-    TransitionTuple m_transitions;
-
-    template <typename Tuple> struct tuple_to_variant;
-
-    template <typename... Cs> struct tuple_to_variant<std::tuple<Cs...>> {
-      using type = std::variant<typename Cs::job_t...>;
-    };
+  template <typename CtxA,
+    typename CtxB,
+    typename TransitionFn,
+    typename JobA,
+    typename JobB>
+  class chained_context {
+    CtxA         m_a;
+    CtxB         m_b;
+    TransitionFn m_trans;
 
   public:
-    using job_t = typename tuple_to_variant<ContextTuple>::type;
+    using job_t = std::variant<JobA, JobB>;
 
     static constexpr std::size_t fanout()
     {
-      return std::apply(
-        [](auto const&... ctxs) { return std::max({ctxs.fanout()...}); },
-        ContextTuple{});
+      return std::max(CtxA::fanout(), CtxB::fanout());
     }
 
-    using result_t                          = step_result<fanout()>;
-    static constexpr std::size_t num_stages = std::tuple_size_v<ContextTuple>;
+    using result_t = step_result<fanout()>;
 
-    pipeline_context(ContextTuple ctxs, TransitionTuple trans)
-        : m_contexts(std::move(ctxs))
-        , m_transitions(std::move(trans))
+    chained_context(CtxA a, CtxB b, TransitionFn t)
+        : m_a(std::move(a))
+        , m_b(std::move(b))
+        , m_trans(std::move(t))
     {}
 
     template <typename Emit> result_t init(job_t& j, Emit&& emit)
     {
-      return detail::dispatch_index<num_stages>(
-        j.index(), [&]<std::size_t I>() {
-          return detail::lift_result<fanout()>(
-            std::get<I>(m_contexts).init(std::get<I>(j), emit));
-        });
+      // Efficiently dispatch to the active state using std::visit
+      return std::visit(
+        [&](auto& state) {
+          using StateT = std::decay_t<decltype(state)>;
+          if constexpr (std::is_same_v<StateT, JobA>) {
+            return detail::lift_result<fanout()>(m_a.init(state, emit));
+          } else {
+            return detail::lift_result<fanout()>(m_b.init(state, emit));
+          }
+        },
+        j);
     }
 
     template <typename Emit> result_t step(job_t& j, Emit&& emit)
     {
-      return detail::dispatch_index<num_stages>(
-        j.index(), [&]<std::size_t I>() {
-          auto& ctx = std::get<I>(m_contexts);
-          auto& job = std::get<I>(j);
+      // Use get_if for single-check access
+      if (auto* state_a = std::get_if<JobA>(&j)) {
+        auto res_a = m_a.step(*state_a, emit);
 
-          auto res = ctx.step(job, emit);
-          if (static_cast<bool>(res)) {
-            return detail::lift_result<fanout()>(res);
-          }
+        if (static_cast<bool>(res_a)) {
+          return detail::lift_result<fanout()>(res_a);
+        }
 
-          if constexpr (I < std::tuple_size_v<TransitionTuple>) {
-            auto& transition_fn = std::get<I>(m_transitions);
+        // A is done. Attempt Transition.
+        if (auto next_b = m_trans(std::move(*state_a))) {
+          // Transition successful: Switch variant to B
+          j.template emplace<JobB>(std::move(*next_b));
+          return detail::lift_result<fanout()>(
+            m_b.init(std::get<JobB>(j), emit));
+        } else {
+          // Transition declined (chain complete).
+          return detail::lift_result<fanout()>(res_a);
+        }
+      }
 
-            if (auto next_job = transition_fn(std::move(job))) {
-              j.template emplace<I + 1>(std::move(*next_job));
-
-              return detail::lift_result<fanout()>(
-                std::get<I + 1>(m_contexts).init(std::get<I + 1>(j), emit));
-            }
-          }
-
-          return detail::lift_result<fanout()>(res);
-        });
+      // State B (unchecked access since we know it's not A)
+      return detail::lift_result<fanout()>(m_b.step(std::get<JobB>(j), emit));
     }
-
-    auto& contexts() && { return m_contexts; }
-
-    auto& transitions() && { return m_transitions; }
   };
 
-  template <typename T> struct is_pipeline : std::false_type {};
-
-  template <typename C, typename T>
-  struct is_pipeline<pipeline_context<C, T>> : std::true_type {};
-
   /**
-   * @brief Factory to chain contexts.
-   * Flattens nested chains into a single linear pipeline.
+   * @brief Factory for creating a chained context.
    */
-  template <typename Left, typename Right, typename TransitionFn>
-  auto chain(Left left, Right right, TransitionFn trans)
+  template <typename JobA,
+    typename JobB,
+    typename CtxA,
+    typename CtxB,
+    typename TransitionFn>
+  constexpr auto chain(CtxA a, CtxB b, TransitionFn t)
   {
-    if constexpr (is_pipeline<std::decay_t<Left>>::value) {
-      auto combined_ctxs = std::tuple_cat(
-        std::move(left).contexts(), std::make_tuple(std::move(right)));
-      auto combined_trans = std::tuple_cat(
-        std::move(left).transitions(), std::make_tuple(std::move(trans)));
-      return pipeline_context(
-        std::move(combined_ctxs), std::move(combined_trans));
-    } else {
-      auto ctx_tuple   = std::make_tuple(std::move(left), std::move(right));
-      auto trans_tuple = std::make_tuple(std::move(trans));
-      return pipeline_context(std::move(ctx_tuple), std::move(trans_tuple));
-    }
+    return chained_context<CtxA, CtxB, TransitionFn, JobA, JobB>(
+      std::move(a), std::move(b), std::move(t));
   }
 
   // --- Executor ---
@@ -275,6 +255,10 @@ namespace vault::amac {
       }
     }
 
+    /**
+     * @brief Unified execution wrapper. Handles exceptions, prefetching, and
+     * reporting.
+     */
     template <typename Reporter, typename Job, typename Action>
     static bool try_execute(Reporter& report, Job& job, Action&& action)
     {
@@ -308,21 +292,28 @@ namespace vault::amac {
       using array_t = std::array<slot_t, PIPELINE_SIZE>;
       using iter_t  = typename array_t::iterator;
 
+      // -- Setup Storage --
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
-
-      auto               pipeline = array_t{};
+      auto               pipeline     = array_t{};
       std::vector<job_t> backlog;
 
       auto emit = [&](
                     job_t&& spawned) { backlog.push_back(std::move(spawned)); };
 
-      auto pipeline_begin  = pipeline.begin();
+      // -- State & Guard --
+      auto pipeline_begin = pipeline.begin();
+      // initialized_end: High-Water Mark for RAII destruction
       auto initialized_end = pipeline.begin();
-      auto active_end      = pipeline.begin();
+      // active_end: Boundary of currently running jobs
+      auto active_end = pipeline.begin();
 
       scope_guard<iter_t> guard{pipeline_begin, initialized_end};
 
+      // -- Helpers --
+
       auto try_activate_into_slot = [&](job_t&& job, iter_t slot) -> bool {
+        // Note: try_execute guarantees job is reported/failed if it returns
+        // false.
         if (try_execute(report, job, [&] { return ctx.init(job, emit); })) {
           if (slot < initialized_end) {
             *slot->get() = std::move(job);
@@ -340,7 +331,10 @@ namespace vault::amac {
           report, *slot.get(), [&] { return ctx.step(*slot.get(), emit); });
       };
 
+      // -- Control Loop --
+
       while (true) {
+        // 1. Greedy Refill (Backlog Priority)
         while (active_end != pipeline.end()) {
           if (!backlog.empty()) {
             if (try_activate_into_slot(std::move(backlog.back()), active_end)) {
@@ -353,14 +347,16 @@ namespace vault::amac {
             }
             ++ijobs_cursor;
           } else {
-            break;
+            break; // No work sources available
           }
         }
 
+        // 2. Termination
         if (active_end == pipeline.begin()) {
           break;
         }
 
+        // 3. Execution & Compaction
         active_end = std::remove_if(pipeline_begin, active_end, is_inactive);
       }
     }
