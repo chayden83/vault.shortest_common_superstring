@@ -8,10 +8,8 @@
 #include <cassert>
 #include <concepts>
 #include <exception>
-#include <functional>
 #include <iterator>
 #include <memory>
-#include <optional>
 #include <ranges>
 #include <tuple>
 #include <type_traits>
@@ -222,13 +220,8 @@ namespace vault::amac {
 
   // --- Executor ---
 
-  /**
-   * @brief Executor implementation.
-   * @tparam ProtoAllocator A prototype allocator (e.g. std::allocator<std::byte>) used to construct the backlog.
-   */
   template <uint8_t TotalFanout = 16, 
-            double_fault_policy FailurePolicy = double_fault_policy::terminate,
-            typename ProtoAllocator = std::allocator<std::byte>>
+            double_fault_policy FailurePolicy = double_fault_policy::terminate>
   class executor_fn {
     
     // -- Safety Shim --
@@ -279,6 +272,11 @@ namespace vault::amac {
 
     // -- Internal Storage --
     
+    /**
+     * @brief Storage wrapper for jobs.
+     * @note operator= assumes the slot is already constructed (active).
+     * This assumption holds because std::remove_if only operates on the active range.
+     */
     template <typename J>
     class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
@@ -326,7 +324,7 @@ namespace vault::amac {
               std::ranges::input_range Jobs,
               concepts::reporter<std::ranges::range_value_t<Jobs>> Reporter>
     requires concepts::context<Context, std::ranges::range_value_t<Jobs>>
-    static constexpr void operator()(Context& ctx, Jobs&& ijobs, Reporter&& reporter, ProtoAllocator proto_alloc = ProtoAllocator())
+    static constexpr void operator()(Context& ctx, Jobs&& ijobs, Reporter&& reporter)
     {
       using job_t = std::ranges::range_value_t<Jobs>;
       using slot_t = job_slot<job_t>;
@@ -340,25 +338,27 @@ namespace vault::amac {
       safety_shim<Reporter> safety{reporter};
       
       auto pipeline = array_t{};
-      
-      // Rebind the prototype allocator to the actual job type
-      using JobAllocator = typename std::allocator_traits<ProtoAllocator>::template rebind_alloc<job_t>;
-      std::vector<job_t, JobAllocator> backlog(proto_alloc);
+      std::vector<job_t> backlog;
 
       auto emit = [&](job_t&& spawned) {
           backlog.push_back(std::move(spawned));
       };
 
       // -- State Tracking --
+      // initialized_end: High-Water Mark for RAII (objects are constructed)
       auto initialized_end = pipeline.begin();
+      // active_end: Boundary of the Working Set (objects are active)
       auto active_end = pipeline.begin();
 
-      // Guard needs lvalue
+      // Fix: Pass the lvalue 'pipeline_begin' (Iter&) to the guard
       auto pipeline_begin = pipeline.begin();
       scope_guard guard{pipeline_begin, initialized_end};
 
       // -- Loop Helpers --
       
+      // Activates a job into a specific slot.
+      // If slot < initialized_end, we Recycle (Move Assign).
+      // If slot == initialized_end, we Extend (Construct).
       auto activate_into_slot = [&](job_t&& job, auto slot) -> bool {
           if (safety.try_execute(job, [&]{ return ctx.init(job, emit); })) {
               if (slot < initialized_end) {
@@ -372,6 +372,7 @@ namespace vault::amac {
           return false; 
       };
 
+      // The predicate for std::remove_if
       auto is_inactive = [&](auto& slot) {
           return !safety.try_execute(*slot.get(), [&]{ return ctx.step(*slot.get(), emit); });
       };
@@ -380,6 +381,7 @@ namespace vault::amac {
       
       while (true) {
           // 1. Greedy Refill
+          // Prioritize Backlog (LIFO) -> Then Input Range
           while (active_end != pipeline.end()) {
               if (!backlog.empty()) {
                    if (activate_into_slot(std::move(backlog.back()), active_end)) {
@@ -413,9 +415,8 @@ namespace vault::amac {
    * @brief Global instance of the executor.
    */
   template <uint8_t TotalFanout = 16, 
-            double_fault_policy FailurePolicy = double_fault_policy::terminate,
-            typename Allocator = std::allocator<std::byte>>
-  constexpr inline auto const executor = executor_fn<TotalFanout, FailurePolicy, Allocator>{};
+            double_fault_policy FailurePolicy = double_fault_policy::terminate>
+  constexpr inline auto const executor = executor_fn<TotalFanout, FailurePolicy>{};
 
 } // namespace vault::amac
 
