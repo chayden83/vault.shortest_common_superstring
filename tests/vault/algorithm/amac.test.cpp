@@ -4,7 +4,6 @@
 #include <vault/algorithm/amac.hpp>
 
 #include <algorithm>
-#include <functional>
 #include <random>
 #include <ranges>
 #include <stdexcept>
@@ -68,7 +67,7 @@ struct ForkState {
 };
 
 struct ForkContext {
-  static constexpr uint64_t fanout() { return 2; }
+  static constexpr uint64_t fanout() { return 2; } // increased to test lifting
 
   template <typename Emit>
   vault::amac::step_result<2> init(ForkState& s, Emit&&)
@@ -77,7 +76,7 @@ struct ForkContext {
       return {nullptr, nullptr};
     }
     s.count--;
-    return {&s, &s};
+    return {&s, &s}; // Return 2 ptrs
   }
 
   template <typename Emit>
@@ -280,6 +279,10 @@ TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
 
 TEST_CASE("AMAC Executor: Composition Chaining", "[amac][chain]")
 {
+  // Chain: Countdown (1 step) -> ForkState (fanout 2)
+  // CountdownState counts down from 1 to 0.
+  // Transition: Convert Countdown(0) -> ForkState(id=1, count=2, depth=0)
+
   auto transition = [](CountdownState&& c) -> std::optional<ForkState> {
     if (c.m_counter == 0) {
       return ForkState{1, 2, 0};
@@ -293,6 +296,7 @@ TEST_CASE("AMAC Executor: Composition Chaining", "[amac][chain]")
   auto chain = vault::amac::chain<JobA, JobB>(
     CountdownContext{}, ForkContext{}, transition);
 
+  // Input must be variants
   using VariantJob = std::variant<JobA, JobB>;
   std::vector<VariantJob> inputs;
   inputs.emplace_back(JobA{1});
@@ -300,6 +304,7 @@ TEST_CASE("AMAC Executor: Composition Chaining", "[amac][chain]")
   std::vector<int>         completed_ids;
   TestReceiver<VariantJob> reporter;
   reporter.completion_handler = [&](VariantJob&& v) {
+    // We expect only JobB (ForkState) to complete, as JobA transitions into it.
     if (std::holds_alternative<JobB>(v)) {
       completed_ids.push_back(std::get<JobB>(v).id);
     } else {
@@ -309,10 +314,16 @@ TEST_CASE("AMAC Executor: Composition Chaining", "[amac][chain]")
 
   vault::amac::executor<16>(chain, inputs, reporter);
 
+  // Countdown(1) -> 0 -> Transition to Fork(1, 2, 0)
+  // Fork(1, 2, 0) -> (split to 11, 12) -> Done
+  // 11, 12 run to completion.
+  // So we expect 3 completions: 1, 11, 12
   CHECK(completed_ids.size() == 3);
   std::ranges::sort(completed_ids);
   CHECK(completed_ids == std::vector<int>{1, 11, 12});
 
+  // Verify Max Fanout Propagation
+  // Countdown has Fanout 1, Fork has Fanout 2. Chain should have Fanout 2.
   static_assert(decltype(chain)::fanout() == 2);
 }
 
