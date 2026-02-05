@@ -7,7 +7,6 @@
 #include <array>
 #include <cassert>
 #include <concepts>
-#include <exception>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -71,28 +70,15 @@ namespace vault::amac::concepts {
   };
 
   /**
-   * @brief Receiver-style interface for handling job outcomes.
+   * @brief Concept for a reporter that handles completed AMAC jobs.
    * @ingroup vault_amac
    */
   template <typename R, typename J>
-  concept reporter = job<J> && requires(R& r, J&& job, std::exception_ptr e) {
-    { r.on_completion(std::move(job)) };
-    { r.on_failure(std::move(job), e) };
-  };
+  concept reporter = job<J> && std::invocable<R, J&&>;
 
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
-
-  /**
-   * @brief Defines behavior when the reporter's on_failure method throws.
-   */
-  enum class double_fault_policy {
-    rethrow,  ///< Propagate the exception (aborts the batch, destroys active
-              ///< jobs).
-    suppress, ///< Catch and ignore the exception (orphans the failing job).
-    terminate ///< Call std::terminate() immediately.
-  };
 
   /**
    * @brief A fixed-size collection of memory addresses to prefetch.
@@ -119,12 +105,8 @@ namespace vault::amac {
    * @ingroup vault_amac
    *
    * @tparam TotalFanout The interleaving degree. Typical values are 8-16.
-   * @tparam FailurePolicy Strategy for handling exceptions thrown by the
-   * reporter.
    */
-  template <uint8_t     TotalFanout   = 16,
-    double_fault_policy FailurePolicy = double_fault_policy::terminate>
-  class executor_fn {
+  template <uint8_t TotalFanout = 16> class executor_fn {
     template <concepts::step_result R>
     static constexpr void prefetch(R const& result)
     {
@@ -143,13 +125,9 @@ namespace vault::amac {
       std::byte storage[sizeof(J)];
 
     public:
-      // Expose the underlying value type for introspection by scope_guard
-      using value_type = J;
-
       [[nodiscard]] job_slot() = default;
 
-      job_slot(job_slot const&)            = delete;
-      job_slot& operator=(job_slot const&) = delete;
+      job_slot(job_slot const&) = delete;
 
       job_slot& operator=(job_slot&& other)
       {
@@ -159,68 +137,13 @@ namespace vault::amac {
         return *this;
       }
 
+      job_slot& operator=(job_slot const&) = delete;
+
       [[nodiscard]] J* get() noexcept
       {
         return reinterpret_cast<J*>(&storage[0]);
       }
     };
-
-    /**
-     * @brief RAII Guard to clean up active jobs if an exception propagates.
-     */
-    template <typename Iter> struct scope_guard {
-      Iter&       first;
-      Iter const& last;
-
-      ~scope_guard()
-      {
-        // Check trivial destructibility of the inner job type J.
-        // Iter::value_type is job_slot<J>, so we access
-        // job_slot<J>::value_type.
-        using JobType =
-          typename std::iterator_traits<Iter>::value_type::value_type;
-
-        if constexpr (!std::is_trivially_destructible_v<JobType>) {
-          for (; first != last; ++first) {
-            std::destroy_at(first->get());
-          }
-        }
-      }
-    };
-
-    /**
-     * @brief Handles exceptions thrown by the reporter during failure handling.
-     */
-    template <typename Reporter, typename Job>
-    static void safe_fail(Reporter& report, Job&& job, std::exception_ptr e)
-    {
-      try {
-        report.on_failure(std::move(job), e);
-      } catch (...) {
-        if constexpr (FailurePolicy == double_fault_policy::terminate) {
-          std::terminate();
-        } else if constexpr (FailurePolicy == double_fault_policy::rethrow) {
-          throw;
-        } else {
-          // Suppress: do nothing
-        }
-      }
-    }
-
-    /**
-     * @brief Wraps completion reporting.
-     * If completion reporting fails, it escalates to safe_fail.
-     */
-    template <typename Reporter, typename Job>
-    static void safe_complete(Reporter& report, Job&& job)
-    {
-      try {
-        report.on_completion(std::move(job));
-      } catch (...) {
-        // Completion failed; treat as a failure.
-        safe_fail(report, std::move(job), std::current_exception());
-      }
-    }
 
   public:
     /**
@@ -228,7 +151,7 @@ namespace vault::amac {
      *
      * @param ctx The context defining the behavior and shared state.
      * @param ijobs The input range of job states.
-     * @param report A callable adhering to the reporter concept.
+     * @param report A callable invoked with the Job once it completes.
      */
     template <typename Context,
       std::ranges::input_range                             Jobs,
@@ -237,133 +160,85 @@ namespace vault::amac {
     static constexpr void operator()(
       Context& ctx, Jobs&& ijobs, Reporter&& report)
     {
-      using job_t  = std::ranges::range_value_t<Jobs>;
-      using slot_t = job_slot<job_t>;
-      // Iterator type for the array
-      using iter_t = typename std::array<slot_t,
-        (TotalFanout + Context::fanout() - 1) / Context::fanout()>::iterator;
+      using job_t = std::ranges::range_value_t<Jobs>;
 
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
       static constexpr auto const JOB_COUNT =
         (TotalFanout + Context::fanout() - 1) / Context::fanout();
 
-      auto jobs = std::array<slot_t, JOB_COUNT>{};
-
-      // Initialize iterators for the range of valid jobs
-      auto jobs_first = jobs.begin();
-      auto jobs_last  = jobs.begin(); // Initially empty
-
-      // RAII Guard: If we throw (Policy::rethrow), this cleans up active jobs.
-      // logic ensures [jobs_first, jobs_last) always contains valid objects.
-      scope_guard<iter_t> guard{jobs_first, jobs_last};
+      auto jobs = std::array<job_slot<job_t>, JOB_COUNT>{};
 
       // 1. Setup Phase: Populate initial batch
-      {
-        while (jobs_last != jobs.end() and ijobs_cursor != ijobs_last) {
+      auto [jobs_first, jobs_last] = std::invoke([&] {
+        auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
+
+        while (jobs_first != jobs_last and ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
-          try {
-            if (auto addresses = ctx.init(job)) {
-              prefetch(addresses);
-              std::construct_at(
-                jobs_last->get(), std::forward<decltype(job)>(job));
-              ++jobs_last;
-            } else {
-              safe_complete(report, std::move(job));
-            }
-          } catch (...) {
-            safe_fail(report, std::move(job), std::current_exception());
+          if (auto addresses = ctx.init(job)) {
+            prefetch(addresses);
+            std::construct_at(
+              jobs_first->get(), std::forward<decltype(job)>(job));
+            ++jobs_first;
+          } else {
+            std::invoke(report, std::move(job));
           }
         }
-      }
+
+        return std::ranges::subrange(std::ranges::begin(jobs), jobs_first);
+      });
 
       // Predicate for std::remove_if
+      // - Calls ctx.step()
+      // - Issues prefetches if active
+      // - Reports and returns true (remove) if done
       auto is_inactive = [&](auto& slot) {
-        try {
-          if (auto addresses = ctx.step(*slot.get())) {
-            prefetch(addresses);
-            return false;
-          } else {
-            safe_complete(report, std::move(*slot.get()));
-            return true;
-          }
-        } catch (...) {
-          safe_fail(report, std::move(*slot.get()), std::current_exception());
-          return true;
+        if (auto addresses = ctx.step(*slot.get())) {
+          return prefetch(addresses), false;
+        } else {
+          return std::invoke(report, std::move(*slot.get())), true;
         }
       };
 
       // 2. Execution/Refill Phase
       auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
 
-      // Clean up moved-from "garbage" at the tail immediately.
-      // This ensures the scope_guard doesn't double-destroy if we throw in the
-      // refill loop.
-      if constexpr (!std::is_trivially_destructible_v<job_t>) {
-        for (auto it = jobs_cursor; it != jobs_last; ++it) {
-          std::destroy_at(it->get());
-        }
-      }
-      jobs_last = jobs_cursor;
-
       do {
-        while (jobs_last != jobs.end() && ijobs_cursor != ijobs_last) {
+        while (jobs_cursor != jobs_last && ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
-          try {
-            if (auto addresses = ctx.init(job)) {
-              prefetch(addresses);
-              // Construct into the slot at jobs_last (guaranteed
-              // empty/destroyed above)
-              std::construct_at(
-                jobs_last->get(), std::forward<decltype(job)>(job));
-              ++jobs_last;
-            } else {
-              safe_complete(report, std::forward<decltype(job)>(job));
-            }
-          } catch (...) {
-            safe_fail(report,
-              std::forward<decltype(job)>(job),
-              std::current_exception());
+          if (auto addresses = ctx.init(job)) {
+            prefetch(addresses);
+            *jobs_cursor->get() = std::forward<decltype(job)>(job);
+            ++jobs_cursor;
+          } else {
+            std::invoke(report, std::forward<decltype(job)>(job));
           }
         }
 
-        jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
-
-        if constexpr (!std::is_trivially_destructible_v<job_t>) {
-          for (auto it = jobs_cursor; it != jobs_last; ++it) {
-            std::destroy_at(it->get());
-          }
-        }
-        jobs_last = jobs_cursor;
-
+        jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       } while (ijobs_cursor != ijobs_last);
 
       // 3. Drain Phase
-      while (jobs_last != jobs_first) {
-        jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
-
-        if constexpr (!std::is_trivially_destructible_v<job_t>) {
-          for (auto it = jobs_cursor; it != jobs_last; ++it) {
-            std::destroy_at(it->get());
-          }
-        }
-        jobs_last = jobs_cursor;
+      while (jobs_cursor != jobs_first) {
+        jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       }
 
-      // When scope_guard destructs here, jobs_first == jobs_last, so it does
-      // nothing.
+      // Cleanup
+      if constexpr (!std::is_trivially_destructible_v<job_t>) {
+        for (; jobs_first != jobs_last; ++jobs_first) {
+          std::destroy_at(jobs_first->get());
+        }
+      }
     }
   };
 
   /**
    * @brief Global instance of the executor.
    */
-  template <uint8_t     TotalFanout   = 16,
-    double_fault_policy FailurePolicy = double_fault_policy::terminate>
-  constexpr inline auto const executor =
-    executor_fn<TotalFanout, FailurePolicy>{};
+  template <uint8_t TotalFanout = 16>
+  constexpr inline auto const executor = executor_fn<TotalFanout>{};
 
 } // namespace vault::amac
 
