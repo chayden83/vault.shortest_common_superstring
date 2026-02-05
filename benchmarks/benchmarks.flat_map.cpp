@@ -106,8 +106,7 @@ struct OpBatchFind {
   template <typename Map, typename Needles, typename Results>
   static void run(const Map& map, const Needles& needles, Results& results)
   {
-    // Updated to use vault::amac::executor template
-    map.batch_find(vault::amac::executor<kAMACBufferSize>,
+    map.batch_find(vault::amac::coordinator<kAMACBufferSize>,
       needles,
       std::back_inserter(results));
   }
@@ -120,8 +119,7 @@ struct OpBatchLowerBound {
   template <typename Map, typename Needles, typename Results>
   static void run(const Map& map, const Needles& needles, Results& results)
   {
-    // Updated to use vault::amac::executor template
-    map.batch_lower_bound(vault::amac::executor<kAMACBufferSize>,
+    map.batch_lower_bound(vault::amac::coordinator<kAMACBufferSize>,
       needles,
       std::back_inserter(results));
   }
@@ -134,8 +132,7 @@ struct OpBatchUpperBound {
   template <typename Map, typename Needles, typename Results>
   static void run(const Map& map, const Needles& needles, Results& results)
   {
-    // Updated to use vault::amac::executor template
-    map.batch_upper_bound(vault::amac::executor<kAMACBufferSize>,
+    map.batch_upper_bound(vault::amac::coordinator<kAMACBufferSize>,
       needles,
       std::back_inserter(results));
   }
