@@ -50,11 +50,11 @@ namespace vault::amac::concepts {
    * @brief Defines the requirements for a Job State.
    * @ingroup vault_amac
    *
-   * A Job is purely a data carrier. It must be movable (constructible and
-   * assignable) to support compaction and slot recycling.
+   * A Job is now purely a data carrier. It must be movable so it can
+   * travel through the pipeline's slots.
    */
   template <typename J>
-  concept job = std::movable<J>;
+  concept job = std::move_constructible<J>;
 
   /**
    * @brief Defines the interface for the execution Context.
@@ -151,7 +151,6 @@ namespace vault::amac {
       job_slot(job_slot const&)            = delete;
       job_slot& operator=(job_slot const&) = delete;
 
-      // Proxies move-assignment to the underlying object
       job_slot& operator=(job_slot&& other)
       {
         if (this != std::addressof(other)) {
@@ -175,6 +174,9 @@ namespace vault::amac {
 
       ~scope_guard()
       {
+        // Check trivial destructibility of the inner job type J.
+        // Iter::value_type is job_slot<J>, so we access
+        // job_slot<J>::value_type.
         using JobType =
           typename std::iterator_traits<Iter>::value_type::value_type;
 
@@ -248,53 +250,35 @@ namespace vault::amac {
 
       auto jobs = std::array<slot_t, JOB_COUNT>{};
 
-      // 'jobs_last' tracks the High-Water Mark of initialized/constructed
-      // slots. The RAII guard owns the range [jobs.begin(), jobs_last). Even if
-      // slots contain moved-from "zombies", they are valid and must be
-      // destroyed.
+      // Initialize iterators for the range of valid jobs
       auto jobs_first = jobs.begin();
-      auto jobs_last  = jobs.begin();
+      auto jobs_last  = jobs.begin(); // Initially empty
 
+      // RAII Guard: If we throw (Policy::rethrow), this cleans up active jobs.
+      // logic ensures [jobs_first, jobs_last) always contains valid objects.
       scope_guard<iter_t> guard{jobs_first, jobs_last};
 
-      // Helper to process a job and place it in the pipeline
-      auto activate_job = [&](auto&& job, auto slot_iter) {
-        try {
-          if (auto addresses = ctx.init(job)) {
-            prefetch(addresses);
-
-            // If the slot is within the initialized range, we Assign (Recycle).
-            // If it is at the boundary, we Construct (Extend).
-            if (slot_iter < jobs_last) {
-              *slot_iter->get() = std::forward<decltype(job)>(job);
-            } else {
-              std::construct_at(
-                slot_iter->get(), std::forward<decltype(job)>(job));
-              ++jobs_last; // Extend RAII scope
-            }
-            return true; // Kept
-          } else {
-            safe_complete(report, std::forward<decltype(job)>(job));
-            return false; // Dropped
-          }
-        } catch (...) {
-          safe_fail(
-            report, std::forward<decltype(job)>(job), std::current_exception());
-          return false; // Dropped
-        }
-      };
-
       // 1. Setup Phase: Populate initial batch
-      // We fill up to JOB_COUNT or until input runs out.
-      while (jobs_last != jobs.end() and ijobs_cursor != ijobs_last) {
-        // In Setup, slot_iter always equals jobs_last, so we always Construct.
-        activate_job(*ijobs_cursor++, jobs_last);
+      {
+        while (jobs_last != jobs.end() and ijobs_cursor != ijobs_last) {
+          auto&& job = *ijobs_cursor++;
+
+          try {
+            if (auto addresses = ctx.init(job)) {
+              prefetch(addresses);
+              std::construct_at(
+                jobs_last->get(), std::forward<decltype(job)>(job));
+              ++jobs_last;
+            } else {
+              safe_complete(report, std::move(job));
+            }
+          } catch (...) {
+            safe_fail(report, std::move(job), std::current_exception());
+          }
+        }
       }
 
       // Predicate for std::remove_if
-      // - Calls ctx.step()
-      // - Issues prefetches if active
-      // - Reports and returns true (remove) if done
       auto is_inactive = [&](auto& slot) {
         try {
           if (auto addresses = ctx.step(*slot.get())) {
@@ -310,33 +294,66 @@ namespace vault::amac {
         }
       };
 
-      // 'active_end' tracks the boundary of currently running jobs.
-      // [jobs.begin(), active_end) are Running.
-      // [active_end, jobs_last) are Zombies (moved-from).
-      auto active_end = jobs_last;
-
       // 2. Execution/Refill Phase
-      active_end = std::remove_if(jobs_first, active_end, is_inactive);
+      auto jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
+
+      // Clean up moved-from "garbage" at the tail immediately.
+      // This ensures the scope_guard doesn't double-destroy if we throw in the
+      // refill loop.
+      if constexpr (!std::is_trivially_destructible_v<job_t>) {
+        for (auto it = jobs_cursor; it != jobs_last; ++it) {
+          std::destroy_at(it->get());
+        }
+      }
+      jobs_last = jobs_cursor;
 
       do {
-        // Refill loop: Use holes (zombies) first, then extend if space permits.
-        while (active_end != jobs.end() && ijobs_cursor != ijobs_last) {
-          if (activate_job(*ijobs_cursor++, active_end)) {
-            ++active_end;
+        while (jobs_last != jobs.end() && ijobs_cursor != ijobs_last) {
+          auto&& job = *ijobs_cursor++;
+
+          try {
+            if (auto addresses = ctx.init(job)) {
+              prefetch(addresses);
+              // Construct into the slot at jobs_last (guaranteed
+              // empty/destroyed above)
+              std::construct_at(
+                jobs_last->get(), std::forward<decltype(job)>(job));
+              ++jobs_last;
+            } else {
+              safe_complete(report, std::forward<decltype(job)>(job));
+            }
+          } catch (...) {
+            safe_fail(report,
+              std::forward<decltype(job)>(job),
+              std::current_exception());
           }
         }
 
-        active_end = std::remove_if(jobs_first, active_end, is_inactive);
+        jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
+
+        if constexpr (!std::is_trivially_destructible_v<job_t>) {
+          for (auto it = jobs_cursor; it != jobs_last; ++it) {
+            std::destroy_at(it->get());
+          }
+        }
+        jobs_last = jobs_cursor;
 
       } while (ijobs_cursor != ijobs_last);
 
       // 3. Drain Phase
-      while (active_end != jobs_first) {
-        active_end = std::remove_if(jobs_first, active_end, is_inactive);
+      while (jobs_last != jobs_first) {
+        jobs_cursor = std::remove_if(jobs_first, jobs_last, is_inactive);
+
+        if constexpr (!std::is_trivially_destructible_v<job_t>) {
+          for (auto it = jobs_cursor; it != jobs_last; ++it) {
+            std::destroy_at(it->get());
+          }
+        }
+        jobs_last = jobs_cursor;
       }
 
-      // Scope Guard handles destruction of [jobs_first, jobs_last).
-      // This includes any zombies left behind by the final remove_if.
+      // When scope_guard destructs here, jobs_first == jobs_last, so it does
+      // nothing.
     }
   };
 
