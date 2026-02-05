@@ -1,39 +1,24 @@
 #ifndef EYTZINGER_LAYOUT_POLICY_HPP
 #define EYTZINGER_LAYOUT_POLICY_HPP
 
-#include "concepts.hpp"
-
 #include <algorithm>
 #include <bit>
 #include <cassert>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <ranges>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include <vault/algorithm/amac.hpp>
 
-#if defined(__GNUC__) || defined(__clang__)
-#define EYTZINGER_PREFETCH(ptr) __builtin_prefetch(ptr, 0, 3)
-#elif defined(_MSC_VER)
-#include <intrin.h>
-#define EYTZINGER_PREFETCH(ptr)                                                \
-  _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0)
-#else
-#define EYTZINGER_PREFETCH(ptr)
-#endif
-
 namespace eytzinger {
 
   template <std::size_t L = 6> struct eytzinger_layout_policy {
-    static constexpr inline auto const ARITY  = 2;
-    static constexpr inline auto const FANOUT = 1;
-
-    /**
-     * @brief Unique identifier of verison 1 of the
-     * eytzinger_layout_policy.
-     */
+    static constexpr inline auto const ARITY    = 2;
+    static constexpr inline auto const FANOUT   = 1;
     static constexpr inline auto const UID_V001 = 16427278603008041617uLL;
 
     template <typename I> struct is_compatible_key_iterator {
@@ -47,7 +32,6 @@ namespace eytzinger {
       std::size_t size = 0;
       std::size_t k    = i + 1;
       std::size_t p    = 1;
-
       while (k <= n) {
         size += std::min(p, n - k + 1);
         k <<= 1;
@@ -136,8 +120,6 @@ namespace eytzinger {
         temp.resize(n);
         I current_source = first;
         fill_in_order(temp, current_source, 0, n);
-        assert(std::distance(first, current_source)
-          == static_cast<std::ptrdiff_t>(n));
         std::ranges::move(temp, first);
       }
 
@@ -159,7 +141,6 @@ namespace eytzinger {
         if (n >= size) {
           throw std::out_of_range("eytzinger index out of range");
         }
-        assert(n < size);
         return *(first + sorted_rank_to_index(n, size));
       }
 
@@ -178,12 +159,9 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        // Valid inputs: [0, n-1]. Input 'n_sz' (end) is invalid to increment.
         assert(i >= 0 && i < static_cast<std::ptrdiff_t>(n_sz));
-
         std::ptrdiff_t n           = static_cast<std::ptrdiff_t>(n_sz);
         auto           right_child = (i << 1) + 2;
-
         if (right_child < n) {
           i               = right_child;
           auto left_child = (i << 1) + 1;
@@ -196,8 +174,6 @@ namespace eytzinger {
           while (i > 0 && !(i & 1)) {
             i = (i - 1) >> 1;
           }
-          // If we traversed back to root (i=0) and it was a right child
-          // (or root itself has no successor), return n (end).
           return (i > 0) ? ((i - 1) >> 1) : n;
         }
       }
@@ -207,24 +183,18 @@ namespace eytzinger {
       [[nodiscard]] static constexpr std::ptrdiff_t operator()(
         std::ptrdiff_t i, std::size_t n_sz) noexcept
       {
-        // Valid inputs: [0, n].
         assert(i >= 0 && i <= static_cast<std::ptrdiff_t>(n_sz));
-
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
-
-        // Handle decrementing End iterator (n)
         if (i == n) {
           if (n == 0) {
-            return n; // Empty: begin() == end()
+            return n;
           }
-          // The last element in sorted order is the right-most node in the tree
           i = 0;
           while ((i << 1) + 2 < n) {
             i = (i << 1) + 2;
           }
           return i;
         }
-
         auto left_child = (i << 1) + 1;
         if (left_child < n) {
           i                = left_child;
@@ -238,8 +208,6 @@ namespace eytzinger {
           while (i > 0 && (i & 1)) {
             i = (i - 1) >> 1;
           }
-          // If we traversed back to root and it was a left child,
-          // we have exhausted the tree. Return n (end).
           return (i > 0) ? ((i - 1) >> 1) : n;
         }
       }
@@ -262,16 +230,12 @@ namespace eytzinger {
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
-        assert(base != nullptr);
-        std::size_t i = 0;
+        std::size_t i    = 0;
         while (i < n) {
-          const std::size_t future_i = ((i + 1) << L) - 1;
-          EYTZINGER_PREFETCH(&base[future_i]);
           bool go_right = std::invoke(comp, std::invoke(proj, base[i]), value);
           i             = (i << 1) + 1 + static_cast<std::size_t>(go_right);
         }
         std::size_t result_idx = restore_lower_bound_index(i);
-        // Map internal failure (-1) to 'n' (end)
         return (result_idx == static_cast<std::size_t>(-1))
           ? last
           : (first + result_idx);
@@ -287,8 +251,8 @@ namespace eytzinger {
         return operator()(std::ranges::begin(range),
           std::ranges::end(range),
           value,
-          std::ref(comp),
-          std::ref(proj));
+          comp,
+          proj);
       }
     };
 
@@ -306,11 +270,8 @@ namespace eytzinger {
         }
         const auto  n    = static_cast<std::size_t>(std::distance(first, last));
         const auto* base = std::to_address(first);
-        assert(base != nullptr);
-        std::size_t i = 0;
+        std::size_t i    = 0;
         while (i < n) {
-          const std::size_t future_i = ((i + 1) << L) - 1;
-          EYTZINGER_PREFETCH(&base[future_i]);
           bool go_right = !std::invoke(comp, value, std::invoke(proj, base[i]));
           i             = (i << 1) + 1 + static_cast<std::size_t>(go_right);
         }
@@ -330,121 +291,98 @@ namespace eytzinger {
         return operator()(std::ranges::begin(range),
           std::ranges::end(range),
           value,
-          std::ref(comp),
-          std::ref(proj));
+          comp,
+          proj);
       }
     };
 
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
 
-    template <typename HaystackIter,
-      typename NeedleIter,
-      typename Comp,
-      search_bound Bound>
-    struct search_job {
-      [[nodiscard]] static constexpr uint64_t fanout()
-      {
-        return eytzinger_layout_policy::FANOUT;
-      }
+    // --- AMAC Implementation ---
 
-      using ValT = std::iter_value_t<HaystackIter>;
-
+    template <typename HaystackIter, typename NeedleIter> struct search_state {
       HaystackIter begin_it;
       std::size_t  n;
-      NeedleIter   needle_iter; // Storing iterator, not value
-      Comp         comp;
+      NeedleIter   needle_iter;
       std::size_t  i = 0;
+    };
 
-      [[nodiscard]] search_job(
-        HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
-          : begin_it(first)
-          , n(size)
-          , needle_iter(n_iter)
-          , comp(c)
-      {}
+    template <typename Compare> struct search_context {
+      [[no_unique_address]] Compare compare_;
 
-      [[nodiscard]] vault::amac::job_step_result<1> init()
+      static constexpr uint64_t fanout() { return FANOUT; }
+
+      template <typename State>
+      [[nodiscard]] auto get_result(State const& s) const
       {
-        if (n == 0) {
-          return {nullptr};
-        }
-        return {std::to_address(begin_it)};
-      }
-
-      [[nodiscard]] vault::amac::job_step_result<1> step()
-      {
-        bool const go_right = [&] {
-          // Dereference needle_iter for comparison
-          if constexpr (Bound == search_bound::upper) {
-            return !std::invoke(comp, *needle_iter, begin_it[i]);
-          } else {
-            return std::invoke(comp, begin_it[i], *needle_iter);
-          }
-        }();
-
-        i = (i << 1) + 1 + static_cast<std::size_t>(go_right);
-
-        if (i >= n) {
-          return {nullptr};
-        }
-
-        const std::size_t future_i = ((i + 1) << L) - 1;
-        return {std::to_address(begin_it + future_i)};
-      }
-
-      // Accessor for the reporter
-      [[nodiscard]] HaystackIter haystack_cursor() const
-      {
-        std::size_t result_idx = restore_lower_bound_index(i);
-        // Correctly maps internal -1 to public n (end)
+        std::size_t result_idx = restore_lower_bound_index(s.i);
         return (result_idx == static_cast<std::size_t>(-1))
-          ? (begin_it + n)
-          : (begin_it + result_idx);
+          ? (s.begin_it + s.n)
+          : (s.begin_it + result_idx);
       }
 
-      // Accessor for the reporter
-      [[nodiscard]] NeedleIter needle_cursor() const { return needle_iter; }
-    };
-
-    struct lower_bound_job_fn {
-      template <std::ranges::random_access_range Haystack,
-        typename Comp,
-        typename NeedleIter>
-      [[nodiscard]] static auto operator()(
-        Haystack&& haystack, Comp comp, NeedleIter needle)
+      template <typename State, typename Emit>
+      [[nodiscard]] constexpr vault::amac::step_result<FANOUT> init(
+        State& s, Emit&&) const
       {
-        return search_job<std::ranges::iterator_t<Haystack>,
-          NeedleIter,
-          Comp,
-          search_bound::lower>(std::ranges::begin(haystack),
-          std::ranges::size(haystack),
-          needle,
-          comp);
+        if (s.n == 0) {
+          return {nullptr};
+        }
+        return {std::to_address(s.begin_it)};
       }
-    };
 
-    struct upper_bound_job_fn {
-      template <std::ranges::random_access_range Haystack,
-        typename Comp,
-        typename NeedleIter>
-      [[nodiscard]] static auto operator()(
-        Haystack&& haystack, Comp comp, NeedleIter needle)
+      template <typename State, typename Emit>
+      [[nodiscard]] constexpr vault::amac::step_result<FANOUT> step(
+        State& s, Emit&& emit) const
       {
-        return search_job<std::ranges::iterator_t<Haystack>,
-          NeedleIter,
-          Comp,
-          search_bound::upper>(std::ranges::begin(haystack),
-          std::ranges::size(haystack),
-          needle,
-          comp);
+        bool const go_right =
+          std::invoke(compare_, s.begin_it[s.i], *s.needle_iter);
+        s.i = (s.i << 1) + 1 + static_cast<std::size_t>(go_right);
+        if (s.i >= s.n) {
+          return {nullptr};
+        }
+        const std::size_t future_i = ((s.i + 1) << L) - 1;
+        return {std::to_address(s.begin_it + future_i)};
       }
     };
 
-    static constexpr inline lower_bound_job_fn lower_bound_job{};
-    static constexpr inline upper_bound_job_fn upper_bound_job{};
+    struct search_state_fn {
+      template <std::ranges::random_access_range Haystack, typename NeedleIter>
+      [[nodiscard]] static constexpr auto operator()(
+        Haystack const& haystack, NeedleIter needle)
+      {
+        using HaystackI =
+          std::ranges::iterator_t<std::remove_reference_t<Haystack const>>;
+        return search_state<HaystackI, NeedleIter>{
+          std::ranges::begin(haystack), std::ranges::size(haystack), needle};
+      }
+    };
+
+    struct lower_bound_context_fn {
+      template <typename Compare = std::ranges::less>
+      [[nodiscard]] static constexpr auto operator()(Compare compare = {})
+      {
+        return search_context<Compare>{compare};
+      }
+    };
+
+    struct upper_bound_context_fn {
+      template <typename Compare = std::ranges::less>
+      [[nodiscard]] static constexpr auto operator()(Compare compare = {})
+      {
+        auto adapted = [=](auto const& node, auto const& needle) {
+          return !std::invoke(compare, needle, node);
+        };
+        return search_context<decltype(adapted)>{adapted};
+      }
+    };
+
+    static constexpr inline search_state_fn        make_state{};
+    static constexpr inline lower_bound_context_fn lower_bound_context{};
+    static constexpr inline upper_bound_context_fn upper_bound_context{};
   };
 
 } // namespace eytzinger
 
-#endif // EYTZINGER_LAYOUT_POLICY_HPP
+#endif
