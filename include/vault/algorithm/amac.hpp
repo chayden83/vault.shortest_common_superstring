@@ -15,7 +15,6 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 /**
  * @defgroup vault_amac Asynchronous Memory Access Coordinator (AMAC)
@@ -61,16 +60,15 @@ namespace vault::amac::concepts {
    * @brief Defines the interface for the execution Context.
    * @ingroup vault_amac
    *
-   * The Context now supports Dynamic Job Creation via an 'emit' callback.
-   * The signature for emit is essentially `void(J&&)`.
+   * The Context encapsulates the behavior and shared immutable state.
+   * It acts as the "Visitor" or "Executor" for the Job state.
    */
   template <typename C, typename J>
-  concept context =
-    job<J> && requires(C& ctx, J& job, std::function<void(J&&)> emit) {
-      { C::fanout() } -> std::convertible_to<std::size_t>;
-      { ctx.init(job, emit) } -> step_result;
-      { ctx.step(job, emit) } -> step_result;
-    };
+  concept context = job<J> && requires(C& ctx, J& job) {
+    { C::fanout() } -> std::convertible_to<std::size_t>;
+    { ctx.init(job) } -> step_result;
+    { ctx.step(job) } -> step_result;
+  };
 
   /**
    * @brief Receiver-style interface for handling job outcomes.
@@ -137,11 +135,15 @@ namespace vault::amac {
 
     /**
      * @brief Internal storage wrapper to manage job lifecycles.
+     *
+     * Provides manual move-assignment and destruction logic to ensure
+     * non-trivially relocatable jobs do not suffer from double-free errors.
      */
     template <typename J> class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
 
     public:
+      // Expose the underlying value type for introspection by scope_guard
       using value_type = J;
 
       [[nodiscard]] job_slot() = default;
@@ -149,6 +151,7 @@ namespace vault::amac {
       job_slot(job_slot const&)            = delete;
       job_slot& operator=(job_slot const&) = delete;
 
+      // Proxies move-assignment to the underlying object
       job_slot& operator=(job_slot&& other)
       {
         if (this != std::addressof(other)) {
@@ -185,6 +188,9 @@ namespace vault::amac {
 
     // --- Safety Helpers ---
 
+    /**
+     * @brief Handles exceptions thrown by the reporter during failure handling.
+     */
     template <typename Reporter, typename Job>
     static void safe_fail(Reporter& report, Job&& job, std::exception_ptr e)
     {
@@ -201,6 +207,10 @@ namespace vault::amac {
       }
     }
 
+    /**
+     * @brief Wraps completion reporting.
+     * If completion reporting fails, it escalates to safe_fail.
+     */
     template <typename Reporter, typename Job>
     static void safe_complete(Reporter& report, Job&& job)
     {
@@ -213,8 +223,9 @@ namespace vault::amac {
 
     /**
      * @brief Executes a job step safely.
-     * @return true if the job is active (prefetch issued).
+     * * @return true if the job is active (prefetch issued).
      * @return false if the job is done (completed) or failed (exception).
+     * * If false is returned, the job has been moved-from (passed to reporter).
      */
     template <typename Reporter, typename Job, typename Action>
     static bool try_execute(Reporter& report, Job& job, Action&& action)
@@ -234,6 +245,13 @@ namespace vault::amac {
     }
 
   public:
+    /**
+     * @brief Executes a batch of jobs using the AMAC algorithm.
+     *
+     * @param ctx The context defining the behavior and shared state.
+     * @param ijobs The input range of job states.
+     * @param report A callable adhering to the reporter concept.
+     */
     template <typename Context,
       std::ranges::input_range                             Jobs,
       concepts::reporter<std::ranges::range_value_t<Jobs>> Reporter>
@@ -253,32 +271,26 @@ namespace vault::amac {
 
       auto jobs = std::array<slot_t, JOB_COUNT>{};
 
-      std::vector<job_t> backlog;
-
-      auto emit = [&](
-                    job_t&& spawned) { backlog.push_back(std::move(spawned)); };
-
+      // RAII management range
       auto jobs_first = jobs.begin();
       auto jobs_last  = jobs.begin();
 
       scope_guard<iter_t> guard{jobs_first, jobs_last};
 
-      // Helper to activate a new job
-      // Takes job by forwarding reference.
-      // Callers must ensure they std::move() if passing a value intended to be
-      // moved.
+      // Helper to activate a new job from input
       auto activate_job = [&](auto&& job, auto slot_iter) {
-        if (try_execute(report, job, [&] { return ctx.init(job, emit); })) {
+        if (try_execute(report, job, [&] { return ctx.init(job); })) {
+          // Success: Job is active. Move into slot.
           if (slot_iter < jobs_last) {
             *slot_iter->get() = std::forward<decltype(job)>(job);
           } else {
             std::construct_at(
               slot_iter->get(), std::forward<decltype(job)>(job));
-            ++jobs_last;
+            ++jobs_last; // Extend RAII scope
           }
           return true;
         }
-        return false;
+        return false; // Job finished/failed immediately
       };
 
       // 1. Setup Phase
@@ -286,51 +298,35 @@ namespace vault::amac {
         activate_job(*ijobs_cursor++, jobs_last);
       }
 
+      // Predicate for std::remove_if
+      // try_execute handles exceptions, completion reporting, and prefetching.
+      // We just need to invert the result (active=true -> remove=false).
       auto is_inactive = [&](auto& slot) {
         return !try_execute(
-          report, *slot.get(), [&] { return ctx.step(*slot.get(), emit); });
+          report, *slot.get(), [&] { return ctx.step(*slot.get()); });
       };
 
+      // Working set boundary
       auto active_end = jobs_last;
 
       // 2. Execution/Refill Phase
       active_end = std::remove_if(jobs_first, active_end, is_inactive);
 
       do {
-        // Refill Logic: Priority Queue (Backlog > Input)
-        while (active_end != jobs.end()) {
-          if (!backlog.empty()) {
-            // 1. Service Backlog
-            // Explicitly move from the backlog to satisfy move-only types
-            if (activate_job(std::move(backlog.back()), active_end)) {
-              ++active_end;
-            }
-            backlog.pop_back();
-          } else if (ijobs_cursor != ijobs_last) {
-            // 2. Service Input Range
-            if (activate_job(*ijobs_cursor++, active_end)) {
-              ++active_end;
-            }
-          } else {
-            break;
+        // Refill logic
+        while (active_end != jobs.end() && ijobs_cursor != ijobs_last) {
+          if (activate_job(*ijobs_cursor++, active_end)) {
+            ++active_end;
           }
         }
 
         active_end = std::remove_if(jobs_first, active_end, is_inactive);
 
-      } while (ijobs_cursor != ijobs_last || !backlog.empty());
+      } while (ijobs_cursor != ijobs_last);
 
       // 3. Drain Phase
       while (active_end != jobs_first) {
         active_end = std::remove_if(jobs_first, active_end, is_inactive);
-
-        // Refill from backlog ONLY (input is exhausted)
-        while (active_end != jobs.end() && !backlog.empty()) {
-          if (activate_job(std::move(backlog.back()), active_end)) {
-            ++active_end;
-          }
-          backlog.pop_back();
-        }
       }
 
       // Cleanup handled by scope_guard

@@ -3,7 +3,6 @@
 
 #include <vault/algorithm/amac.hpp>
 
-#include <algorithm>
 #include <random>
 #include <ranges>
 #include <stdexcept>
@@ -29,19 +28,21 @@ template <typename J> struct TestReceiver {
   }
 };
 
-// --- Global Test State Definitions ---
+// --- Test Job Definitions ---
 
-// 1. Countdown Job
+// Pure State
 struct CountdownState {
   int m_counter;
 };
 
+// Behavior / Context
 struct CountdownContext {
   [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
 
-  template <typename Emit>
-  [[nodiscard]] vault::amac::step_result<1> init(
-    CountdownState& state, Emit&&) const
+  // Returns a tuple-like result of 1 pointer.
+  // If counter is 0, returns {nullptr} (Finished).
+  // Otherwise, decrements and returns {this} (Active).
+  [[nodiscard]] vault::amac::step_result<1> init(CountdownState& state) const
   {
     if (state.m_counter <= 0) {
       return {nullptr};
@@ -50,190 +51,25 @@ struct CountdownContext {
     return {&state};
   }
 
-  template <typename Emit>
-  [[nodiscard]] vault::amac::step_result<1> step(
-    CountdownState& state, Emit&& e) const
+  [[nodiscard]] vault::amac::step_result<1> step(CountdownState& state) const
   {
-    return init(state, e);
+    return init(state);
   }
 };
 
+// Verify Concept Compliance
 static_assert(vault::amac::concepts::context<CountdownContext, CountdownState>);
-
-// 2. Forking Job
-struct ForkState {
-  int id;
-  int count;
-  int depth;
-};
-
-struct ForkContext {
-  static constexpr uint64_t fanout() { return 1; }
-
-  template <typename Emit>
-  vault::amac::step_result<1> init(ForkState& s, Emit&&)
-  {
-    if (s.count <= 0) {
-      return {nullptr};
-    }
-    s.count--;
-    return {&s};
-  }
-
-  template <typename Emit>
-  vault::amac::step_result<1> step(ForkState& s, Emit&& emit)
-  {
-    if (s.count == 1 && s.depth < 1) { // Split at count 1, only if depth 0
-      // Emit two children
-      emit(ForkState{s.id * 10 + 1, 2, s.depth + 1});
-      emit(ForkState{s.id * 10 + 2, 2, s.depth + 1});
-    }
-
-    if (s.count <= 0) {
-      return {nullptr};
-    }
-    s.count--;
-    return {&s};
-  }
-};
-
-// 3. Resource Job
-struct ResourceState {
-  std::unique_ptr<int> m_resource;
-  int                  m_steps_remaining;
-
-  ResourceState(int id, int steps)
-      : m_resource(std::make_unique<int>(id))
-      , m_steps_remaining(steps)
-  {}
-
-  ResourceState(ResourceState&&)                 = default;
-  ResourceState& operator=(ResourceState&&)      = default;
-  ResourceState(const ResourceState&)            = delete;
-  ResourceState& operator=(const ResourceState&) = delete;
-};
-
-struct ResourceContext {
-  [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
-
-  template <typename Emit>
-  [[nodiscard]] vault::amac::step_result<1> init(
-    ResourceState& state, Emit&&) const
-  {
-    if (state.m_steps_remaining <= 0) {
-      return {nullptr};
-    }
-    state.m_steps_remaining--;
-    return {state.m_resource.get()};
-  }
-
-  template <typename Emit>
-  [[nodiscard]] vault::amac::step_result<1> step(
-    ResourceState& state, Emit&& e) const
-  {
-    return init(state, e);
-  }
-};
-
-// 4. Fragile Job
-struct FragileState {
-  int  id;
-  bool should_throw;
-};
-
-struct FragileContext {
-  static constexpr uint64_t fanout() { return 1; }
-
-  template <typename Emit>
-  vault::amac::step_result<1> init(FragileState& s, Emit&&)
-  {
-    if (s.should_throw) {
-      throw std::runtime_error("Boom");
-    }
-    return {nullptr};
-  }
-
-  template <typename Emit>
-  vault::amac::step_result<1> step(FragileState&, Emit&&)
-  {
-    return {nullptr};
-  }
-};
-
-// 5. Throwing/Policy Job
-struct ThrowingReporterState {
-  int id;
-};
-
-struct ThrowingReporterContext {
-  static constexpr uint64_t fanout() { return 1; }
-
-  template <typename Emit>
-  vault::amac::step_result<1> init(ThrowingReporterState&, Emit&&)
-  {
-    return {nullptr};
-  }
-
-  template <typename Emit>
-  vault::amac::step_result<1> step(ThrowingReporterState&, Emit&&)
-  {
-    return {nullptr};
-  }
-};
-
-template <typename J> struct EvilReceiver {
-  void on_completion(J&&) { throw std::runtime_error("Double Fault"); }
-
-  void on_failure(J&&, std::exception_ptr)
-  {
-    throw std::runtime_error("Double Fault");
-  }
-};
-
-// 6. Tracked Job (RAII)
-static int g_destroyed_count = 0;
-
-struct TrackedState {
-  int id;
-
-  ~TrackedState() { g_destroyed_count++; }
-
-  TrackedState(int i)
-      : id(i)
-  {}
-
-  TrackedState(TrackedState&&)                 = default;
-  TrackedState& operator=(TrackedState&&)      = default;
-  TrackedState(const TrackedState&)            = delete;
-  TrackedState& operator=(const TrackedState&) = delete;
-};
-
-struct TriggerContext {
-  static constexpr uint64_t fanout() { return 1; }
-
-  template <typename Emit>
-  vault::amac::step_result<1> init(TrackedState& s, Emit&&)
-  {
-    if (s.id == 1) {
-      throw std::runtime_error("Trigger");
-    }
-    return {&s};
-  }
-
-  template <typename Emit>
-  vault::amac::step_result<1> step(TrackedState&, Emit&&)
-  {
-    return {nullptr};
-  }
-};
 
 // --- Test Suite ---
 
 TEST_CASE("AMAC Executor: Countdown Integrity", "[amac][executor]")
 {
-  const size_t num_jobs        = GENERATE(0, 1, 15, 16, 17, 100, 1000);
-  const int    max_start_count = GENERATE(0, 1, 5, 10);
+  // Test parameters
+  const size_t num_jobs = GENERATE(0, 1, 15, 16, 17, 100, 1000);
+  const int    max_start_count =
+    GENERATE(0, 1, 5, 10); // 0 ensures we test immediate completion
 
+  // 1. Setup Input (Needles)
   std::vector<int> start_counts;
   start_counts.reserve(num_jobs);
 
@@ -244,50 +80,29 @@ TEST_CASE("AMAC Executor: Countdown Integrity", "[amac][executor]")
     start_counts.push_back(dist(rng));
   }
 
+  // 2. Setup Reporting
   size_t reported_count = 0;
 
   TestReceiver<CountdownState> reporter;
   reporter.completion_handler = [&](CountdownState&& job) {
     reported_count++;
+    // CRITICAL CHECK: Job must be finished (counter == 0)
     REQUIRE(job.m_counter == 0);
   };
   reporter.failure_handler = [&](CountdownState&&, std::exception_ptr) {
     FAIL("Should not have failed");
   };
 
+  // 3. Create Jobs View
   auto jobs = start_counts
     | std::views::transform([](int count) { return CountdownState{count}; });
 
+  // 4. Run Executor
   CountdownContext ctx;
   vault::amac::executor<16>(ctx, jobs, reporter);
 
+  // 5. Verification
   CHECK(reported_count == num_jobs);
-}
-
-TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
-{
-  // Input: One job {id:1, count:3, depth:0}
-  // Execution:
-  // 3 -> 2 -> 1 (Split -> emits 11, 12) -> 0 (Done)
-  // 11 (count 2) -> 1 -> 0 (Done)
-  // 12 (count 2) -> 1 -> 0 (Done)
-  // Total completions: 3.
-
-  std::vector<ForkState> inputs = {{1, 3, 0}};
-  std::vector<int>       completed_ids;
-
-  TestReceiver<ForkState> reporter;
-  reporter.completion_handler = [&](ForkState&& s) {
-    completed_ids.push_back(s.id);
-  };
-
-  ForkContext ctx;
-  vault::amac::executor<16>(ctx, inputs, reporter);
-
-  CHECK(completed_ids.size() == 3);
-
-  std::ranges::sort(completed_ids);
-  CHECK(completed_ids == std::vector<int>{1, 11, 12});
 }
 
 TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]")
@@ -359,6 +174,42 @@ TEST_CASE(
 TEST_CASE(
   "AMAC Executor: Double Free Regression Test", "[amac][resource][asan]")
 {
+  // Pure State holding a move-only resource
+  struct ResourceState {
+    std::unique_ptr<int> m_resource;
+    int                  m_steps_remaining;
+
+    // Explicitly movable, non-copyable
+    ResourceState(int id, int steps)
+        : m_resource(std::make_unique<int>(id))
+        , m_steps_remaining(steps)
+    {}
+
+    ResourceState(ResourceState&&)                 = default;
+    ResourceState& operator=(ResourceState&&)      = default;
+    ResourceState(const ResourceState&)            = delete;
+    ResourceState& operator=(const ResourceState&) = delete;
+  };
+
+  // Behavior
+  struct ResourceContext {
+    [[nodiscard]] static constexpr uint64_t fanout() { return 1uz; }
+
+    [[nodiscard]] vault::amac::step_result<1> init(ResourceState& state) const
+    {
+      if (state.m_steps_remaining <= 0) {
+        return {nullptr};
+      }
+      state.m_steps_remaining--;
+      return {state.m_resource.get()};
+    }
+
+    [[nodiscard]] vault::amac::step_result<1> step(ResourceState& state) const
+    {
+      return init(state);
+    }
+  };
+
   const size_t                     num_jobs = 32;
   std::vector<std::pair<int, int>> needles;
   needles.reserve(num_jobs);
@@ -389,7 +240,29 @@ TEST_CASE(
 
 TEST_CASE("AMAC Executor: Error Channel", "[amac][error]")
 {
-  std::vector<FragileState> inputs = {{1, false}, {2, true}, {3, false}};
+  // A job state with an ID to verify which one failed
+  struct FragileState {
+    int  id;
+    bool should_throw;
+  };
+
+  struct FragileContext {
+    static constexpr uint64_t fanout() { return 1; }
+
+    vault::amac::step_result<1> init(FragileState& s)
+    {
+      if (s.should_throw) {
+        throw std::runtime_error("Boom");
+      }
+      return {nullptr}; // Finish immediately
+    }
+
+    vault::amac::step_result<1> step(FragileState&) { return {nullptr}; }
+  };
+
+  std::vector<FragileState> inputs = {{1, false},
+    {2, true}, // This will explode
+    {3, false}};
 
   size_t success_count = 0;
   size_t fail_count    = 0;
@@ -417,6 +290,29 @@ TEST_CASE("AMAC Executor: Error Channel", "[amac][error]")
   CHECK(fail_count == 1);
 }
 
+// --- Policy Test Definitions ---
+
+struct ThrowingReporterState {
+  int id;
+};
+
+struct ThrowingReporterContext {
+  static constexpr uint64_t fanout() { return 1; }
+
+  vault::amac::step_result<1> init(ThrowingReporterState&) { return {nullptr}; }
+
+  vault::amac::step_result<1> step(ThrowingReporterState&) { return {nullptr}; }
+};
+
+template <typename J> struct EvilReceiver {
+  void on_completion(J&&) { throw std::runtime_error("Double Fault"); }
+
+  void on_failure(J&&, std::exception_ptr)
+  {
+    throw std::runtime_error("Double Fault");
+  }
+};
+
 TEST_CASE("AMAC Executor: Double Fault Policies", "[amac][policy]")
 {
   std::vector<ThrowingReporterState>  inputs = {{1}};
@@ -425,6 +321,7 @@ TEST_CASE("AMAC Executor: Double Fault Policies", "[amac][policy]")
 
   SECTION("Policy: Terminate (Default)")
   {
+    // Compile-time check for default type
     STATIC_REQUIRE(std::is_same_v<decltype(vault::amac::executor<1>),
       const vault::amac::executor_fn<1,
         vault::amac::double_fault_policy::terminate>>);
@@ -448,23 +345,66 @@ TEST_CASE("AMAC Executor: Double Fault Policies", "[amac][policy]")
 
 TEST_CASE("AMAC Executor: RAII Cleanup on Rethrow", "[amac][raii]")
 {
+  static int destroyed_count = 0;
+
+  struct TrackedState {
+    int id;
+
+    ~TrackedState() { destroyed_count++; }
+
+    TrackedState(int i)
+        : id(i)
+    {}
+
+    TrackedState(TrackedState&&)                 = default;
+    TrackedState& operator=(TrackedState&&)      = default;
+    TrackedState(const TrackedState&)            = delete;
+    TrackedState& operator=(const TrackedState&) = delete;
+  };
+
+  struct TriggerContext {
+    static constexpr uint64_t fanout() { return 1; }
+
+    // Job 1 fails and triggers double fault. Job 2 is active.
+    vault::amac::step_result<1> init(TrackedState& s)
+    {
+      if (s.id == 1) {
+        throw std::runtime_error("Trigger");
+      }
+      return {&s};
+    }
+
+    vault::amac::step_result<1> step(TrackedState&) { return {nullptr}; }
+  };
+
   std::vector<TrackedState> inputs;
   inputs.reserve(2);
+  // Order matters:
+  // 1. Job 2 (Safe) enters first and occupies a slot.
+  // 2. Job 1 (Trigger) enters second, throws, and causes the executor to
+  // unwind.
   inputs.emplace_back(2);
   inputs.emplace_back(1);
 
+  // Explicitly transform input vector (lvalues) into rvalues using a view
   auto rvalue_inputs = inputs
     | std::views::transform(
       [](TrackedState& s) -> TrackedState&& { return std::move(s); });
 
+  // EvilReceiver throws on failure
   EvilReceiver<TrackedState> reporter;
   TriggerContext             ctx;
 
-  g_destroyed_count = 0;
+  // Reset count to ignore vector setup noise
+  destroyed_count = 0;
 
   REQUIRE_THROWS(
     (vault::amac::executor<4, vault::amac::double_fault_policy::rethrow>(
       ctx, rvalue_inputs, reporter)));
 
-  CHECK(g_destroyed_count == 1);
+  // We expect EXACTLY 1 destruction here:
+  // Job 2 was active in the slot and should be destroyed by the scope_guard.
+  // Job 1 threw before entering a slot, so the guard doesn't see it.
+  // The vector 'inputs' is still alive, so its destructors haven't run yet.
+  CHECK(destroyed_count == 1);
 }
