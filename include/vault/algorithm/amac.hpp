@@ -23,7 +23,6 @@
 
 /**
  * @defgroup vault_amac Asynchronous Memory Access Coordinator (AMAC)
- * @brief A composable, exception-safe software pipelining engine.
  */
 
 namespace vault::amac::concepts {
@@ -37,9 +36,6 @@ namespace vault::amac::concepts {
   template <typename J>
   concept job = std::movable<J>;
 
-  /**
-   * @brief Context concept.
-   */
   template <typename C, typename J>
   concept context = job<J> && requires(C& ctx, J& job) {
     { C::fanout() } -> std::convertible_to<std::size_t>;
@@ -47,9 +43,6 @@ namespace vault::amac::concepts {
     { ctx.step(job, [](auto&&){}) } -> step_result;
   };
 
-  /**
-   * @brief Reporter concept.
-   */
   template <typename R, typename J>
   concept reporter = job<J> && requires(R& r, J&& job, std::exception_ptr e) {
     { r.on_completion(std::move(job)) };
@@ -198,7 +191,6 @@ namespace vault::amac {
             typename ProtoAllocator = std::allocator<std::byte>>
   class executor_fn {
     
-    // -- Safety Shim --
     template <typename Reporter>
     struct safety_shim {
         Reporter& report;
@@ -242,8 +234,6 @@ namespace vault::amac {
         }
     };
 
-    // -- Internal Storage --
-    
     template <typename J>
     class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
@@ -281,16 +271,17 @@ namespace vault::amac {
         }
     };
 
-    // -- Emitter Functor --
     template <typename BacklogType>
     struct emitter {
         using value_type = typename BacklogType::value_type;
         BacklogType& target;
 
+        // 1. Single Item
         void operator()(value_type&& j) const {
             target.push_back(std::move(j));
         }
 
+        // 2. Initializer List (Copyable types only)
         void operator()(std::initializer_list<value_type> list) const 
         requires std::copy_constructible<value_type> 
         {
@@ -300,6 +291,7 @@ namespace vault::amac {
             }
         }
 
+        // 3. Range
         template <std::ranges::input_range R = std::initializer_list<value_type>>
         requires std::convertible_to<std::ranges::range_reference_t<R>, value_type>
         void operator()(R&& range) const {
@@ -322,12 +314,12 @@ namespace vault::amac {
       using job_t = std::ranges::range_value_t<Jobs>;
       using slot_t = job_slot<job_t>;
       static constexpr auto const PIPELINE_SIZE = (TotalFanout + Context::fanout() - 1) / Context::fanout();
+      using array_t = std::array<slot_t, PIPELINE_SIZE>;
       
-      // -- Setup --
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
       safety_shim<Reporter> safety{reporter};
       
-      std::array<slot_t, PIPELINE_SIZE> pipeline;
+      auto pipeline = array_t{};
       
       using JobAllocator = typename std::allocator_traits<ProtoAllocator>::template rebind_alloc<job_t>;
       using BacklogVector = std::vector<job_t, JobAllocator>;
@@ -338,81 +330,54 @@ namespace vault::amac {
       auto initialized_end = pipeline.begin();
       auto active_end = pipeline.begin();
 
-      // RAII for pipeline [begin, initialized_end)
       auto pipeline_begin = pipeline.begin();
       scope_guard guard{pipeline_begin, initialized_end};
 
-      // -- Linearized Helpers --
-
-      // 1. Source Abstraction: Prioritizes Backlog > Input
-      // Takes a consumer callback. Returns true if work was provided.
-      auto fetch_next_job = [&](auto&& consume) -> bool {
-          if (!backlog.empty()) {
-              consume(std::move(backlog.back()));
-              backlog.pop_back();
-              return true;
-          }
-          if (ijobs_cursor != ijobs_last) {
-              consume(std::move(*ijobs_cursor));
-              ++ijobs_cursor;
-              return true;
-          }
-          return false;
-      };
-
-      // 2. Activation Logic: Tries to init job and places it in the slot
-      // Handles recycling vs extending the RAII range.
-      auto activate_job = [&](job_t&& job, auto slot) -> bool {
-          // If init fails/completes, try_execute handles reporting.
+      auto activate_into_slot = [&](job_t&& job, auto slot) -> bool {
           if (safety.try_execute(job, [&]{ return ctx.init(job, emit); })) {
-              // Job is active: place in slot
               if (slot < initialized_end) {
-                  *slot->get() = std::move(job); // Recycle
+                  *slot->get() = std::move(job);
               } else {
-                  std::construct_at(slot->get(), std::move(job)); // Extend
+                  std::construct_at(slot->get(), std::move(job));
                   ++initialized_end;
               }
-              return true; 
+              return true;
           }
-          return false; // Job finished immediately
+          return false; 
       };
 
-      // 3. Step Predicate (for remove_if)
       auto is_inactive = [&](auto& slot) {
           return !safety.try_execute(*slot.get(), [&]{ return ctx.step(*slot.get(), emit); });
       };
       
-      // -- Unified Control Loop --
-      
       while (true) {
-          // A. Greedy Refill Phase
-          // "While we have space, and can fetch a job, try to activate it."
           while (active_end != pipeline.end()) {
-              bool source_has_work = fetch_next_job([&](job_t&& job) {
-                  if (activate_job(std::move(job), active_end)) {
-                      ++active_end;
-                  }
-                  // If activate_job returns false, the job finished immediately.
-                  // We stay on the current slot index and loop again to fill it.
-              });
-
-              if (!source_has_work) break;
+              if (!backlog.empty()) {
+                   if (activate_into_slot(std::move(backlog.back()), active_end)) {
+                       ++active_end;
+                   }
+                   backlog.pop_back();
+              } 
+              else if (ijobs_cursor != ijobs_last) {
+                   if (activate_into_slot(std::move(*ijobs_cursor), active_end)) {
+                       ++active_end;
+                   }
+                   ++ijobs_cursor;
+              } 
+              else {
+                   break;
+              }
           }
 
-          // B. Termination Phase
           if (active_end == pipeline.begin()) {
-              break; // Pipeline empty and no work sources
+              break;
           }
 
-          // C. Execution Phase
           active_end = std::remove_if(pipeline.begin(), active_end, is_inactive);
       }
     }
   };
 
-  /**
-   * @brief Global instance of the executor.
-   */
   template <uint8_t TotalFanout = 16, 
             double_fault_policy FailurePolicy = double_fault_policy::terminate,
             typename Allocator = std::allocator<std::byte>>
