@@ -237,6 +237,8 @@ namespace vault::amac {
         }
       }
 
+      // Checks noexcept specifier of the Action to optionally elide the
+      // try/catch block
       template <typename Job, typename Action>
       bool try_execute(Job& job, Action&& action)
       {
@@ -244,6 +246,7 @@ namespace vault::amac {
           executor_fn::prefetch(result);
           return true;
         };
+
         auto on_done = [&]() {
           complete(std::move(job));
           return false;
@@ -353,21 +356,13 @@ namespace vault::amac {
       using slot_t = job_slot<job_t>;
       static constexpr auto const PIPELINE_SIZE =
         (TotalFanout + Context::fanout() - 1) / Context::fanout();
+      using array_t = std::array<slot_t, PIPELINE_SIZE>;
 
-      // -- Setup --
+      auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
       safety_shim<Reporter> safety{reporter};
 
-      // 1. Pipeline State
-      using array_t = std::array<slot_t, PIPELINE_SIZE>;
-      array_t pipeline;
+      auto pipeline = array_t{};
 
-      auto initialized_end = pipeline.begin();
-      auto active_end      = pipeline.begin();
-      auto pipeline_begin  = pipeline.begin();
-
-      scope_guard guard{pipeline_begin, initialized_end};
-
-      // 2. Work Queue State
       using JobAllocator = typename std::allocator_traits<
         ProtoAllocator>::template rebind_alloc<job_t>;
       using BacklogVector = std::vector<job_t, JobAllocator>;
@@ -375,80 +370,65 @@ namespace vault::amac {
       BacklogVector          backlog(proto_alloc);
       emitter<BacklogVector> emit{backlog};
 
-      auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
+      auto initialized_end = pipeline.begin();
+      auto active_end      = pipeline.begin();
 
-      // -- Linearized Helpers --
+      auto        pipeline_begin = pipeline.begin();
+      scope_guard guard{pipeline_begin, initialized_end};
 
-      auto pipeline_full  = [&] { return active_end == pipeline.end(); };
-      auto pipeline_empty = [&] { return active_end == pipeline.begin(); };
-
-      // Polls for work from Backlog then Input
-      auto fetch_next_job = [&](auto&& consume) -> bool {
-        if (!backlog.empty()) {
-          consume(std::move(backlog.back()));
-          backlog.pop_back();
-          return true;
-        }
-        if (ijobs_cursor != ijobs_last) {
-          consume(std::move(*ijobs_cursor));
-          ++ijobs_cursor;
+      auto activate_into_slot = [&](job_t&& job, auto slot) -> bool {
+        // Explicitly propagate noexcept specification from ctx.init to the
+        // lambda
+        if (safety.try_execute(
+              job, [&]() noexcept(noexcept(ctx.init(job, emit))) {
+                return ctx.init(job, emit);
+              })) {
+          if (slot < initialized_end) {
+            *slot->get() = std::move(job);
+          } else {
+            std::construct_at(slot->get(), std::move(job));
+            ++initialized_end;
+          }
           return true;
         }
         return false;
       };
 
-      // Tries to init a job and admit it to the pipeline
-      auto activate_job = [&](job_t&& job) {
-        auto action = [&]() noexcept(noexcept(ctx.init(job, emit))) {
-          return ctx.init(job, emit);
-        };
-
-        if (safety.try_execute(job, action)) {
-          // Job is active: place in slot
-          if (active_end < initialized_end) {
-            *active_end->get() = std::move(job); // Recycle
-          } else {
-            std::construct_at(active_end->get(), std::move(job)); // Extend
-            ++initialized_end;
-          }
-          ++active_end;
-        }
+      auto is_inactive = [&](auto& slot) {
+        // Explicitly propagate noexcept specification from ctx.step to the
+        // lambda
+        return !safety.try_execute(
+          *slot.get(), [&]() noexcept(noexcept(ctx.step(*slot.get(), emit))) {
+            return ctx.step(*slot.get(), emit);
+          });
       };
-
-      // Predicate for std::remove_if
-      auto is_inactive = [&](slot_t& slot) {
-        auto& job    = *slot.get();
-        auto  action = [&]() noexcept(noexcept(ctx.step(job, emit))) {
-          return ctx.step(job, emit);
-        };
-        return !safety.try_execute(job, action);
-      };
-
-      // -- Unified Control Loop --
 
       while (true) {
-        // A. Greedy Refill Phase
-        while (!pipeline_full()) {
-          bool source_has_work = fetch_next_job(activate_job);
-          if (!source_has_work) {
+        while (active_end != pipeline.end()) {
+          if (!backlog.empty()) {
+            if (activate_into_slot(std::move(backlog.back()), active_end)) {
+              ++active_end;
+            }
+            backlog.pop_back();
+          } else if (ijobs_cursor != ijobs_last) {
+            if (activate_into_slot(std::move(*ijobs_cursor), active_end)) {
+              ++active_end;
+            }
+            ++ijobs_cursor;
+          } else {
             break;
           }
         }
 
-        // B. Termination Phase
-        if (pipeline_empty()) {
+        if (active_end == pipeline.begin()) {
           break;
         }
 
-        // C. Execution Phase
-        active_end = std::remove_if(pipeline_begin, active_end, is_inactive);
+        active_end = std::remove_if(pipeline.begin(), active_end, is_inactive);
       }
     }
   };
 
-  /**
-   * @brief Global instance of the executor.
-   */
   template <uint8_t     TotalFanout   = 16,
     double_fault_policy FailurePolicy = double_fault_policy::terminate,
     typename Allocator                = std::allocator<std::byte>>
