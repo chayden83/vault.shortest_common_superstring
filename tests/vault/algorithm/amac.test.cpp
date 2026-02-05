@@ -4,6 +4,7 @@
 #include <vault/algorithm/amac.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <random>
 #include <ranges>
@@ -31,7 +32,7 @@ template <typename J> struct TestReceiver {
   }
 };
 
-// --- Custom Allocator for Testing ---
+// --- Custom Allocator ---
 template <typename T> struct CountingAllocator {
   using value_type = T;
   int* alloc_counter;
@@ -110,6 +111,7 @@ struct ForkState {
 
 using ForkJob = ForkState;
 
+// Standard ForkContext (Generic, uses single emit)
 struct ForkContext {
   using job_t = ForkJob;
 
@@ -131,6 +133,39 @@ struct ForkContext {
     if (s.count == 1 && s.depth < 1) {
       emit(ForkState{s.id * 10 + 1, 2, s.depth + 1});
       emit(ForkState{s.id * 10 + 2, 2, s.depth + 1});
+    }
+
+    if (s.count <= 0) {
+      return {nullptr, nullptr};
+    }
+    s.count--;
+    return {&s, &s};
+  }
+};
+
+// Batch ForkContext (Specifically tests initializer_list syntax)
+struct BatchForkContext {
+  using job_t = ForkJob;
+
+  static constexpr uint64_t fanout() { return 2; }
+
+  template <typename Emit>
+  vault::amac::step_result<2> init(ForkState& s, Emit&&)
+  {
+    if (s.count <= 0) {
+      return {nullptr, nullptr};
+    }
+    s.count--;
+    return {&s, &s};
+  }
+
+  template <typename Emit>
+  vault::amac::step_result<2> step(ForkState& s, Emit&& emit)
+  {
+    if (s.count == 1 && s.depth < 1) {
+      // Explicitly use initializer list to test that overload
+      emit({ForkState{s.id * 10 + 1, 2, s.depth + 1},
+        ForkState{s.id * 10 + 2, 2, s.depth + 1}});
     }
 
     if (s.count <= 0) {
@@ -179,6 +214,43 @@ struct ResourceContext {
     ResourceState& state, Emit&& e) const
   {
     return init(state, e);
+  }
+};
+
+struct MoveBatchContext {
+  using job_t = ResourceJob;
+
+  static constexpr uint64_t fanout() { return 1; }
+
+  template <typename Emit>
+  vault::amac::step_result<1> init(ResourceJob& s, Emit&&)
+  {
+    if (s.m_steps_remaining == 0) {
+      return {nullptr};
+    }
+    s.m_steps_remaining--;
+    return {s.m_resource.get()};
+  }
+
+  template <typename Emit>
+  vault::amac::step_result<1> step(ResourceJob& s, Emit&& emit)
+  {
+    if (s.m_steps_remaining == 1) {
+      std::vector<ResourceJob> batch;
+      batch.reserve(2);
+      batch.emplace_back(s.m_steps_remaining * 100 + 1, 0);
+      batch.emplace_back(s.m_steps_remaining * 100 + 2, 0);
+
+      // Explicit move iterators for move-only types
+      emit(std::ranges::subrange(std::make_move_iterator(batch.begin()),
+        std::make_move_iterator(batch.end())));
+    }
+
+    if (s.m_steps_remaining == 0) {
+      return {nullptr};
+    }
+    s.m_steps_remaining--;
+    return {s.m_resource.get()};
   }
 };
 
@@ -320,8 +392,9 @@ TEST_CASE("AMAC Executor: Countdown Integrity", "[amac][executor]")
   CHECK(reported_count == num_jobs);
 }
 
-TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
+TEST_CASE("AMAC Executor: Dynamic Forking (Batch)", "[amac][fork]")
 {
+  // Uses BatchForkContext to test initializer_list syntax on copyable types
   std::vector<ForkState> inputs = {{1, 3, 0}};
   std::vector<int>       completed_ids;
 
@@ -330,13 +403,35 @@ TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
     completed_ids.push_back(s.id);
   };
 
-  ForkContext ctx;
+  BatchForkContext ctx;
   vault::amac::executor<16>(ctx, inputs, reporter);
 
+  // 3 -> 2 -> 1 (Emits {11, 12}) -> 0
+  // 11 -> ... -> 0
+  // 12 -> ... -> 0
   CHECK(completed_ids.size() == 3);
 
   std::ranges::sort(completed_ids);
   CHECK(completed_ids == std::vector<int>{1, 11, 12});
+}
+
+TEST_CASE("AMAC Executor: Move-Only Batch Emission", "[amac][fork][move]")
+{
+  std::vector<ResourceJob> inputs;
+  inputs.emplace_back(100, 2);
+
+  std::vector<int>          completed_ids;
+  TestReceiver<ResourceJob> reporter;
+  reporter.completion_handler = [&](ResourceJob&& s) {
+    completed_ids.push_back(*s.m_resource);
+  };
+
+  MoveBatchContext ctx;
+  vault::amac::executor<16>(ctx, inputs, reporter);
+
+  CHECK(completed_ids.size() == 3);
+  std::ranges::sort(completed_ids);
+  CHECK(completed_ids == std::vector<int>{100, 101, 102});
 }
 
 TEST_CASE("AMAC Executor: Custom Allocator", "[amac][allocator]")
@@ -344,8 +439,6 @@ TEST_CASE("AMAC Executor: Custom Allocator", "[amac][allocator]")
   int                          alloc_count = 0;
   CountingAllocator<std::byte> alloc(&alloc_count);
 
-  // We use Forking, because normal execution doesn't use the backlog (no
-  // allocations).
   std::vector<ForkState> inputs = {{1, 3, 0}};
 
   TestReceiver<ForkState> reporter;
@@ -353,13 +446,10 @@ TEST_CASE("AMAC Executor: Custom Allocator", "[amac][allocator]")
 
   ForkContext ctx;
 
-  // Explicitly specialize with the custom allocator type
   vault::amac::executor<16,
     vault::amac::double_fault_policy::terminate,
     CountingAllocator<std::byte>>(ctx, inputs, reporter, alloc);
 
-  // The executor should have allocated the backlog vector's storage.
-  // ForkState splits once into 2 children -> push_back triggers allocation.
   CHECK(alloc_count > 0);
 }
 
