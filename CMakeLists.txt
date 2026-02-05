@@ -18,14 +18,14 @@ include(cmake/vault-configure.cmake)
 
 add_subdirectory(src/vault/flat_map)
 add_subdirectory(src/vault/algorithm)
-#add_subdirectory(src/vault/frozen_vector)
-#add_subdirectory(src/vault/segmented_vector)
+add_subdirectory(src/vault/frozen_vector)
+add_subdirectory(src/vault/segmented_vector)
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
   add_subdirectory(tests/vault/flat_map)
   add_subdirectory(tests/vault/algorithm)
-#  add_subdirectory(tests/vault/frozen_vector)
-#  add_subdirectory(tests/vault/segmented_vector)
+  add_subdirectory(tests/vault/frozen_vector)
+  add_subdirectory(tests/vault/segmented_vector)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_EXAMPLES)
@@ -33,7 +33,7 @@ if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_EXAMPLES)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_BENCHMARKS)
-#  add_subdirectory(benchmarks)
+  add_subdirectory(benchmarks)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_CONFIG_FILE_PACKAGE)
