@@ -31,6 +31,7 @@ template <typename J> struct TestReceiver {
 
 // --- Global Test State Definitions ---
 
+// 1. Countdown Job
 struct CountdownState {
   int m_counter;
 };
@@ -59,6 +60,7 @@ struct CountdownContext {
 
 static_assert(vault::amac::concepts::context<CountdownContext, CountdownState>);
 
+// 2. Forking Job
 struct ForkState {
   int id;
   int count;
@@ -81,7 +83,8 @@ struct ForkContext {
   template <typename Emit>
   vault::amac::step_result<1> step(ForkState& s, Emit&& emit)
   {
-    if (s.count == 1 && s.depth < 1) {
+    if (s.count == 1 && s.depth < 1) { // Split at count 1, only if depth 0
+      // Emit two children
       emit(ForkState{s.id * 10 + 1, 2, s.depth + 1});
       emit(ForkState{s.id * 10 + 2, 2, s.depth + 1});
     }
@@ -94,6 +97,7 @@ struct ForkContext {
   }
 };
 
+// 3. Resource Job
 struct ResourceState {
   std::unique_ptr<int> m_resource;
   int                  m_steps_remaining;
@@ -131,6 +135,7 @@ struct ResourceContext {
   }
 };
 
+// 4. Fragile Job
 struct FragileState {
   int  id;
   bool should_throw;
@@ -155,6 +160,7 @@ struct FragileContext {
   }
 };
 
+// 5. Throwing/Policy Job
 struct ThrowingReporterState {
   int id;
 };
@@ -184,6 +190,7 @@ template <typename J> struct EvilReceiver {
   }
 };
 
+// 6. Tracked Job (RAII)
 static int g_destroyed_count = 0;
 
 struct TrackedState {
@@ -259,6 +266,13 @@ TEST_CASE("AMAC Executor: Countdown Integrity", "[amac][executor]")
 
 TEST_CASE("AMAC Executor: Dynamic Forking", "[amac][fork]")
 {
+  // Input: One job {id:1, count:3, depth:0}
+  // Execution:
+  // 3 -> 2 -> 1 (Split -> emits 11, 12) -> 0 (Done)
+  // 11 (count 2) -> 1 -> 0 (Done)
+  // 12 (count 2) -> 1 -> 0 (Done)
+  // Total completions: 3.
+
   std::vector<ForkState> inputs = {{1, 3, 0}};
   std::vector<int>       completed_ids;
 
