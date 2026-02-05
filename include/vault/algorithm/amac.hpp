@@ -173,7 +173,6 @@ namespace vault::amac {
 
       static constexpr auto const PIPELINE_SIZE =
         (TotalFanout + Context::fanout() - 1) / Context::fanout();
-
       using array_t = std::array<slot_t, PIPELINE_SIZE>;
       using iter_t  = typename array_t::iterator;
 
