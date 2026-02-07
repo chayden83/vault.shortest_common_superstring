@@ -13,6 +13,7 @@ FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
   flat_map
+  static_index
   frozen_vector
   fsst_dictionary
   segmented_vector
@@ -35,6 +36,7 @@ foreach(benchmark ${ALL_BENCHMARKS})
     benchmark::benchmark
     benchmark::benchmark_main
     vault::flat_map
+    vault::static_index
     vault::frozen_vector
     vault::segmented_vector
     vault::shortest_common_superstring

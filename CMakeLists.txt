@@ -16,8 +16,10 @@ include(GNUInstallDirs)
 
 include(cmake/vault-configure.cmake)
 
+add_subdirectory(pthash)
 add_subdirectory(src/vault/flat_map)
 add_subdirectory(src/vault/algorithm)
+add_subdirectory(src/vault/static_index)
 add_subdirectory(src/vault/frozen_vector)
 add_subdirectory(src/vault/segmented_vector)
 
