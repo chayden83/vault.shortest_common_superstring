@@ -75,17 +75,34 @@ TEST_CASE("StaticIndex: Core Lifecycle", "[static_index][core]")
   }
 }
 
-// TEST_CASE("StaticIndex: Trait System Integration", "[static_index][traits]")
-// {
-//   // Test that we can index a vector of integers directly
-//   std::vector<int> int_keys = {10, 20, 30, 40, 50};
+TEST_CASE(
+  "StaticIndex: Trait System Integration (Large N)", "[static_index][traits]")
+{
+  std::vector<int> int_keys;
+  int_keys.reserve(1000);
+  for (int i = 0; i < 1000; ++i) {
+    int_keys.push_back(i * 10);
+  }
 
-//   auto index = static_index_builder().add(int_keys).build();
+  auto index = static_index_builder().add(int_keys).build();
 
-//   REQUIRE(index.lookup(10).has_value());
-//   REQUIRE(index.lookup(50).has_value());
-//   REQUIRE_FALSE(index.lookup(99).has_value());
-// }
+  REQUIRE(index.lookup(10).has_value());
+  REQUIRE(index.lookup(500).has_value()); // 50 * 10
+  REQUIRE_FALSE(index.lookup(99).has_value());
+}
+
+TEST_CASE(
+  "StaticIndex: Trait System Integration (Small N)", "[static_index][traits]")
+{
+  // Test that we can index a vector of integers directly
+  std::vector<int> int_keys = {10, 20, 30, 40, 50};
+
+  auto index = static_index_builder().add(int_keys).build();
+
+  REQUIRE(index.lookup(10).has_value());
+  REQUIRE(index.lookup(50).has_value());
+  REQUIRE_FALSE(index.lookup(99).has_value());
+}
 
 TEST_CASE("StaticIndex: Move Semantics", "[static_index][memory]")
 {
