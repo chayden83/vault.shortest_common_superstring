@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 #include <xxhash.h>
 
@@ -17,37 +18,27 @@ namespace vault::containers {
     [[nodiscard]] static constexpr key_128 from_xxhash(
       XXH128_hash_t const& hash)
     {
-      return {hash.high64, hash.high64};
+      return {hash.low64, hash.high64};
     }
 
     bool operator==(const key_128& other) const = default;
   };
 
+  class static_index_builder;
+
   class static_index {
+    friend class static_index_builder;
+
   public:
-    static_index();
+    [[nodiscard]] static_index() = default;
+
+    [[nodiscard]] static_index(static_index&&) noexcept = default;
+    [[nodiscard]] static_index(const static_index&)     = default;
+
+    static_index& operator=(const static_index&)     = default;
+    static_index& operator=(static_index&&) noexcept = default;
+
     ~static_index();
-
-    // --- Generalized Build ---
-    // Constraints: T must satisfy the underlying_byte_sequences concept
-    template <concepts::underlying_byte_sequences T>
-    void build(const std::vector<T>& items)
-    {
-      if (items.empty()) {
-        clear();
-        return;
-      }
-      auto hash_cache = std::vector<key_128>{};
-      hash_cache.reserve(items.size());
-
-      auto* state = get_thread_local_state();
-
-      for (const auto& item : items) {
-        hash_cache.push_back(hash_object(item, state));
-      }
-
-      build_internal(hash_cache);
-    }
 
     // --- Generalized Lookup ---
     template <concepts::underlying_byte_sequences T>
@@ -57,18 +48,19 @@ namespace vault::containers {
     }
 
     [[nodiscard]] size_t memory_usage_bytes() const noexcept;
-    void                 clear();
+    [[nodiscard]] bool   empty() const noexcept;
 
   private:
     struct impl;
     std::shared_ptr<const impl> pimpl_;
 
-    // Internal helpers
-    void build_internal(const std::vector<key_128>& hashes);
+    // Private constructor used by the Builder
+    explicit static_index(std::shared_ptr<const impl> ptr);
 
     [[nodiscard]] std::optional<size_t> lookup_internal(
       key_128 key) const noexcept;
 
+    // --- Internal Hashing Helpers (Shared with Builder) ---
     [[nodiscard]] static XXH3_state_t* get_thread_local_state();
 
     template <typename T>
@@ -83,6 +75,29 @@ namespace vault::containers {
 
       return key_128::from_xxhash(XXH3_128bits_digest(state));
     }
+  };
+
+  struct static_index_builder {
+    template <typename Self, concepts::underlying_byte_sequences T>
+    Self add(this Self&& self, const std::vector<T>& items)
+    {
+      if (items.empty()) {
+        return std::forward<Self>(self);
+      }
+
+      auto* state = static_index::get_thread_local_state();
+
+      for (const auto& item : items) {
+        self.hash_cache_.push_back(static_index::hash_object(item, state));
+      }
+
+      return std::forward<Self>(self);
+    }
+
+    [[nodiscard]] static_index build() &&;
+
+  private:
+    std::vector<key_128> hash_cache_;
   };
 
 } // namespace vault::containers

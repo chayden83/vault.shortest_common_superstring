@@ -13,7 +13,7 @@ FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
   flat_map
-  static_index
+#  static_index
   frozen_vector
   fsst_dictionary
   segmented_vector

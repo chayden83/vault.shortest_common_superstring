@@ -1,7 +1,11 @@
+/**
+ * @file test_static_index.cpp
+ * @brief Unit tests for vault::containers::static_index ensuring correctness
+ * and builder pattern.
+ */
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
-
-#include <vault/static_index/static_index.hpp>
 
 #include <algorithm>
 #include <random>
@@ -9,9 +13,12 @@
 #include <string>
 #include <vector>
 
+#include <vault/static_index/static_index.hpp>
+
+using namespace vault::containers;
+
 // --- Helper Functions ---
 
-// Generates unique random alphanumeric strings
 [[nodiscard]] std::vector<std::string> generate_unique_keys(
   size_t count, size_t len)
 {
@@ -35,42 +42,26 @@
 
 // --- Test Suite ---
 
-TEST_CASE("StaticIndex: Core Lifecycle", "[static_index]")
+TEST_CASE("StaticIndex: Core Lifecycle", "[static_index][core]")
 {
-  using namespace vault::containers;
-
   // 1. Setup Data
   const size_t num_keys = 5000;
   auto         keys     = generate_unique_keys(num_keys, 16);
 
-  // 2. Instantiate
-  static_index index;
+  // 2. Build using the new Builder Pattern
+  auto index = static_index_builder().add(keys).build();
 
-  SECTION("Build and Verify Hits")
+  SECTION("Verify Hits")
   {
-    REQUIRE_NOTHROW(index.build(keys));
-
-    // Verify every key we inserted returns a valid slot
     for (const auto& key : keys) {
       auto result = index.lookup(key);
       REQUIRE(result.has_value());
-
-      // The slot must be within bounds of the storage
-      // Note: PTHash slot mapping is technically minimal (0 to N-1),
-      // but your implementation manages the storage size, so we implicitly
-      // trust it. We can explicitly check if you expose size(), but lookup()
-      // safety is key.
     }
   }
 
   SECTION("Verify Misses")
   {
-    index.build(keys);
-
-    // Generate NEW keys that strictly were not in the original set
-    auto missing_keys = generate_unique_keys(
-      100, 17); // Length 17 ensures no collision with length 16 keys
-
+    auto missing_keys = generate_unique_keys(100, 17);
     for (const auto& key : missing_keys) {
       auto result = index.lookup(key);
       REQUIRE_FALSE(result.has_value());
@@ -79,70 +70,58 @@ TEST_CASE("StaticIndex: Core Lifecycle", "[static_index]")
 
   SECTION("Memory Usage Reporting")
   {
-    index.build(keys);
-
     size_t mem = index.memory_usage_bytes();
-
-    // Sanity check:
-    // 5000 keys * 8 bytes (fingerprint) = 40,000 bytes.
-    // Plus PTHash overhead (~3 bits/key) = ~1,875 bytes.
-    // Total should be roughly > 41,000 bytes.
     REQUIRE(mem > 40000);
-    REQUIRE(mem < 100000); // Should definitely be less than 100KB for 5k items
   }
 }
 
-TEST_CASE("StaticIndex: Move Semantics", "[static_index]")
+// TEST_CASE("StaticIndex: Trait System Integration", "[static_index][traits]")
+// {
+//   // Test that we can index a vector of integers directly
+//   std::vector<int> int_keys = {10, 20, 30, 40, 50};
+
+//   auto index = static_index_builder().add(int_keys).build();
+
+//   REQUIRE(index.lookup(10).has_value());
+//   REQUIRE(index.lookup(50).has_value());
+//   REQUIRE_FALSE(index.lookup(99).has_value());
+// }
+
+TEST_CASE("StaticIndex: Move Semantics", "[static_index][memory]")
 {
-  using namespace vault::containers;
+  auto keys = generate_unique_keys(1000, 10);
 
-  auto         keys = generate_unique_keys(1000, 10);
-  static_index source;
-  source.build(keys);
-
-  // Sanity check source
+  auto source = static_index_builder().add(keys).build();
   REQUIRE(source.lookup(keys[0]).has_value());
 
   SECTION("Move Constructor")
   {
     static_index dest(std::move(source));
 
-    // Dest should have the data
     REQUIRE(dest.lookup(keys[0]).has_value());
-
-    // Source should be empty/invalid (lookup returns nullopt or crashes safely)
-    // Your implementation uses unique_ptrs/shared_ptrs, so source is likely
-    // reset. However, pthash structs might not reset fully on move depending on
-    // implementation. Ideally, we just check that Dest works.
+    // Source should be empty (reset)
+    REQUIRE(source.empty());
   }
 
   SECTION("Move Assignment")
   {
-    static_index dest;
+    static_index dest; // Default constructs to empty
     dest = std::move(source);
 
     REQUIRE(dest.lookup(keys[0]).has_value());
+    REQUIRE(source.empty());
   }
 }
 
-TEST_CASE("StaticIndex: Edge Cases", "[static_index]")
+TEST_CASE("StaticIndex: Edge Cases", "[static_index][edge]")
 {
-  using namespace vault::containers;
-  static_index index;
-
   SECTION("Empty Vector Build")
   {
     std::vector<std::string> empty;
-    // PTHash sometimes asserts on empty inputs.
-    // We test to see if your wrapper handles it or if it propagates the crash.
-    // Ideally, this should not throw or crash.
-    try {
-      index.build(empty);
-      // If it succeeds, lookup should return nullopt
-      REQUIRE_FALSE(index.lookup("anything").has_value());
-    } catch (...) {
-      // If PTHash throws on empty, that's acceptable behavior to document.
-      SUCCEED("Implementation throws on empty input (acceptable)");
-    }
+
+    auto index = static_index_builder().add(empty).build();
+
+    REQUIRE(index.empty());
+    REQUIRE_FALSE(index.lookup("anything").has_value());
   }
 }

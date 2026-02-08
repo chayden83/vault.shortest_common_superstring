@@ -1,7 +1,11 @@
 #include <cstring>
 #include <new>
+
 #include <sys/mman.h>
+
 #include <vault/pthash/pthash.hpp>
+#include <vault/pthash/utils/hasher.hpp>
+
 #include <vault/static_index/static_index.hpp>
 
 namespace vault::containers {
@@ -9,7 +13,7 @@ namespace vault::containers {
   // --- Internal Helpers ---
 
   struct hasher_128 {
-    typedef pthash::hash128 hash_type;
+    using hash_type = pthash::hash128;
 
     static inline hash_type hash(const key_128& key, uint64_t seed)
     {
@@ -27,38 +31,24 @@ namespace vault::containers {
   struct static_index::impl {
     using fingerprint_t = uint64_t;
 
-    // 1. The MPH Function (Heavyweight object)
     pthash::single_phf<hasher_128,
       pthash::skew_bucketer,
       pthash::dictionary_dictionary,
       true>
       mph_function;
 
-    // 2. Metadata
     size_t num_fingerprints = 0;
 
-    // 3. The "Flexible Array Member"
-    // We declare an array of size 1 to satisfy the compiler, but we never
-    // access it directly without bounds checking logic.
-    // In C++ standard, this is technically UB if accessed past [0], but
-    // nearly all compilers support this pattern or we access via pointer math.
+    // Flexible Array Member for fingerprints
     fingerprint_t fingerprints[1];
 
-    // Helper to get the pointer to the start of the array safely
     [[nodiscard]] const fingerprint_t* data() const { return &fingerprints[0]; }
 
     [[nodiscard]] fingerprint_t* data_mutable() { return &fingerprints[0]; }
 
-    // --- Logic ---
-
     [[nodiscard]] std::optional<size_t> lookup(key_128 h) const
     {
-      // Note: mph_function(h) is guaranteed to return [0, num_fingerprints - 1]
-      // if the key exists.
       uint64_t slot = mph_function(h);
-
-      // ACCESS: Direct offset from 'this' pointer. No second pointer
-      // dereference.
       if (data()[slot] == h.high) {
         return slot;
       }
@@ -72,35 +62,59 @@ namespace vault::containers {
     }
   };
 
-  // --- Allocation & Construction Logic ---
+  // --- Custom Deleter ---
 
-  // Custom Deleter for the shared_ptr
   struct ImplDeleter {
     size_t total_size_bytes;
 
     void operator()(auto* ptr) const
     {
       if (ptr) {
-        // 1. Manually call destructor for the C++ object
         ptr->~impl();
-        // 2. Free the raw memory
         munmap(ptr, total_size_bytes);
       }
     }
   };
 
-  static_index::static_index()  = default; // pimpl_ is null
+  // --- static_index Implementation ---
+
   static_index::~static_index() = default;
 
-  void static_index::clear() { pimpl_.reset(); }
+  // Private constructor called by builder
+  static_index::static_index(std::shared_ptr<const impl> ptr)
+      : pimpl_(std::move(ptr))
+  {}
 
-  void static_index::build_internal(const std::vector<key_128>& hashes)
+  std::optional<size_t> static_index::lookup_internal(key_128 h) const noexcept
   {
-    // 1. Configure and Build the PTHash function separately first
-    //    We need to build it temporarily to know its size and state before we
-    //    can copy it into the final destination. (Ideally PTHash would let us
-    //    build into a buffer, but it owns its memory).
+    if (!pimpl_) [[unlikely]] {
+      return std::nullopt;
+    }
+    return pimpl_->lookup(h);
+  }
 
+  size_t static_index::memory_usage_bytes() const noexcept
+  {
+    return pimpl_ ? pimpl_->memory_usage() : 0;
+  }
+
+  bool static_index::empty() const noexcept { return !pimpl_; }
+
+  XXH3_state_t* static_index::get_thread_local_state()
+  {
+    static thread_local XXH3_state_t* state = XXH3_createState();
+    return state;
+  }
+
+  // --- static_index_builder Implementation ---
+
+  static_index static_index_builder::build() &&
+  {
+    if (hash_cache_.size() == 0) {
+      return {};
+    }
+
+    // 1. Build PTHash structure temporarily
     auto temp_mph = pthash::single_phf<hasher_128,
       pthash::skew_bucketer,
       pthash::dictionary_dictionary,
@@ -112,20 +126,16 @@ namespace vault::containers {
       config.lambda  = 3.5;
       config.verbose = false;
 
-      // Mutable copy for permutation
-      std::vector<key_128> mutable_hashes = hashes;
       temp_mph.build_in_internal_memory(
-        mutable_hashes.begin(), mutable_hashes.size(), config);
+        hash_cache_.begin(), hash_cache_.size(), config);
     }
 
-    // 2. Calculate Total Memory Needed
-    //    Size = sizeof(impl) + (N-1 * sizeof(uint64_t))
-    //    (N-1 because impl already includes space for fingerprints[0])
-    size_t num_keys           = hashes.size();
+    // 2. Allocate Memory
+    size_t num_keys           = hash_cache_.size();
     size_t extra_fingerprints = (num_keys > 0) ? (num_keys - 1) : 0;
-    size_t total_bytes = sizeof(impl) + (extra_fingerprints * sizeof(uint64_t));
+    size_t total_bytes =
+      sizeof(static_index::impl) + (extra_fingerprints * sizeof(uint64_t));
 
-    // 3. Allocate Huge Pages
     void* ptr = mmap(nullptr,
       total_bytes,
       PROT_READ | PROT_WRITE,
@@ -145,46 +155,21 @@ namespace vault::containers {
       }
     }
 
-    // 4. Construct 'impl' in place
-    //    We use placement new to initialize the C++ parts (vtables, pthash
-    //    members)
-    impl* impl_ptr = new (ptr) impl();
-
-    // 5. Move the built PTHash function into the allocated block
+    // 3. Placement New & Move
+    auto* impl_ptr             = new (ptr) static_index::impl();
     impl_ptr->mph_function     = std::move(temp_mph);
     impl_ptr->num_fingerprints = num_keys;
 
-    // 6. Populate Fingerprints
-    //    (Now we write directly to the tail of the allocation)
+    // 4. Write Fingerprints
     uint64_t* raw_data = impl_ptr->data_mutable();
-    for (const auto& h : hashes) {
+    for (const auto& h : hash_cache_) {
       uint64_t slot  = impl_ptr->mph_function(h);
       raw_data[slot] = h.high;
     }
 
-    // 7. Store in shared_ptr with custom deleter
-    pimpl_ = std::shared_ptr<const impl>(impl_ptr, ImplDeleter{total_bytes});
-  }
-
-  [[nodiscard]] std::optional<size_t> static_index::lookup_internal(
-    key_128 h) const noexcept
-  {
-    if (!pimpl_) [[unlikely]] {
-      return std::nullopt;
-    }
-
-    return pimpl_->lookup(h);
-  }
-
-  [[nodiscard]] size_t static_index::memory_usage_bytes() const noexcept
-  {
-    return pimpl_ ? pimpl_->memory_usage() : 0;
-  }
-
-  XXH3_state_t* static_index::get_thread_local_state()
-  {
-    static thread_local XXH3_state_t* state = XXH3_createState();
-    return state;
+    // 5. Return wrapped in static_index
+    return static_index(std::shared_ptr<const static_index::impl>(
+      impl_ptr, ImplDeleter{total_bytes}));
   }
 
 } // namespace vault::containers
