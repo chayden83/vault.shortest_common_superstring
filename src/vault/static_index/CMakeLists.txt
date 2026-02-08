@@ -5,14 +5,22 @@ FetchContent_Declare(vault.pthash
 
 FetchContent_MakeAvailable(vault.pthash)
 
-vault_add_header_only_library(vault.static_index)
+vault_add_library(vault.static_index)
+
+target_sources(vault.static_index PRIVATE
+  static_index.cpp
+)
 
 target_sources(vault.static_index PUBLIC FILE_SET HEADERS BASE_DIRS ${PROJECT_SOURCE_DIR}/include FILES
   ${PROJECT_SOURCE_DIR}/include/vault/static_index/static_index.hpp
 )
 
+target_link_libraries(vault.static_index PRIVATE
+  vault::pthash
+)
+
 target_link_libraries(vault.static_index INTERFACE
-  vault.pthash
+  xxhash
 )
 
 vault_install_targets(
