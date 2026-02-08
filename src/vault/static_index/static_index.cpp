@@ -181,4 +181,10 @@ namespace vault::containers {
     return pimpl_ ? pimpl_->memory_usage() : 0;
   }
 
+  XXH3_state_t* static_index::get_thread_local_state()
+  {
+    static thread_local XXH3_state_t* state = XXH3_createState();
+    return state;
+  }
+
 } // namespace vault::containers

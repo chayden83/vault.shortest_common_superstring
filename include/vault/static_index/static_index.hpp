@@ -14,6 +14,12 @@ namespace vault::containers {
     uint64_t low;
     uint64_t high;
 
+    [[nodiscard]] static constexpr key_128 from_xxhash(
+      XXH128_hash_t const& hash)
+    {
+      return {hash.high64, hash.high64};
+    }
+
     bool operator==(const key_128& other) const = default;
   };
 
@@ -31,11 +37,10 @@ namespace vault::containers {
         clear();
         return;
       }
-      std::vector<key_128> hash_cache;
+      auto hash_cache = std::vector<key_128>{};
       hash_cache.reserve(items.size());
 
-      // Prepare state once (thread local to save allocation)
-      XXH3_state_t* state = get_thread_local_state();
+      auto* state = get_thread_local_state();
 
       for (const auto& item : items) {
         hash_cache.push_back(hash_object(item, state));
@@ -48,11 +53,7 @@ namespace vault::containers {
     template <concepts::underlying_byte_sequences T>
     [[nodiscard]] std::optional<size_t> lookup(const T& item) const noexcept
     {
-      // 1. Hash locally (Fully inlined)
-      key_128 key = hash_object(item, get_thread_local_state());
-
-      // 2. Pass 128-bit key to opaque impl
-      return lookup_internal(key);
+      return lookup_internal(hash_object(item, get_thread_local_state()));
     }
 
     [[nodiscard]] size_t memory_usage_bytes() const noexcept;
@@ -64,32 +65,23 @@ namespace vault::containers {
 
     // Internal helpers
     void build_internal(const std::vector<key_128>& hashes);
+
     [[nodiscard]] std::optional<size_t> lookup_internal(
       key_128 key) const noexcept;
 
-    // Helper to manage thread-local XXHash state
-    static XXH3_state_t* get_thread_local_state()
-    {
-      static thread_local XXH3_state_t* state = XXH3_createState();
-      return state;
-    }
+    [[nodiscard]] static XXH3_state_t* get_thread_local_state();
 
-    // The hashing logic
     template <typename T>
-    static key_128 hash_object(const T& item, XXH3_state_t* state)
+    [[nodiscard]] static key_128 hash_object(const T& item, XXH3_state_t* state)
     {
       XXH3_128bits_reset(state);
 
-      // The generic visitor lambda matching concepts::byte_sequence_visitor
-      auto visitor = [state](std::span<std::byte const> bytes) {
-        XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
-      };
+      traits::underlying_byte_sequences<T>::visit(
+        item, [state](std::span<std::byte const> bytes) {
+          XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
+        });
 
-      // Compile-time dispatch via traits namespace
-      traits::underlying_byte_sequences<T>::visit(item, visitor);
-
-      XXH128_hash_t res = XXH3_128bits_digest(state);
-      return {res.low64, res.high64};
+      return key_128::from_xxhash(XXH3_128bits_digest(state));
     }
   };
 
