@@ -10,6 +10,7 @@ add_executable(vault.static_index.tests)
 
 target_sources(vault.static_index.tests PRIVATE
   static_index.test.cpp
+  static_index.test.laptop.cpp
   static_index.test.extensive.cpp
 )
 
