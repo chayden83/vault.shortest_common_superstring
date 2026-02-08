@@ -166,15 +166,14 @@ namespace vault::containers {
     pimpl_ = std::shared_ptr<const impl>(impl_ptr, ImplDeleter{total_bytes});
   }
 
-  [[nodiscard]] std::optional<size_t> static_index::lookup(
-    std::string_view key) const noexcept
+  [[nodiscard]] std::optional<size_t> static_index::lookup_internal(
+    key_128 h) const noexcept
   {
     if (!pimpl_) [[unlikely]] {
       return std::nullopt;
     }
 
-    XXH128_hash_t result = XXH3_128bits(key.data(), key.size());
-    return pimpl_->lookup({result.low64, result.high64});
+    return pimpl_->lookup(h);
   }
 
   [[nodiscard]] size_t static_index::memory_usage_bytes() const noexcept
