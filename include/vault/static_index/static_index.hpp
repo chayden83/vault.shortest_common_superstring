@@ -1,6 +1,11 @@
 #ifndef VAULT_CONTAINERS_STATIC_INDEX_HPP
 #define VAULT_CONTAINERS_STATIC_INDEX_HPP
 
+#include <unistd.h>
+#include <xxhash.h>
+
+#include <sys/mman.h>
+
 #include <bit>
 #include <concepts>
 #include <cstring>
@@ -11,13 +16,7 @@
 #include <string_view>
 #include <vector>
 
-// System headers
-#include <sys/mman.h>
-#include <unistd.h>
-
-// External Dependencies
-#include <pthash.hpp>
-#include <xxhash.h>
+#include <vault/pthash/pthash.hpp>
 
 namespace vault::containers {
 

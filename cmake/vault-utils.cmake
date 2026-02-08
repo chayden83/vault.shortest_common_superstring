@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+if(DEFINED _VAULT_UTILS_ONCE_FLAG)
+  return()
+else()
+  set(_VAULT_UTILS_ONCE_FLAG ON CACHE BOOL "Vault utilities inclusion guard")
+  mark_as_advanced(_VAULT_UTILS_ONCE_FLAG)
+endif()
+
 # Configure a project-specific option as a cache variable according to
 # the following precedence.
 #
@@ -235,27 +242,25 @@ macro(vault_install_targets)
 endmacro()
 
 macro(vault_install_export)
-    if(VAULT_${VAULT_SHORT_NAME_UPPER}_CONFIG_FILE_PACKAGE)
-        block()
-            cmake_parse_arguments(_arg "" "EXPORT" "" ${ARGN})
+    block()
+        cmake_parse_arguments(_arg "" "EXPORT" "" ${ARGN})
 
-            if(NOT DEFINED _arg_EXPORT)
-                set(_arg_EXPORT
-                    vault.${VAULT_SHORT_NAME}-${VAULT_${VAULT_SHORT_NAME_UPPER}_TARGET_EXPORT_VARIANT}-target-export
-                )
-            endif()
-
-            # [CMAKE.CONFIG]
-            install(
-                EXPORT ${_arg_EXPORT}
-                DESTINATION
-                    "${VAULT_${VAULT_SHORT_NAME_UPPER}_INSTALL_CMAKEDIR}"
-                NAMESPACE vault::
-                COMPONENT
-                    "${VAULT_${VAULT_SHORT_NAME_UPPER}_CONFIG_FILE_PACKAGE_INSTALL_COMPONENT}"
+        if(NOT DEFINED _arg_EXPORT)
+            set(_arg_EXPORT
+                vault.${VAULT_SHORT_NAME}-${VAULT_${VAULT_SHORT_NAME_UPPER}_TARGET_EXPORT_VARIANT}-target-export
             )
-        endblock()
-    endif()
+        endif()
+
+        # [CMAKE.CONFIG]
+        install(
+            EXPORT ${_arg_EXPORT}
+            DESTINATION
+                "${VAULT_${VAULT_SHORT_NAME_UPPER}_INSTALL_CMAKEDIR}"
+            NAMESPACE vault::
+            COMPONENT
+                "${VAULT_${VAULT_SHORT_NAME_UPPER}_CONFIG_FILE_PACKAGE_INSTALL_COMPONENT}"
+        )
+    endblock()
 endmacro()
 
 include(${PROJECT_SOURCE_DIR}/cmake/vault-configure.cmake)
