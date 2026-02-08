@@ -28,7 +28,7 @@ TEST_CASE("StaticIndex: Laptop Cache Hierarchy Analysis", "[benchmark][laptop]")
     size_t const count = 100'000;
     auto         keys  = generate_int_keys(count);
 
-    auto index = static_index_builder().add(keys).build();
+    auto index = static_index_builder().add_n(keys).build();
 
     std::mt19937             urng(42);
     std::vector<std::string> queries = keys;
@@ -51,7 +51,7 @@ TEST_CASE("StaticIndex: Laptop Cache Hierarchy Analysis", "[benchmark][laptop]")
     size_t const count = 4'000'000;
     auto         keys  = generate_int_keys(count);
 
-    auto index = static_index_builder().add(keys).build();
+    auto index = static_index_builder().add_n(keys).build();
 
     size_t const             query_count = 100'000;
     std::vector<std::string> queries;
@@ -83,7 +83,7 @@ TEST_CASE("StaticIndex: Laptop Cache Hierarchy Analysis", "[benchmark][laptop]")
     auto keys = generate_int_keys(count);
 
     std::cout << "Building 20M Index..." << std::endl;
-    auto index = static_index_builder().add(keys).build();
+    auto index = static_index_builder().add_n(keys).build();
 
     size_t const             query_count = 100'000;
     std::vector<std::string> queries;

@@ -56,11 +56,11 @@ TEST_CASE("StaticIndex: Scale Stress Test (1M Items)", "[stress][slow]")
 
   BENCHMARK("Build 1M Keys")
   {
-    return static_index_builder().add(keys).build();
+    return static_index_builder().add_n(keys).build();
   };
 
   // Actually build it for verification
-  auto index = static_index_builder().add(keys).build();
+  auto index = static_index_builder().add_n(keys).build();
 
   REQUIRE(index.memory_usage_bytes() > 0);
 
@@ -87,7 +87,7 @@ TEST_CASE("StaticIndex: Entropy & Edge Cases", "[edge]")
     null_key[10] = '\0';
     keys.push_back(null_key);
 
-    auto index = static_index_builder().add(keys).build();
+    auto index = static_index_builder().add_n(keys).build();
 
     for (const auto& key : keys) {
       REQUIRE(index.lookup(key).has_value());
@@ -106,7 +106,7 @@ TEST_CASE("StaticIndex: Entropy & Edge Cases", "[edge]")
       keys.push_back(copy);
     }
 
-    auto index = static_index_builder().add(keys).build();
+    auto index = static_index_builder().add_n(keys).build();
 
     for (const auto& key : keys) {
       REQUIRE(index.lookup(key).has_value());
@@ -119,7 +119,7 @@ TEST_CASE("StaticIndex: Performance Regression Baseline", "[benchmark]")
   size_t const count = 100'000;
   auto         keys  = generate_binary_keys(count, 16);
 
-  auto index = static_index_builder().add(keys).build();
+  auto index = static_index_builder().add_n(keys).build();
 
   std::vector<std::string> queries = keys;
   auto                     misses  = generate_binary_keys(count, 17);

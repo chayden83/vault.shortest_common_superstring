@@ -78,18 +78,24 @@ namespace vault::containers {
   };
 
   struct static_index_builder {
-    template <typename Self, concepts::underlying_byte_sequences T>
-    Self add(this Self&& self, const std::vector<T>& items)
+    template <typename Self, std::ranges::input_range R>
+      requires concepts::underlying_byte_sequences<
+        std::remove_cvref_t<std::ranges::range_reference_t<R>>>
+    Self add_n(this Self&& self, R&& items)
     {
-      if (items.empty()) {
-        return std::forward<Self>(self);
+      for (auto&& item : items) {
+        self.add_1(std::forward<decltype(item)>(item));
       }
 
-      auto* state = static_index::get_thread_local_state();
+      return std::forward<Self>(self);
+    }
 
-      for (const auto& item : items) {
-        self.hash_cache_.push_back(static_index::hash_object(item, state));
-      }
+    template <typename Self, typename T>
+      requires concepts::underlying_byte_sequences<std::remove_cvref_t<T>>
+    Self add_1(this Self&& self, T&& item)
+    {
+      self.hash_cache_.push_back(static_index::hash_object(
+        item, static_index::get_thread_local_state()));
 
       return std::forward<Self>(self);
     }

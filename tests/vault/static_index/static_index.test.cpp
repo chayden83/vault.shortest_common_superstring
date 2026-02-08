@@ -49,7 +49,7 @@ TEST_CASE("StaticIndex: Core Lifecycle", "[static_index][core]")
   auto         keys     = generate_unique_keys(num_keys, 16);
 
   // 2. Build using the new Builder Pattern
-  auto index = static_index_builder().add(keys).build();
+  auto index = static_index_builder().add_n(keys).build();
 
   SECTION("Verify Hits")
   {
@@ -84,7 +84,7 @@ TEST_CASE(
     int_keys.push_back(i * 10);
   }
 
-  auto index = static_index_builder().add(int_keys).build();
+  auto index = static_index_builder().add_n(int_keys).build();
 
   REQUIRE(index.lookup(10).has_value());
   REQUIRE(index.lookup(500).has_value()); // 50 * 10
@@ -97,7 +97,7 @@ TEST_CASE(
   // Test that we can index a vector of integers directly
   std::vector<int> int_keys = {10, 20, 30, 40, 50};
 
-  auto index = static_index_builder().add(int_keys).build();
+  auto index = static_index_builder().add_n(int_keys).build();
 
   REQUIRE(index.lookup(10).has_value());
   REQUIRE(index.lookup(50).has_value());
@@ -108,7 +108,7 @@ TEST_CASE("StaticIndex: Move Semantics", "[static_index][memory]")
 {
   auto keys = generate_unique_keys(1000, 10);
 
-  auto source = static_index_builder().add(keys).build();
+  auto source = static_index_builder().add_n(keys).build();
   REQUIRE(source.lookup(keys[0]).has_value());
 
   SECTION("Move Constructor")
@@ -136,7 +136,7 @@ TEST_CASE("StaticIndex: Edge Cases", "[static_index][edge]")
   {
     std::vector<std::string> empty;
 
-    auto index = static_index_builder().add(empty).build();
+    auto index = static_index_builder().add_n(empty).build();
 
     REQUIRE(index.empty());
     REQUIRE_FALSE(index.lookup("anything").has_value());
