@@ -1,18 +1,15 @@
-#ifndef VAULT_CONTAINERS_STATIC_INDEX_HPP
-#define VAULT_CONTAINERS_STATIC_INDEX_HPP
+#ifndef VAULT_STATIC_INDEX_STATIC_INDEX_HPP
+#define VAULT_STATIC_INDEX_STATIC_INDEX_HPP
 
+#include <sys/mman.h>
 #include <unistd.h>
 #include <xxhash.h>
 
-#include <sys/mman.h>
-
-#include <bit>
 #include <concepts>
 #include <cstring>
 #include <memory>
 #include <new>
 #include <optional>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -89,6 +86,13 @@ namespace vault::containers {
     template <string_like key_type>
     void build(const std::vector<key_type>& keys)
     {
+      // FIX: Handle empty input to prevent PTHash assertion failure
+      if (keys.empty()) {
+        num_fingerprints_ = 0;
+        fingerprint_storage_.reset();
+        return;
+      }
+
       size_t               num_keys = keys.size();
       std::vector<key_128> hash_cache;
       hash_cache.reserve(num_keys);
@@ -100,8 +104,8 @@ namespace vault::containers {
 
       pthash::build_configuration config;
       config.alpha   = 0.94;
-      config.lambda  = 3.5;   // Renamed from 'c' to 'lambda'
-      config.verbose = false; // Renamed from 'verbose_output' to 'verbose'
+      config.lambda  = 3.5;
+      config.verbose = false;
 
       mph_function_.build_in_internal_memory(
         hash_cache.begin(), hash_cache.size(), config);
@@ -142,11 +146,6 @@ namespace vault::containers {
     }
 
   private:
-    // FIXED: Added 'pthash::skew_bucketer' as the 2nd template argument.
-    // 1. Hasher: hasher_128
-    // 2. Bucketer: skew_bucketer (Correct class for partitioning)
-    // 3. Encoder: dictionary_dictionary (Correct class for compression)
-    // 4. Minimal: true
     pthash::single_phf<hasher_128,
       pthash::skew_bucketer,
       pthash::dictionary_dictionary,
@@ -159,4 +158,4 @@ namespace vault::containers {
 
 } // namespace vault::containers
 
-#endif // VAULT_CONTAINERS_STATIC_INDEX_HPP
+#endif // VAULT_STATIC_INDEX_STATIC_INDEX_HPP
