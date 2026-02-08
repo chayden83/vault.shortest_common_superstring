@@ -14,10 +14,7 @@ namespace vault::containers {
     uint64_t low;
     uint64_t high;
 
-    bool operator==(const key_128& other) const
-    {
-      return low == other.low && high == other.high;
-    }
+    [[nodiscard]] bool operator==(const key_128& other) const = default;
   };
 
   template <typename T>
@@ -28,14 +25,8 @@ namespace vault::containers {
 
   class static_index {
   public:
-    static_index();
+    [[nodiscard]] static_index();
     ~static_index();
-
-    // Copyable and Movable (Default behavior for shared_ptr)
-    static_index(const static_index&)                = default;
-    static_index& operator=(const static_index&)     = default;
-    static_index(static_index&&) noexcept            = default;
-    static_index& operator=(static_index&&) noexcept = default;
 
     /**
      * @brief Builds the index from a collection of keys.
@@ -73,7 +64,6 @@ namespace vault::containers {
     void build_internal(const std::vector<key_128>& hashes);
 
     struct impl;
-    // Shared ownership of IMMUTABLE data.
     std::shared_ptr<const impl> pimpl_;
   };
 
