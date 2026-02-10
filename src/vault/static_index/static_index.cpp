@@ -1,3 +1,4 @@
+#include <function2/function2.hpp>
 #include <ranges>
 #include <sys/mman.h>
 
@@ -91,12 +92,22 @@ namespace vault::containers {
       : pimpl_(std::move(ptr))
   {}
 
-  std::optional<size_t> static_index::lookup_internal(key_128 h) const noexcept
+  std::optional<size_t> static_index::lookup_impl(
+    fu2::function_view<void(bytes_sequence_sink)> visitor) const
   {
     if (!pimpl_) [[unlikely]] {
       return std::nullopt;
     }
-    return pimpl_->lookup(h);
+
+    auto* state = static_index::get_thread_local_state();
+
+    XXH3_128bits_reset(state);
+
+    visitor([=](std::span<std::byte const> bytes) {
+      XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
+    });
+
+    return pimpl_->lookup(key_128::from_xxhash(XXH3_128bits_digest(state)));
   }
 
   size_t static_index::memory_usage_bytes() const noexcept

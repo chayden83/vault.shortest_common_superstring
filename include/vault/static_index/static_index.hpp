@@ -121,10 +121,14 @@ namespace vault::containers {
      * @return std::optional<size_t> containing the index of the item if found,
      * or std::nullopt if the item is not present.
      */
-    template <concepts::underlying_byte_sequences T>
-    [[nodiscard]] std::optional<size_t> operator[](const T& item) const noexcept
+    template <typename T>
+      requires concepts::underlying_byte_sequences<std::remove_cvref_t<T>>
+    [[nodiscard]] std::optional<size_t> operator[](T&& item) const noexcept
     {
-      return lookup_internal(hash_object(item, get_thread_local_state()));
+      return lookup_impl([&](concepts::byte_sequence_visitor auto visitor) {
+        traits::underlying_byte_sequences<std::remove_cvref_t<T>>::visit(
+          std::forward<T>(item), visitor);
+      });
     }
 
     /**
@@ -157,14 +161,11 @@ namespace vault::containers {
      */
     explicit static_index(std::shared_ptr<const impl> ptr);
 
-    /**
-     * @brief Internal lookup implementation using a pre-computed 128-bit key.
-     *
-     * @param key The 128-bit hash of the item.
-     * @return std::optional<size_t> containing the index if found.
-     */
-    [[nodiscard]] std::optional<size_t> lookup_internal(
-      key_128 key) const noexcept;
+    using bytes_sequence_sink =
+      fu2::function_view<void(std::span<std::byte const>)>;
+
+    [[nodiscard]] std::optional<std::size_t> lookup_impl(
+      fu2::function_view<void(bytes_sequence_sink)> visitor) const;
 
     // --- Internal Hashing Helpers (Shared with Builder) ---
 
