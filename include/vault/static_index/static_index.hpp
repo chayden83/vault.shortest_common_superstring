@@ -1,13 +1,16 @@
 #ifndef VAULT_STATIC_INDEX_STATIC_INDEX_HPP
 #define VAULT_STATIC_INDEX_STATIC_INDEX_HPP
 
+#include <concepts>
 #include <xxhash.h>
 
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
+#include <function2/function2.hpp>
 #include <vault/static_index/traits.hpp>
 
 namespace vault::containers {
@@ -49,16 +52,17 @@ namespace vault::containers {
   class static_index_builder;
 
   /**
-   * @brief A read-only, static index for checking set membership or retrieving
-   * associated values.
+   * @brief A read-only, static index for checking set membership or
+   * retrieving associated values.
    *
-   * The static_index is optimized for read-heavy workloads where the dataset is
-   * immutable after construction. It uses a perfect hashing scheme or similar
-   * static structure to ensure O(1) lookups.
+   * The static_index is optimized for read-heavy workloads where the
+   * dataset is immutable after construction. It uses a perfect
+   * hashing scheme or similar static structure to ensure O(1)
+   * lookups.
    *
    * The implementation details are hidden behind a Pimpl (Pointer to
-   * Implementation) interface to ensure ABI stability and reduce compile-time
-   * dependencies.
+   * Implementation) interface to ensure ABI stability and reduce
+   * compile-time dependencies.
    *
    * @note This class is thread-safe for const access.
    */
@@ -118,7 +122,7 @@ namespace vault::containers {
      * or std::nullopt if the item is not present.
      */
     template <concepts::underlying_byte_sequences T>
-    [[nodiscard]] std::optional<size_t> lookup(const T& item) const noexcept
+    [[nodiscard]] std::optional<size_t> operator[](const T& item) const noexcept
     {
       return lookup_internal(hash_object(item, get_thread_local_state()));
     }
@@ -244,16 +248,28 @@ namespace vault::containers {
       return std::forward<Self>(self);
     }
 
-    /**
-     * @brief Builds and returns the static_index.
-     *
-     * Consumes the builder's state to create the index.
-     *
-     * @return A newly constructed static_index.
-     */
     [[nodiscard]] static_index build() &&;
 
+    template <std::invocable<std::size_t> Sink>
+    [[nodiscard]] std::pair<static_index, Sink> build(Sink sink) &&
+    {
+      auto index = std::move(*this).build_impl(std::ref(sink));
+      return {std::move(index), std::move(sink)};
+    }
+
+    template <std::output_iterator<std::size_t> O>
+    [[nodiscard]] std::pair<static_index, O> build(O out) &&
+    {
+      auto index =
+        std::move(*this).build_impl([&](std::size_t idx) { *out++ = idx; });
+
+      return {std::move(index), out};
+    }
+
   private:
+    [[nodiscard]] static_index build_impl(
+      fu2::function_view<void(std::size_t)>) &&;
+
     /// Cache of hashed keys to be included in the index.
     std::vector<key_128> hash_cache_;
   };

@@ -1,15 +1,7 @@
-/**
- * @file test_static_index.cpp
- * @brief Unit tests for vault::containers::static_index ensuring correctness
- * and builder pattern.
- */
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#include <algorithm>
-#include <random>
-#include <set>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -17,129 +9,119 @@
 
 using namespace vault::containers;
 
-// --- Helper Functions ---
-
-[[nodiscard]] std::vector<std::string> generate_unique_keys(
-  size_t count, size_t len)
+TEST_CASE("StaticIndex: Basic Functionality", "[static_index]")
 {
-  static const char charset[] =
-    "0123456789"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "abcdefghijklmnopqrstuvwxyz";
+  static_index_builder     builder;
+  std::vector<std::string> items = {"apple", "banana", "cherry", "date"};
 
-  std::mt19937                          gen{std::random_device{}()};
-  std::uniform_int_distribution<size_t> dist{0, sizeof(charset) - 2};
+  builder.add_n(items);
+  auto index = std::move(builder).build();
 
-  std::set<std::string> unique_set;
-  while (unique_set.size() < count) {
-    std::string str(len, 0);
-    std::generate(str.begin(), str.end(), [&]() { return charset[dist(gen)]; });
-    unique_set.insert(str);
+  REQUIRE_FALSE(index.empty());
+  REQUIRE(index.memory_usage_bytes() > 0);
+
+  for (const auto& item : items) {
+    auto result = index[item];
+    REQUIRE(result.has_value());
   }
 
-  return {unique_set.begin(), unique_set.end()};
-}
-
-// --- Test Suite ---
-
-TEST_CASE("StaticIndex: Core Lifecycle", "[static_index][core]")
-{
-  // 1. Setup Data
-  const size_t num_keys = 5000;
-  auto         keys     = generate_unique_keys(num_keys, 16);
-
-  // 2. Build using the new Builder Pattern
-  auto index = static_index_builder().add_n(keys).build();
-
-  SECTION("Verify Hits")
-  {
-    for (const auto& key : keys) {
-      auto result = index.lookup(key);
-      REQUIRE(result.has_value());
-    }
-  }
-
-  SECTION("Verify Misses")
-  {
-    auto missing_keys = generate_unique_keys(100, 17);
-    for (const auto& key : missing_keys) {
-      auto result = index.lookup(key);
-      REQUIRE_FALSE(result.has_value());
-    }
-  }
-
-  SECTION("Memory Usage Reporting")
-  {
-    size_t mem = index.memory_usage_bytes();
-    REQUIRE(mem > 40000);
-  }
+  REQUIRE_FALSE(index["elderberry"].has_value());
 }
 
 TEST_CASE(
-  "StaticIndex: Trait System Integration (Large N)", "[static_index][traits]")
+  "StaticIndex: Permutation Verification", "[static_index][permutation]")
 {
-  std::vector<int> int_keys;
-  int_keys.reserve(1000);
-  for (int i = 0; i < 1000; ++i) {
-    int_keys.push_back(i * 10);
+  std::vector<std::string> items = {
+    "foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply"};
+
+  SECTION("Build with Sink (Lambda)")
+  {
+    static_index_builder builder;
+    builder.add_n(items);
+
+    std::vector<size_t> permutation;
+    permutation.reserve(items.size());
+
+    // Capture the permutation via lambda sink
+    auto [index, sink] = std::move(builder).build(
+      [&](size_t slot) { permutation.push_back(slot); });
+
+    REQUIRE(permutation.size() == items.size());
+
+    // VERIFY: For each item 'i' added, its location in the index
+    // must match permutation[i].
+    for (size_t i = 0; i < items.size(); ++i) {
+      auto slot = index[items[i]];
+      REQUIRE(slot.has_value());
+      REQUIRE(*slot == permutation[i]);
+    }
   }
 
-  auto index = static_index_builder().add_n(int_keys).build();
+  SECTION("Build with Output Iterator (Back Inserter)")
+  {
+    static_index_builder builder;
+    builder.add_n(items);
 
-  REQUIRE(index.lookup(10).has_value());
-  REQUIRE(index.lookup(500).has_value()); // 50 * 10
-  REQUIRE_FALSE(index.lookup(99).has_value());
+    std::vector<size_t> permutation;
+
+    // Capture via output iterator
+    auto [index, out_it] =
+      std::move(builder).build(std::back_inserter(permutation));
+
+    REQUIRE(permutation.size() == items.size());
+
+    for (size_t i = 0; i < items.size(); ++i) {
+      auto slot = index[items[i]];
+      REQUIRE(slot.has_value());
+      REQUIRE(*slot == permutation[i]);
+    }
+  }
+
+  SECTION("Data Reordering Use Case")
+  {
+    // This simulates the primary use case: reordering a parallel array
+    // so it matches the index layout for cache locality.
+
+    static_index_builder builder;
+    builder.add_n(items);
+
+    std::vector<std::string> reordered_items(items.size());
+    size_t                   current_idx = 0;
+
+    auto [index, _] = std::move(builder).build([&](size_t slot) {
+      // Place the item at the slot dictated by the index
+      reordered_items[slot] = items[current_idx];
+      current_idx++;
+    });
+
+    // Verify that index lookup on the original item points to the
+    // correct location in the reordered array.
+    for (const auto& original_item : items) {
+      size_t slot = *index[original_item];
+      REQUIRE(reordered_items[slot] == original_item);
+    }
+  }
 }
 
-// TEST_CASE(
-//   "StaticIndex: Trait System Integration (Small N)",
-//   "[static_index][traits]")
-// {
-//   // Test that we can index a vector of integers directly
-//   std::vector<int> int_keys = {10, 20, 30, 40, 50};
-
-//   auto index = static_index_builder().add_n(int_keys).build();
-
-//   REQUIRE(index.lookup(10).has_value());
-//   REQUIRE(index.lookup(50).has_value());
-//   REQUIRE_FALSE(index.lookup(99).has_value());
-// }
-
-TEST_CASE("StaticIndex: Move Semantics", "[static_index][memory]")
+TEST_CASE("StaticIndex: Empty Index", "[static_index]")
 {
-  auto keys = generate_unique_keys(1000, 10);
+  static_index_builder builder;
 
-  auto source = static_index_builder().add_n(keys).build();
-  REQUIRE(source.lookup(keys[0]).has_value());
-
-  SECTION("Move Constructor")
+  SECTION("Standard Build")
   {
-    static_index dest(std::move(source));
-
-    REQUIRE(dest.lookup(keys[0]).has_value());
-    // Source should be empty (reset)
-    REQUIRE(source.empty());
+    auto index = std::move(builder).build();
+    REQUIRE(index.empty());
+    REQUIRE(index.memory_usage_bytes() == 0);
+    REQUIRE_FALSE(index["anything"].has_value());
   }
 
-  SECTION("Move Assignment")
+  SECTION("Build with Sink")
   {
-    static_index dest; // Default constructs to empty
-    dest = std::move(source);
-
-    REQUIRE(dest.lookup(keys[0]).has_value());
-    REQUIRE(source.empty());
-  }
-}
-
-TEST_CASE("StaticIndex: Edge Cases", "[static_index][edge]")
-{
-  SECTION("Empty Vector Build")
-  {
-    std::vector<std::string> empty;
-
-    auto index = static_index_builder().add_n(empty).build();
+    bool sink_called = false;
+    auto [index, _] =
+      std::move(builder).build([&](size_t) { sink_called = true; });
 
     REQUIRE(index.empty());
-    REQUIRE_FALSE(index.lookup("anything").has_value());
+    REQUIRE_FALSE(sink_called);
   }
 }

@@ -1,3 +1,11 @@
+FetchContent_Declare(fu2
+  GIT_REPOSITORY https://github.com/Naios/function2.git
+  GIT_TAG 4.2.5
+  EXCLUDE_FROM_ALL
+)
+
+FetchContent_MakeAvailable(fu2)
+
 FetchContent_Declare(vault.pthash
   GIT_REPOSITORY https://github.com/chayden83/jermp.pthash.git
   EXCLUDE_FROM_ALL
@@ -21,6 +29,10 @@ target_link_libraries(vault.static_index PRIVATE
 
 target_link_libraries(vault.static_index INTERFACE
   xxhash
+)
+
+target_link_libraries(vault.static_index PUBLIC
+  function2
 )
 
 vault_install_targets(

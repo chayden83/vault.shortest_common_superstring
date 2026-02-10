@@ -2,109 +2,104 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <iostream>
 #include <random>
 #include <string>
-#include <vault/static_index/static_index.hpp>
 #include <vector>
+
+#include <vault/static_index/static_index.hpp>
 
 using namespace vault::containers;
 
-std::vector<std::string> generate_int_keys(size_t count)
-{
-  std::vector<std::string> keys;
-  keys.reserve(count);
-  for (size_t i = 0; i < count; ++i) {
-    keys.push_back(std::to_string(i));
-  }
-  return keys;
-}
-
 TEST_CASE("StaticIndex: Laptop Cache Hierarchy Analysis", "[benchmark][laptop]")
 {
+  std::mt19937_64 rng(2457498388); // Fixed seed
+
+  auto generate_keys = [&](size_t count) {
+    std::vector<std::string> keys;
+    keys.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      keys.push_back("key_" + std::to_string(i) + "_" + std::to_string(rng()));
+    }
+    return keys;
+  };
 
   SECTION("Small Index (L2 Resident - 100k)")
   {
-    size_t const count = 100'000;
-    auto         keys  = generate_int_keys(count);
+    size_t num_keys = 100'000;
+    auto   keys     = generate_keys(num_keys);
 
-    auto index = static_index_builder().add_n(keys).build();
+    static_index_builder builder;
+    builder.add_n(keys);
+    auto index = std::move(builder).build();
 
-    std::mt19937             urng(42);
-    std::vector<std::string> queries = keys;
-    std::shuffle(queries.begin(), queries.end(), urng);
+    std::vector<std::string> query_keys = keys;
+    std::ranges::shuffle(query_keys, rng);
 
     BENCHMARK("Lookup L2 Resident")
     {
-      size_t hits = 0;
-      for (const auto& key : queries) {
-        if (index.lookup(key).has_value()) {
-          hits++;
+      size_t checksum = 0;
+      for (const auto& key : query_keys) {
+        if (index[key].has_value()) {
+          checksum++;
         }
       }
-      return hits;
+      return checksum;
     };
   }
 
-  SECTION("Medium Index (L3 Resident - 4M)")
+  SECTION("Medium Index (L3 Resident - 1M)")
   {
-    size_t const count = 4'000'000;
-    auto         keys  = generate_int_keys(count);
+    size_t num_keys = 1'000'000;
+    auto   keys     = generate_keys(num_keys);
 
-    auto index = static_index_builder().add_n(keys).build();
+    static_index_builder builder;
+    builder.add_n(keys);
+    auto index = std::move(builder).build();
 
-    size_t const             query_count = 100'000;
-    std::vector<std::string> queries;
-    queries.reserve(query_count);
-    std::mt19937                          urng(12345);
-    std::uniform_int_distribution<size_t> dist(0, count - 1);
-
-    for (size_t i = 0; i < query_count; ++i) {
-      queries.push_back(keys[dist(urng)]);
-    }
+    std::vector<std::string> query_keys = keys;
+    std::ranges::shuffle(query_keys, rng);
+    query_keys.resize(100'000);
 
     BENCHMARK("Lookup L3 Resident")
     {
-      size_t hits = 0;
-      for (const auto& key : queries) {
-        if (index.lookup(key).has_value()) {
-          hits++;
+      size_t checksum = 0;
+      for (const auto& key : query_keys) {
+        if (index[key].has_value()) {
+          checksum++;
         }
       }
-      return hits;
+      return checksum;
     };
   }
 
   SECTION("Large Index (DRAM Bound - 20M)")
   {
-    size_t const count = 20'000'000;
+    size_t num_keys = 20'000'000;
 
-    std::cout << "Generating 20M keys..." << std::endl;
-    auto keys = generate_int_keys(count);
+    UNSCOPED_INFO("Generating 20M keys...");
+    auto keys = generate_keys(num_keys);
 
-    std::cout << "Building 20M Index..." << std::endl;
-    auto index = static_index_builder().add_n(keys).build();
+    UNSCOPED_INFO("Building 20M Index...");
+    static_index_builder builder;
+    builder.add_n(keys);
+    auto index = std::move(builder).build();
 
-    size_t const             query_count = 100'000;
-    std::vector<std::string> queries;
-    queries.reserve(query_count);
-    std::mt19937                          urng(12345);
-    std::uniform_int_distribution<size_t> dist(0, count - 1);
+    UNSCOPED_INFO("Benchmarking DRAM Bound Lookups...");
 
-    for (size_t i = 0; i < query_count; ++i) {
-      queries.push_back(keys[dist(urng)]);
-    }
+    std::vector<std::string> query_keys;
+    query_keys.reserve(100'000);
+    std::sample(
+      keys.begin(), keys.end(), std::back_inserter(query_keys), 100'000, rng);
 
-    std::cout << "Benchmarking DRAM Bound Lookups..." << std::endl;
     BENCHMARK("Lookup DRAM Bound")
     {
-      size_t hits = 0;
-      for (const auto& key : queries) {
-        if (index.lookup(key).has_value()) {
-          hits++;
+      size_t checksum = 0;
+      for (const auto& key : query_keys) {
+        if (index[key].has_value()) {
+          checksum++;
         }
       }
-      return hits;
+      return checksum;
     };
   }
 }

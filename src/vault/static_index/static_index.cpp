@@ -1,3 +1,4 @@
+#include <ranges>
 #include <sys/mman.h>
 
 #include <cstring>
@@ -116,7 +117,8 @@ namespace vault::containers {
 
   // --- static_index_builder Implementation ---
 
-  static_index static_index_builder::build() &&
+  static_index static_index_builder::build_impl(
+    fu2::function_view<void(std::size_t)> sink) &&
   {
     if (hash_cache_.size() == 0) {
       return {};
@@ -140,11 +142,8 @@ namespace vault::containers {
     }
 
     // 2. Allocate Memory
-    size_t num_keys           = hash_cache_.size();
-    size_t extra_fingerprints = (num_keys > 0) ? (num_keys - 1) : 0;
-
     size_t total_bytes =
-      sizeof(static_index::impl) + (extra_fingerprints * sizeof(uint64_t));
+      sizeof(static_index::impl) + (hash_cache_.size() * sizeof(uint64_t));
 
     auto* ptr = mmap(nullptr,
       total_bytes,
@@ -171,12 +170,14 @@ namespace vault::containers {
 
       try {
         impl_ptr->mph_function     = std::move(temp_mph);
-        impl_ptr->num_fingerprints = num_keys;
+        impl_ptr->num_fingerprints = hash_cache_.size();
 
         uint64_t* raw_data = impl_ptr->fingerprints;
 
-        for (const auto& h : hash_cache_) {
-          raw_data[impl_ptr->mph_function(h)] = h.high;
+        for (auto const& h : hash_cache_) {
+          auto slot      = impl_ptr->mph_function(h);
+          raw_data[slot] = h.high;
+          sink(slot);
         }
 
         return static_index(std::shared_ptr<const static_index::impl>(
@@ -189,6 +190,11 @@ namespace vault::containers {
       munmap(ptr, total_bytes);
       throw;
     }
+  }
+
+  static_index static_index_builder::build() &&
+  {
+    return std::move(*this).build_impl([](auto&&...) {});
   }
 
 } // namespace vault::containers
