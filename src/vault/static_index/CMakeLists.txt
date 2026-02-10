@@ -25,9 +25,6 @@ target_sources(vault.static_index PUBLIC FILE_SET HEADERS BASE_DIRS ${PROJECT_SO
 
 target_link_libraries(vault.static_index PRIVATE
   vault::pthash
-)
-
-target_link_libraries(vault.static_index INTERFACE
   xxhash
 )
 

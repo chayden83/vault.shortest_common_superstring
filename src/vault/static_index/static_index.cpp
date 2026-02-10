@@ -1,12 +1,13 @@
-#include <function2/function2.hpp>
-#include <ranges>
 #include <sys/mman.h>
+#include <xxhash.h>
 
 #include <cstring>
 #include <memory>
 #include <new>
 #include <optional>
 #include <utility>
+
+#include <function2/function2.hpp>
 
 #include <vault/pthash/pthash.hpp>
 #include <vault/pthash/utils/hasher.hpp>
@@ -48,6 +49,22 @@ namespace vault::containers {
         }
       }
     };
+
+    [[nodiscard]] constexpr key_128 key_128_from_xxhash(
+      XXH128_hash_t const& hash)
+    {
+      return {hash.low64, hash.high64};
+    }
+
+    XXH3_state_t* get_thread_local_state()
+    {
+      using state_ptr = std::unique_ptr<XXH3_state_t,
+        XXH_NAMESPACEXXH_errorcode (*)(XXH3_state_t*)>;
+
+      static thread_local state_ptr state{XXH3_createState(), &XXH3_freeState};
+      return state.get();
+    }
+
   } // namespace
 
   // --- The Implementation Struct ---
@@ -99,7 +116,7 @@ namespace vault::containers {
       return std::nullopt;
     }
 
-    auto* state = static_index::get_thread_local_state();
+    auto* state = get_thread_local_state();
 
     XXH3_128bits_reset(state);
 
@@ -107,7 +124,7 @@ namespace vault::containers {
       XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
     });
 
-    return pimpl_->lookup(key_128::from_xxhash(XXH3_128bits_digest(state)));
+    return pimpl_->lookup(key_128_from_xxhash(XXH3_128bits_digest(state)));
   }
 
   size_t static_index::memory_usage_bytes() const noexcept
@@ -116,15 +133,6 @@ namespace vault::containers {
   }
 
   bool static_index::empty() const noexcept { return !pimpl_; }
-
-  XXH3_state_t* static_index::get_thread_local_state()
-  {
-    using state_ptr = std::unique_ptr<XXH3_state_t,
-      XXH_NAMESPACEXXH_errorcode (*)(XXH3_state_t*)>;
-
-    static thread_local state_ptr state{XXH3_createState(), &XXH3_freeState};
-    return state.get();
-  }
 
   // --- static_index_builder Implementation ---
 
@@ -136,7 +144,7 @@ namespace vault::containers {
   void static_index_builder::add_1_impl(
     fu2::function_view<void(bytes_sequence_sink)> visitor)
   {
-    auto* state = static_index::get_thread_local_state();
+    auto* state = get_thread_local_state();
 
     XXH3_128bits_reset(state);
 
@@ -144,7 +152,7 @@ namespace vault::containers {
       XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
     });
 
-    hash_cache_.emplace_back(key_128::from_xxhash(XXH3_128bits_digest(state)));
+    hash_cache_.emplace_back(key_128_from_xxhash(XXH3_128bits_digest(state)));
   }
 
   static_index static_index_builder::build_impl(

@@ -2,8 +2,6 @@
 #define VAULT_STATIC_INDEX_STATIC_INDEX_HPP
 
 #include <concepts>
-#include <xxhash.h>
-
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -17,28 +15,12 @@ namespace vault::containers {
 
   /**
    * @brief A 128-bit hash key used for indexing.
-   *
-   * This structure wraps the low and high 64-bit components of an XXH128 hash.
-   * It provides equality comparison and a factory method for conversion from
-   * the native xxHash type.
    */
   struct key_128 {
     /// The lower 64 bits of the 128-bit hash.
     uint64_t low;
     /// The higher 64 bits of the 128-bit hash.
     uint64_t high;
-
-    /**
-     * @brief Constructs a key_128 from an XXH128_hash_t struct.
-     *
-     * @param hash The native xxHash struct containing the 128-bit hash.
-     * @return A new key_128 instance initialized with the hash's components.
-     */
-    [[nodiscard]] static constexpr key_128 from_xxhash(
-      XXH128_hash_t const& hash)
-    {
-      return {hash.low64, hash.high64};
-    }
 
     /**
      * @brief Checks if two keys are identical.
@@ -112,14 +94,16 @@ namespace vault::containers {
     /**
      * @brief Looks up an item in the index.
      *
-     * Hashes the provided item using XXH3_128 and checks for its existence
-     * in the index.
+     * Hashes the provided item and checks for its existence in the
+     * index.
      *
      * @tparam T The type of the item to lookup. Must satisfy the
      * concepts::underlying_byte_sequences constraint.
+     *
      * @param item The item to search for.
-     * @return std::optional<size_t> containing the index of the item if found,
-     * or std::nullopt if the item is not present.
+     *
+     * @return std::optional<size_t> containing the index of the item
+     * if found, or std::nullopt if the item is not present.
      */
     template <typename T>
       requires concepts::underlying_byte_sequences<std::remove_cvref_t<T>>
@@ -168,34 +152,6 @@ namespace vault::containers {
       fu2::function_view<void(bytes_sequence_sink)> visitor) const;
 
     // --- Internal Hashing Helpers (Shared with Builder) ---
-
-    /**
-     * @brief Retrieves the thread-local XXH3 state.
-     *
-     * @return Pointer to the thread-local XXH3_state_t.
-     */
-    [[nodiscard]] static XXH3_state_t* get_thread_local_state();
-
-    /**
-     * @brief Hashes an object using XXH3_128.
-     *
-     * @tparam T The type of the item to hash.
-     * @param item The item to hash.
-     * @param state The XXH3 state to use for hashing.
-     * @return The 128-bit hash key.
-     */
-    template <typename T>
-    [[nodiscard]] static key_128 hash_object(const T& item, XXH3_state_t* state)
-    {
-      XXH3_128bits_reset(state);
-
-      traits::underlying_byte_sequences<T>::visit(
-        item, [state](std::span<std::byte const> bytes) {
-          XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
-        });
-
-      return key_128::from_xxhash(XXH3_128bits_digest(state));
-    }
   };
 
   /**
