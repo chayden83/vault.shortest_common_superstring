@@ -117,6 +117,25 @@ namespace vault::containers {
 
   // --- static_index_builder Implementation ---
 
+  static_index static_index_builder::build() &&
+  {
+    return std::move(*this).build_impl([](auto&&...) {});
+  }
+
+  void static_index_builder::add_1_impl(
+    fu2::function_view<void(bytes_sequence_sink)> visitor)
+  {
+    auto* state = static_index::get_thread_local_state();
+
+    XXH3_128bits_reset(state);
+
+    visitor([=](std::span<std::byte const> bytes) {
+      XXH3_128bits_update(state, bytes.data(), bytes.size_bytes());
+    });
+
+    hash_cache_.emplace_back(key_128::from_xxhash(XXH3_128bits_digest(state)));
+  }
+
   static_index static_index_builder::build_impl(
     fu2::function_view<void(std::size_t)> sink) &&
   {
@@ -190,11 +209,6 @@ namespace vault::containers {
       munmap(ptr, total_bytes);
       throw;
     }
-  }
-
-  static_index static_index_builder::build() &&
-  {
-    return std::move(*this).build_impl([](auto&&...) {});
   }
 
 } // namespace vault::containers

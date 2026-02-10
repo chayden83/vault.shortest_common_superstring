@@ -242,8 +242,10 @@ namespace vault::containers {
       requires concepts::underlying_byte_sequences<std::remove_cvref_t<T>>
     Self add_1(this Self&& self, T&& item)
     {
-      self.hash_cache_.push_back(static_index::hash_object(
-        item, static_index::get_thread_local_state()));
+      self.add_1_impl([&](concepts::byte_sequence_visitor auto visitor) {
+        traits::underlying_byte_sequences<std::remove_cvref_t<T>>::visit(
+          std::forward<T>(item), visitor);
+      });
 
       return std::forward<Self>(self);
     }
@@ -267,10 +269,14 @@ namespace vault::containers {
     }
 
   private:
+    using bytes_sequence_sink =
+      fu2::function_view<void(std::span<std::byte const>)>;
+
+    void add_1_impl(fu2::function_view<void(bytes_sequence_sink)>);
+
     [[nodiscard]] static_index build_impl(
       fu2::function_view<void(std::size_t)>) &&;
 
-    /// Cache of hashed keys to be included in the index.
     std::vector<key_128> hash_cache_;
   };
 
