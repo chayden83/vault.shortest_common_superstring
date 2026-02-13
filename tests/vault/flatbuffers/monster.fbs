@@ -1,0 +1,16 @@
+// schema/game.fbs
+namespace Game;
+
+table Equipment {
+  name: string;
+  damage: short;
+}
+
+table Monster {
+  name: string;
+  hp: short;
+  // This field contains a nested FlatBuffer of type 'Equipment'
+  equipped_gear: [ubyte] (nested_flatbuffer: "Equipment");
+}
+
+root_type Monster;
