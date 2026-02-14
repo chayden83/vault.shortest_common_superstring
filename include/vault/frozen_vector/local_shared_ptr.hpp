@@ -16,6 +16,29 @@ namespace frozen {
 
   template <typename T> class local_shared_ptr;
 
+  // --- Forward Declarations for Factories ---
+  template <typename T, typename... Args>
+    requires(!std::is_array_v<T>)
+  local_shared_ptr<T> make_local_shared(Args&&... args);
+
+  template <typename T, typename Alloc, typename... Args>
+    requires(!std::is_array_v<T>)
+  local_shared_ptr<T> allocate_local_shared(const Alloc& alloc, Args&&... args);
+
+  template <typename T, typename Alloc>
+  local_shared_ptr<T> allocate_local_shared_for_overwrite(const Alloc& alloc);
+
+  template <typename T, typename Alloc>
+    requires std::is_array_v<T>
+  local_shared_ptr<T> allocate_local_shared_for_overwrite(
+    std::size_t n, const Alloc& alloc);
+
+  template <typename T> local_shared_ptr<T> make_local_shared_for_overwrite();
+
+  template <typename T>
+    requires std::is_array_v<T>
+  local_shared_ptr<T> make_local_shared_for_overwrite(std::size_t n);
+
   namespace detail {
     struct local_control_block_base {
       long ref_count{1};
@@ -296,6 +319,7 @@ namespace frozen {
     }
 
   private:
+    // Factory Constructor
     local_shared_ptr(
       element_type* p, detail::local_control_block_base* cb) noexcept
         : ptr_(p)
@@ -305,29 +329,31 @@ namespace frozen {
     element_type*                     ptr_;
     detail::local_control_block_base* cb_;
 
-    // Factories
+    // --- Friend Declarations ---
     template <typename U, typename... Args>
+      requires(!std::is_array_v<U>)
     friend local_shared_ptr<U> make_local_shared(Args&&... args);
 
     template <typename U, typename Alloc, typename... Args>
+      requires(!std::is_array_v<U>)
     friend local_shared_ptr<U> allocate_local_shared(
       const Alloc& alloc, Args&&... args);
-
-    template <typename U>
-    friend local_shared_ptr<U> make_local_shared_for_overwrite();
 
     template <typename U, typename Alloc>
     friend local_shared_ptr<U> allocate_local_shared_for_overwrite(
       const Alloc& alloc);
 
-    template <typename U>
-      requires std::is_array_v<U>
-    friend local_shared_ptr<U> make_local_shared_for_overwrite(std::size_t n);
-
     template <typename U, typename Alloc>
       requires std::is_array_v<U>
     friend local_shared_ptr<U> allocate_local_shared_for_overwrite(
       std::size_t n, const Alloc& alloc);
+
+    template <typename U>
+    friend local_shared_ptr<U> make_local_shared_for_overwrite();
+
+    template <typename U>
+      requires std::is_array_v<U>
+    friend local_shared_ptr<U> make_local_shared_for_overwrite(std::size_t n);
 
     template <typename U> friend class local_shared_ptr;
   };
@@ -416,6 +442,14 @@ namespace frozen {
       throw;
     }
     return local_shared_ptr<T>(data, cb);
+  }
+
+  template <typename T, typename Alloc, typename... Args>
+    requires(!std::is_array_v<T>)
+  [[nodiscard]] local_shared_ptr<T> allocate_local_shared(
+    const Alloc&, Args&&... args)
+  {
+    return make_local_shared<T>(std::forward<Args>(args)...);
   }
 
   template <typename T, typename Alloc>

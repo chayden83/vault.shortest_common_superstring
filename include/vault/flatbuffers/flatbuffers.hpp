@@ -89,8 +89,7 @@ namespace lazyfb {
       template <typename Context, typename... Args>
       static auto make_context(Args&&... args) -> storage_type<Context>
       {
-        return frozen::local_shared_ptr<Context>(
-          new Context{std::forward<Args>(args)...});
+        return frozen::make_local_shared<Context>(std::forward<Args>(args)...);
       }
     };
 
