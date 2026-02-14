@@ -1,7 +1,8 @@
 /**
  * @file lazy_wrapper.hpp
  * @brief Generic, policy-based, thread-safe lazy FlatBuffer wrapper.
- * Optimized with Non-Type Template Parameters (NTTP).
+ * Optimized with Non-Type Template Parameters (NTTP) and Traits-based type
+ * deduction.
  */
 #pragma once
 
@@ -16,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -30,6 +32,17 @@ namespace lazyfb {
     concept flatbuffer_table = std::is_base_of_v<flatbuffers::Table, T>;
 
   } // namespace concepts
+
+  /// @brief Traits used to map accessors to nested table types.
+  namespace traits {
+
+    /**
+     * @brief Primary template for nested type mapping.
+     * User must specialize this struct for their specific accessors.
+     */
+    template <auto Accessor> struct nested_type;
+
+  } // namespace traits
 
   /// @brief Type-erased identifier for member function pointers (16 bytes).
   using accessor_id = std::array<std::byte, 16>;
@@ -106,13 +119,22 @@ namespace lazyfb {
     const accessor_id id_generator<Accessor>::value = []() {
       accessor_id id{};
       // FIX: Assign NTTP to a local variable to be able to take its address.
-      auto accessor_value = Accessor;
-
-      // We can safely memcpy here because this lambda runs only once at
-      // initialization. The 'Accessor' value is known at compile/link time.
-      std::memcpy(id.data(), &accessor_value, sizeof(accessor_value));
+      auto accessor_val = Accessor;
+      std::memcpy(id.data(), &accessor_val, sizeof(accessor_val));
       return id;
     }();
+
+    /**
+     * @brief Metafunction to resolve the nested type.
+     */
+    template <typename ExplicitType, auto Accessor> struct resolve_nested_type {
+      using type = ExplicitType;
+    };
+
+    // Specialization: If ExplicitType is void, look up the trait.
+    template <auto Accessor> struct resolve_nested_type<void, Accessor> {
+      using type = typename traits::nested_type<Accessor>::type;
+    };
 
   } // namespace detail
 
@@ -127,9 +149,6 @@ namespace lazyfb {
     using context_type =
       detail::verification_context<typename Policy::mutex_type>;
 
-    /**
-     * @brief Creates a lazy wrapper for a root table.
-     */
     [[nodiscard]]
     static auto create(const uint8_t* data, size_t size)
       -> std::optional<lazy_wrapper<T, Policy>>
@@ -159,42 +178,40 @@ namespace lazyfb {
 
     /**
      * @brief Lazily verifies a nested FlatBuffer using a compile-time accessor.
-     * * @tparam Accessor The member function pointer (e.g.,
-     * &Monster::equipped_gear).
-     * @tparam NestedT The expected type of the nested table.
      */
-    template <auto Accessor, concepts::flatbuffer_table NestedT>
+    template <auto Accessor, typename ExplicitType = void>
     [[nodiscard]]
-    auto get_nested() const -> std::optional<lazy_wrapper<NestedT, Policy>>
+    auto get_nested() const
     {
-      // Compile-time check to ensure Accessor is actually a member of T
-      // and returns a Vector<uint8_t>*.
-      static_assert(std::is_same_v<decltype((std::declval<T>().*Accessor)()),
-                      const flatbuffers::Vector<uint8_t>*>,
-        "Accessor must be a member function returning const "
-        "flatbuffers::Vector<uint8_t>*");
+      // 1. Resolve the Nested Table Type
+      using NestedT =
+        typename detail::resolve_nested_type<ExplicitType, Accessor>::type;
 
+      static_assert(concepts::flatbuffer_table<NestedT>,
+        "Resolved nested type must be a FlatBuffer Table.");
+
+      using return_type = std::optional<lazy_wrapper<NestedT, Policy>>;
+
+      // 3. Runtime Access
       const auto* vec = (table_->*Accessor)();
 
-      // Branch prediction hint: valid data usually has fields present
       if (!vec) [[unlikely]] {
-        return std::nullopt;
+        return return_type{std::nullopt};
       }
 
       const auto* nested_data = vec->data();
-
-      // STATIC OPTIMIZATION:
-      // This ID is generated once per program lifetime for this specific
-      // Accessor. No runtime memcpy or overhead.
-      const auto& id = detail::id_generator<Accessor>::value;
+      const auto& id          = detail::id_generator<Accessor>::value;
 
       // Phase 1: Read Lock (Fast Path)
       {
         auto lock = typename Policy::read_lock(ctx_->mutex);
         for (const auto& [ptr, hist_id] : ctx_->history) {
           if (ptr == nested_data && hist_id == id) {
-            return lazy_wrapper<NestedT, Policy>(
-              flatbuffers::GetRoot<NestedT>(nested_data), ctx_);
+            // FIX: Direct constructor call invokes the private constructor via
+            // friendship. implicit conversion to std::optional handles the
+            // rest.
+            return return_type(lazy_wrapper<NestedT, Policy>(
+              flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
           }
         }
       }
@@ -204,23 +221,22 @@ namespace lazyfb {
 
       for (const auto& [ptr, hist_id] : ctx_->history) {
         if (ptr == nested_data && hist_id == id) {
-          return lazy_wrapper<NestedT, Policy>(
-            flatbuffers::GetRoot<NestedT>(nested_data), ctx_);
+          return return_type(lazy_wrapper<NestedT, Policy>(
+            flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
         }
       }
 
-      // Verify
       auto options                     = flatbuffers::Verifier::Options{};
       options.check_nested_flatbuffers = false;
       auto verifier = flatbuffers::Verifier{nested_data, vec->size(), options};
 
       if (verifier.template VerifyBuffer<NestedT>(nullptr)) {
         ctx_->history.emplace_back(nested_data, id);
-        return lazy_wrapper<NestedT, Policy>(
-          flatbuffers::GetRoot<NestedT>(nested_data), ctx_);
+        return return_type(lazy_wrapper<NestedT, Policy>(
+          flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
       }
 
-      return std::nullopt;
+      return return_type{std::nullopt};
     }
 
   private:
