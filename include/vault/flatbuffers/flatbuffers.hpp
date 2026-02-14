@@ -4,10 +4,12 @@
  */
 #pragma once
 
+#include <bit>
 #include <concepts>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <utility>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
@@ -160,18 +162,21 @@ namespace vault::fb {
     [[nodiscard]] auto get_nested() const -> std::optional<nested_table_t<Accessor, ExplicitType>> {
       using nested_type = nested_t<Accessor, ExplicitType>;
       using table_type  = nested_table_t<Accessor, ExplicitType>;
-      using return_type = std::optional<table_type>;
 
       const auto* vec = (table_->*Accessor)();
+
       if (!vec) {
-        return return_type{std::nullopt};
+        return std::nullopt;
       }
 
-      const auto* nested_data = vec->data();
-      const auto& id          = detail::id_generator<Accessor>::value;
+      const auto* nested_data  = vec->data();
+      const auto  history_size = ctx_->history.size();
+
+      const auto& id = detail::id_generator<Accessor>::value;
 
       {
         auto lock = typename Policy::read_lock(ctx_->mutex);
+
         for (const auto& [ptr, hist_id] : ctx_->history) {
           if (ptr == nested_data && hist_id == id) {
             return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
@@ -180,7 +185,10 @@ namespace vault::fb {
       }
 
       auto lock = typename Policy::write_lock(ctx_->mutex);
-      for (const auto& [ptr, hist_id] : ctx_->history) {
+
+      for (auto i = history_size; i != ctx_->history.size(); ++i) {
+        const auto& [ptr, hist_id] = ctx_->history[i];
+
         if (ptr == nested_data && hist_id == id) {
           return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
         }
@@ -188,12 +196,13 @@ namespace vault::fb {
 
       auto verifier = flatbuffers::Verifier{nested_data, vec->size()};
 
-      if (verifier.template VerifyBuffer<nested_type>(nullptr)) {
+      if (not verifier.template VerifyBuffer<nested_type>(nullptr)) {
+        return std::nullopt;
+      } else {
         ctx_->history.emplace_back(nested_data, id);
-        return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
       }
 
-      return std::nullopt;
+      return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
     }
 
   private:
