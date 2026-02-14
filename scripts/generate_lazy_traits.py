@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Generates C++ traits for lazy FlatBuffer wrappers.
-Filters types by their declaration file to prevent redefinition errors in transitive builds.
+Filters types by their declaration file to prevent redefinition errors and 
+uses strict namespace resolution to prevent collisions.
 """
 
 import sys
@@ -45,19 +46,31 @@ class SchemaParser:
             self.objects_by_name[name] = obj
 
     def find_object(self, name: str, context_namespace: str = "") -> Optional[str]:
+        """
+        Strict namespace resolution hierarchy:
+        1. Absolute match (exact full name).
+        2. Relative match (relative to the context namespace).
+        3. Global search (only if unique).
+        """
+        # 1. Absolute match
         if name in self.objects_by_name:
             return name
+        
+        # 2. Relative match
         if context_namespace:
             relative_name = f"{context_namespace}.{name}"
             if relative_name in self.objects_by_name:
                 return relative_name
         
-        matches = [k for k in self.objects_by_name.keys() if k.endswith(f".{name}")]
+        # 3. Global search with ambiguity check
+        matches = [k for k in self.objects_by_name.keys() if k.split('.')[-1] == name]
         if len(matches) == 1:
             return matches[0]
         elif len(matches) > 1:
-            print(f"Error: Ambiguous type '{name}'. Matches: {matches}")
+            print(f"Error: Ambiguous type '{name}' found in multiple namespaces: {matches}")
+            print(f"Please use the fully qualified name in your .fbs attribute.")
             sys.exit(1)
+            
         return None
 
     def validate_field_type(self, field: reflection.Field.Field, table_name: str) -> bool:
@@ -74,7 +87,6 @@ class SchemaParser:
 
     def generate_cpp_traits(self, current_bfbs_name: str) -> List[str]:
         traits = []
-        # Match against the base filename (e.g., monster.fbs)
         base_filter_name = os.path.basename(current_bfbs_name).replace(".bfbs", ".fbs")
 
         for i in range(self.schema.ObjectsLength()):
@@ -82,7 +94,7 @@ class SchemaParser:
             if obj.IsStruct():
                 continue
 
-            # Ownership check: Only generate traits for types defined in this specific file
+            # Ownership check to prevent redefinitions across transitive includes
             if hasattr(obj, 'DeclarationFile') and obj.DeclarationFile():
                 decl_file = obj.DeclarationFile().decode("utf-8")
                 if os.path.basename(decl_file) != base_filter_name:
@@ -118,7 +130,7 @@ class SchemaParser:
 
                     resolved = self.find_object(nested_type_raw, namespace)
                     if not resolved:
-                        print(f"Error: Unknown nested type '{nested_type_raw}' in '{full_table_name}'")
+                        print(f"Error: Could not resolve nested type '{nested_type_raw}' in '{full_table_name}'")
                         sys.exit(1)
 
                     traits.append(
