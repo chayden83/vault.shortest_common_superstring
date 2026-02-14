@@ -21,10 +21,10 @@
 namespace vault::fb {
   namespace concepts {
     template <typename T>
-    concept flatbuffer_table = std::is_base_of_v<flatbuffers::Table, T>;
+    concept table = std::is_base_of_v<flatbuffers::Table, T>;
 
     template <typename P, typename T>
-    concept cache_policy = requires {
+    concept table_cache = requires {
       typename P::mutex_type;
       typename P::read_lock;
       typename P::write_lock;
@@ -40,46 +40,45 @@ namespace vault::fb {
 
   using accessor_id = std::array<std::byte, 16>;
 
-  namespace policies {
-    struct thread_safe {
-      using mutex_type = std::shared_mutex;
+  struct table_cache_mt {
+    using mutex_type = std::shared_mutex;
 
-      template <typename T>
-      using storage_type = std::shared_ptr<T>;
+    template <typename T>
+    using storage_type = std::shared_ptr<T>;
 
-      using read_lock  = std::shared_lock<mutex_type>;
-      using write_lock = std::unique_lock<mutex_type>;
+    using read_lock  = std::shared_lock<mutex_type>;
+    using write_lock = std::unique_lock<mutex_type>;
 
-      template <typename Context, typename... Args>
-      static auto make_context(Args&&... args) -> storage_type<Context> {
-        return std::make_shared<Context>(std::forward<Args>(args)...);
-      }
+    template <typename Context, typename... Args>
+    static auto make_context(Args&&... args) -> storage_type<Context> {
+      return std::make_shared<Context>(std::forward<Args>(args)...);
+    }
+  };
+
+  struct table_cache_st {
+    struct mutex_type {
+      constexpr void lock() const noexcept {}
+      constexpr void unlock() const noexcept {}
+      constexpr void lock_shared() const noexcept {}
+      constexpr void unlock_shared() const noexcept {}
     };
 
-    struct single_threaded {
-      struct mutex_type {
-        constexpr void lock() const noexcept {}
-        constexpr void unlock() const noexcept {}
-        constexpr void lock_shared() const noexcept {}
-        constexpr void unlock_shared() const noexcept {}
-      };
+    template <typename T>
+    using storage_type = boost::local_shared_ptr<T>;
 
-      template <typename T>
-      using storage_type = boost::local_shared_ptr<T>;
-
-      struct read_lock {
-        explicit constexpr read_lock(mutex_type&) noexcept {}
-      };
-      struct write_lock {
-        explicit constexpr write_lock(mutex_type&) noexcept {}
-      };
-
-      template <typename Context, typename... Args>
-      static auto make_context(Args&&... args) -> storage_type<Context> {
-        return boost::make_local_shared<Context>(std::forward<Args>(args)...);
-      }
+    struct read_lock {
+      explicit constexpr read_lock(mutex_type&) noexcept {}
     };
-  } // namespace policies
+
+    struct write_lock {
+      explicit constexpr write_lock(mutex_type&) noexcept {}
+    };
+
+    template <typename Context, typename... Args>
+    static auto make_context(Args&&... args) -> storage_type<Context> {
+      return boost::make_local_shared<Context>(std::forward<Args>(args)...);
+    }
+  };
 
   namespace detail {
     template <typename MutexType>
@@ -112,13 +111,13 @@ namespace vault::fb {
   // Lazy Wrapper Implementation
   // -----------------------------------------------------------------------------
 
-  template <concepts::flatbuffer_table T, typename Policy = policies::thread_safe>
+  template <concepts::table T, typename Policy = table_cache_mt>
   class table {
-    static_assert(concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>);
+    static_assert(concepts::table_cache<Policy, detail::verification_context<typename Policy::mutex_type>>);
   };
 
-  template <concepts::flatbuffer_table T, typename Policy>
-    requires concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>
+  template <concepts::table T, typename Policy>
+    requires concepts::table_cache<Policy, detail::verification_context<typename Policy::mutex_type>>
   class table<T, Policy> {
     using context_t = detail::verification_context<typename Policy::mutex_type>;
     using storage_t = typename Policy::template storage_type<context_t>;
@@ -208,7 +207,7 @@ namespace vault::fb {
     const T*  table_;
     storage_t ctx_;
 
-    template <concepts::flatbuffer_table U, typename P>
+    template <concepts::table U, typename P>
     friend class table;
   };
 
