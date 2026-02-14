@@ -1,3 +1,4 @@
+---
 Language: Cpp
 BasedOnStyle: LLVM
 
@@ -19,8 +20,18 @@ AllowShortLoopsOnASingleLine: false
 NamespaceIndentation: All
 AccessModifierOffset: -2
 
+# --- Alignment ---
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: true
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: true
+AlignTrailingComments: true
+
 # --- Constructor Initializer Lists ---
-# Forces each member to its own line for clarity
 BreakConstructorInitializers: BeforeComma
 ConstructorInitializerIndentWidth: 2
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
@@ -32,26 +43,14 @@ SpaceAfterTemplateKeyword: true
 PointerAlignment: Left
 MaxEmptyLinesToKeep: 1
 SpaceBeforeAssignmentOperators: true
-SpaceInEmptyParentheses: false
 
-# --- Alignment and Wrapping ---
-AlignConsecutiveAssignments: None
-AlignConsecutiveDeclarations: None
-AlignTrailingComments: true
-RequiresClausePosition: OwnLine
-IndentRequiresClause: true
-AllowAllParametersOfDeclarationOnNextLine: false
+# --- Wrapping ---
 BinPackParameters: false
 BinPackArguments: false
+RequiresClausePosition: OwnLine
+IndentRequiresClause: true
 
-# --- Attribute and Qualifier Handling ---
-AllowShortAttributesOnASingleLine: false
-
-# --- Reflow and Comments ---
-ReflowComments: true
-BreakStringLiterals: false
-
-# --- Include Grouping (Up to 3 levels deep) ---
+# --- Include Grouping ---
 SortIncludes: CaseSensitive
 IncludeBlocks: Regroup
 IncludeCategories:

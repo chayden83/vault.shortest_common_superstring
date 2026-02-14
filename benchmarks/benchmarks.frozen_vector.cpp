@@ -1,9 +1,9 @@
-#include <benchmark/benchmark.h>
-
 #include <algorithm>
 #include <memory>
 #include <numeric>
 #include <vector>
+
+#include <benchmark/benchmark.h>
 
 #include <vault/frozen_vector/frozen_vector.hpp>
 #include <vault/frozen_vector/frozen_vector_builder.hpp>
@@ -19,15 +19,16 @@ using namespace frozen;
 
 // Define types for easier usage
 using StdVec = std::vector<int>;
+
 using AtomicVec = frozen_vector_builder<int, shared_storage_policy<int>>;
 using UniqueVec = frozen_vector_builder<int, unique_storage_policy<int>>;
-using LocalVec = frozen_vector_builder<int, local_shared_storage_policy<int>>;
+using LocalVec  = frozen_vector_builder<int, local_shared_storage_policy<int>>;
 
 // ============================================================================
 // BENCHMARK: Copying (The Key Differentiator)
 // ============================================================================
 
-static void BM_StdVector_Copy(benchmark::State &state) {
+static void BM_StdVector_Copy(benchmark::State& state) {
   size_t N = state.range(0);
   StdVec src(N);
   for (auto _ : state) {
@@ -36,21 +37,21 @@ static void BM_StdVector_Copy(benchmark::State &state) {
   }
 }
 
-static void BM_AtomicShared_Copy(benchmark::State &state) {
-  size_t N = state.range(0);
+static void BM_AtomicShared_Copy(benchmark::State& state) {
+  size_t    N = state.range(0);
   AtomicVec builder(N);
-  auto src = std::move(builder).freeze();
+  auto      src = std::move(builder).freeze();
   for (auto _ : state) {
     auto copy = src;
     benchmark::DoNotOptimize(copy.data());
   }
 }
 
-static void BM_LocalShared_Copy(benchmark::State &state) {
-  size_t N = state.range(0);
+static void BM_LocalShared_Copy(benchmark::State& state) {
+  size_t   N = state.range(0);
   LocalVec builder(N);
   // Explicitly freeze to local const handle
-  auto src = std::move(builder).freeze<local_shared_ptr<const int[]>>();
+  auto     src = std::move(builder).freeze<local_shared_ptr<const int[]>>();
   for (auto _ : state) {
     auto copy = src;
     benchmark::DoNotOptimize(copy.data());
@@ -61,7 +62,7 @@ static void BM_LocalShared_Copy(benchmark::State &state) {
 // BENCHMARK: Construction (Allocation Overhead)
 // ============================================================================
 
-static void BM_StdVector_Construct(benchmark::State &state) {
+static void BM_StdVector_Construct(benchmark::State& state) {
   size_t N = state.range(0);
   for (auto _ : state) {
     StdVec v(N);
@@ -69,7 +70,7 @@ static void BM_StdVector_Construct(benchmark::State &state) {
   }
 }
 
-static void BM_AtomicShared_Construct(benchmark::State &state) {
+static void BM_AtomicShared_Construct(benchmark::State& state) {
   size_t N = state.range(0);
   for (auto _ : state) {
     AtomicVec v(N);
@@ -77,7 +78,7 @@ static void BM_AtomicShared_Construct(benchmark::State &state) {
   }
 }
 
-static void BM_Unique_Construct(benchmark::State &state) {
+static void BM_Unique_Construct(benchmark::State& state) {
   size_t N = state.range(0);
   for (auto _ : state) {
     UniqueVec v(N);
@@ -85,7 +86,7 @@ static void BM_Unique_Construct(benchmark::State &state) {
   }
 }
 
-static void BM_LocalShared_Construct(benchmark::State &state) {
+static void BM_LocalShared_Construct(benchmark::State& state) {
   size_t N = state.range(0);
   for (auto _ : state) {
     LocalVec v(N);
@@ -100,11 +101,10 @@ static void BM_LocalShared_Construct(benchmark::State &state) {
 // serialization.
 // ============================================================================
 
-template <typename VectorType>
-static void BM_InterleavedWork(benchmark::State &state) {
-  size_t N = 1000; // Small vector to keep data in cache
+template <typename VectorType> static void BM_InterleavedWork(benchmark::State& state) {
+  size_t     N = 1000; // Small vector to keep data in cache
   VectorType builder(N);
-  auto src = std::move(builder).freeze();
+  auto       src = std::move(builder).freeze();
 
   // Volatile to prevent compiler from optimizing away the math
   volatile int input = 42;
