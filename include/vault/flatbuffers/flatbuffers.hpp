@@ -97,14 +97,17 @@ namespace vault::fb {
     }();
 
     template <typename ExplicitType, auto Accessor>
-    struct resolve_nested_type {
+    struct nested_type {
       using type = ExplicitType;
     };
 
     template <auto Accessor>
-    struct resolve_nested_type<void, Accessor> {
+    struct nested_type<void, Accessor> {
       using type = typename traits::nested_type<Accessor>::type;
     };
+
+    template <typename ExplicitType, auto Accessor>
+    using nested_type_t = typename nested_type<ExplicitType, Accessor>::type;
   } // namespace detail
 
   // -----------------------------------------------------------------------------
@@ -123,7 +126,7 @@ namespace vault::fb {
     using storage_t = typename Policy::template storage_type<context_t>;
 
     template <auto Accessor, typename ExplicitType>
-    using nested_t = typename detail::resolve_nested_type<ExplicitType, Accessor>::type;
+    using nested_t = detail::nested_type_t<ExplicitType, Accessor>;
 
     template <auto Accessor, typename ExplicitType>
     using nested_table_t = table<nested_t<Accessor, ExplicitType>, Policy>;
