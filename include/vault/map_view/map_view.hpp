@@ -3,10 +3,9 @@
 
 #include <concepts>
 #include <cstddef>
-#include <memory>      // For std::addressof
-#include <stdexcept>   // For std::out_of_range
-#include <type_traits> // For std::forward, std::move
-#include <utility>     // For std::pair
+#include <memory>    // For std::addressof
+#include <stdexcept> // For std::out_of_range
+#include <utility>   // For std::pair
 
 namespace lib {
 
