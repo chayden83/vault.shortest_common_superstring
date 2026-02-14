@@ -94,7 +94,7 @@ namespace vault::fb {
     constexpr inline auto const identity = std::remove_cvref_t<decltype(Value)>{Value};
 
     template <auto Accessor>
-    inline const auto id = std::bit_cast<accessor_id>(identity<Accessor>);
+    inline auto const id = std::bit_cast<accessor_id>(identity<Accessor>);
 
     template <typename ExplicitType, auto Accessor>
     struct nested_type {
