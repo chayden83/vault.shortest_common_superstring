@@ -12,7 +12,8 @@ FetchContent_Declare(googlebench
 FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
-  flat_map
+  map_view
+#  flat_map
 #  static_index
   frozen_vector
   fsst_dictionary
@@ -35,7 +36,8 @@ foreach(benchmark ${ALL_BENCHMARKS})
     range-v3::range-v3
     benchmark::benchmark
     benchmark::benchmark_main
-    vault::flat_map
+    vault::map_view
+#    vault::flat_map
     vault::static_index
     vault::frozen_vector
     vault::segmented_vector
@@ -51,6 +53,12 @@ foreach(benchmark ${ALL_BENCHMARKS})
     vault.shortest_common_superstring.benchmarks.${benchmark}
   )
 endforeach()
+
+target_sources(vault.shortest_common_superstring.benchmarks.map_view.exe PRIVATE
+  benchmarks.map_view.hpp
+  benchmarks.map_view.cpp
+  benchmarks.map_view.impl.cpp
+)
 
 if(PROJECT_IS_TOP_LEVEL)
   if(NOT TARGET vault.benchmarks)
