@@ -120,7 +120,9 @@ namespace lazyfb {
   // -----------------------------------------------------------------------------
 
   template <concepts::flatbuffer_table T, typename Policy = policies::thread_safe>
-  class lazy_wrapper;
+  class lazy_wrapper {
+    static_assert(concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>);
+  };
 
   template <concepts::flatbuffer_table T, typename Policy>
     requires concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>
@@ -190,11 +192,12 @@ namespace lazyfb {
     }
 
   private:
-    explicit lazy_wrapper(const T* table, typename Policy::template storage_type<context_type> ctx)
-      : table_(table), ctx_(std::move(ctx)) {}
+    using context_t = typename Policy::template storage_type<context_type>;
 
-    const T*                                             table_;
-    typename Policy::template storage_type<context_type> ctx_;
+    explicit lazy_wrapper(const T* table, context_t ctx) : table_(table), ctx_(std::move(ctx)) {}
+
+    const T*  table_;
+    context_t ctx_;
 
     template <concepts::flatbuffer_table U, typename P>
     friend class lazy_wrapper;
