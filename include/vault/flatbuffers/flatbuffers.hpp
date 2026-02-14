@@ -16,6 +16,8 @@
 #include <boost/smart_ptr/local_shared_ptr.hpp>
 #include <boost/smart_ptr/make_local_shared.hpp>
 
+#include "flatbuffers/verifier.h"
+
 namespace vault::fb {
   namespace concepts {
     template <typename T>
@@ -134,9 +136,11 @@ namespace vault::fb {
         return std::nullopt;
       }
 
-      auto options                     = flatbuffers::Verifier::Options{};
-      options.check_nested_flatbuffers = false;
-      auto verifier                    = flatbuffers::Verifier{data, size, options};
+      // clang-format off
+      auto verifier = flatbuffers::Verifier {
+	data, size, flatbuffers::Verifier::Options {.check_nested_flatbuffers = false}
+      };
+      // clang-format on
 
       if (verifier.template VerifyBuffer<T>(nullptr)) {
         return table{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
