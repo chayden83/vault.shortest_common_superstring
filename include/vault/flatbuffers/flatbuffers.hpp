@@ -21,7 +21,8 @@
 #include <utility>
 #include <vector>
 
-#include <vault/frozen_vector/local_shared_ptr.hpp>
+#include <boost/smart_ptr/local_shared_ptr.hpp>
+#include <boost/smart_ptr/make_local_shared.hpp>
 
 namespace lazyfb {
 
@@ -76,7 +77,7 @@ namespace lazyfb {
         constexpr void unlock_shared() const noexcept {}
       };
 
-      template <typename T> using storage_type = frozen::local_shared_ptr<T>;
+      template <typename T> using storage_type = boost::local_shared_ptr<T>;
 
       struct read_lock {
         explicit constexpr read_lock(mutex_type&) noexcept {}
@@ -89,7 +90,7 @@ namespace lazyfb {
       template <typename Context, typename... Args>
       static auto make_context(Args&&... args) -> storage_type<Context>
       {
-        return frozen::make_local_shared<Context>(std::forward<Args>(args)...);
+        return boost::make_local_shared<Context>(std::forward<Args>(args)...);
       }
     };
 
