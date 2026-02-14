@@ -18,29 +18,29 @@
 
 #include "flatbuffers/verifier.h"
 
+namespace vault::fb::concepts {
+  template <typename T>
+  concept table = std::is_base_of_v<flatbuffers::Table, T>;
+
+  template <typename P, typename T>
+  concept history = requires {
+    typename P::mutex_type;
+    typename P::read_lock;
+    typename P::write_lock;
+
+    { P::template make_context<T>() } -> std::same_as<typename P::template storage_type<T>>;
+  };
+} // namespace vault::fb::concepts
+
+namespace vault::fb::traits {
+  template <auto Accessor>
+  struct nested_type;
+}
+
 namespace vault::fb {
-  namespace concepts {
-    template <typename T>
-    concept table = std::is_base_of_v<flatbuffers::Table, T>;
-
-    template <typename P, typename T>
-    concept history = requires {
-      typename P::mutex_type;
-      typename P::read_lock;
-      typename P::write_lock;
-
-      { P::template make_context<T>() } -> std::same_as<typename P::template storage_type<T>>;
-    };
-  } // namespace concepts
-
-  namespace traits {
-    template <auto Accessor>
-    struct nested_type;
-  }
-
   using accessor_id = std::array<std::byte, 16>;
 
-  struct history_mt {
+  struct history_mt_policy {
     using mutex_type = std::shared_mutex;
 
     template <typename T>
@@ -55,7 +55,7 @@ namespace vault::fb {
     }
   };
 
-  struct history_st {
+  struct history_st_policy {
     struct mutex_type {
       constexpr void lock() const noexcept {}
       constexpr void unlock() const noexcept {}
@@ -82,14 +82,15 @@ namespace vault::fb {
 
   namespace detail {
     template <typename MutexType>
-    struct verification_context {
+    struct history {
       using key_type = std::pair<const uint8_t*, accessor_id>;
+
       std::vector<key_type> history;
       mutable MutexType     mutex;
     };
 
     template <auto Accessor>
-    inline const accessor_id id = []() {
+    inline const accessor_id id = [] {
       accessor_id id{};
       auto        accessor_val = Accessor;
       std::memcpy(id.data(), &accessor_val, sizeof(accessor_val));
@@ -114,16 +115,16 @@ namespace vault::fb {
   // Lazy Wrapper Implementation
   // -----------------------------------------------------------------------------
 
-  template <concepts::table T, typename Policy = history_mt>
+  template <concepts::table T, typename Policy = history_mt_policy>
   class table {
-    static_assert(concepts::history<Policy, detail::verification_context<typename Policy::mutex_type>>);
+    static_assert(concepts::history<Policy, detail::history<typename Policy::mutex_type>>);
   };
 
   template <concepts::table T, typename Policy>
-    requires concepts::history<Policy, detail::verification_context<typename Policy::mutex_type>>
+    requires concepts::history<Policy, detail::history<typename Policy::mutex_type>>
   class table<T, Policy> {
-    using context_t = detail::verification_context<typename Policy::mutex_type>;
-    using storage_t = typename Policy::template storage_type<context_t>;
+    using context_t = detail::history<typename Policy::mutex_type>;
+    using history_t = typename Policy::template storage_type<context_t>;
 
     template <auto Accessor, typename ExplicitType>
     using nested_t = detail::nested_type_t<ExplicitType, Accessor>;
@@ -205,10 +206,10 @@ namespace vault::fb {
     }
 
   private:
-    [[nodiscard]] table(const T* table, storage_t ctx) : table_(table), ctx_(std::move(ctx)) {}
+    [[nodiscard]] table(const T* table, history_t ctx) : table_(table), ctx_(std::move(ctx)) {}
 
     const T*  table_;
-    storage_t ctx_;
+    history_t ctx_;
 
     template <concepts::table U, typename P>
     friend class table;
