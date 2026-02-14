@@ -51,7 +51,7 @@ static void BM_LocalShared_Copy(benchmark::State& state) {
   size_t   N = state.range(0);
   LocalVec builder(N);
   // Explicitly freeze to local const handle
-  auto     src = std::move(builder).freeze<local_shared_ptr<const int[]>>();
+  auto src = std::move(builder).freeze<local_shared_ptr<const int[]>>();
   for (auto _ : state) {
     auto copy = src;
     benchmark::DoNotOptimize(copy.data());

@@ -1,5 +1,3 @@
-#include <benchmark/benchmark.h>
-
 #include <cmath>
 #include <cstddef>
 #include <deque>
@@ -7,14 +5,15 @@
 #include <random>
 #include <vector>
 
+#include <benchmark/benchmark.h>
+
 // Include your header here
 #include <vault/segmented_vector/segmented_vector.hpp>
 
 // -----------------------------------------------------------------------------
 // Benchmarking Config
 // -----------------------------------------------------------------------------
-using ValueType =
-    size_t; // Simple type to measure container overhead specifically
+using ValueType = size_t; // Simple type to measure container overhead specifically
 
 // We compare against std::deque (stable refs) and std::vector (baseline,
 // unstable refs) We also include std::list just to show how slow non-contiguous
@@ -24,8 +23,7 @@ using ValueType =
 // 1. Pure Append Benchmark (Push Back)
 // -----------------------------------------------------------------------------
 
-template <typename Container> static void BM_PushBack(benchmark::State& state)
-{
+template <typename Container> static void BM_PushBack(benchmark::State& state) {
   for (auto _ : state) {
     Container c;
     // prevent optimization
@@ -39,30 +37,19 @@ template <typename Container> static void BM_PushBack(benchmark::State& state)
 }
 
 // Register for segmented_vector
-BENCHMARK_TEMPLATE(BM_PushBack, segmented_vector<ValueType>)
-    ->RangeMultiplier(8)
-    ->Range(8, 2 << 15)
-    ->Complexity();
+BENCHMARK_TEMPLATE(BM_PushBack, segmented_vector<ValueType>)->RangeMultiplier(8)->Range(8, 2 << 15)->Complexity();
 
 // Register for std::deque
-BENCHMARK_TEMPLATE(BM_PushBack, std::deque<ValueType>)
-    ->RangeMultiplier(8)
-    ->Range(8, 2 << 15)
-    ->Complexity();
+BENCHMARK_TEMPLATE(BM_PushBack, std::deque<ValueType>)->RangeMultiplier(8)->Range(8, 2 << 15)->Complexity();
 
 // Register for std::vector
-BENCHMARK_TEMPLATE(BM_PushBack, std::vector<ValueType>)
-    ->RangeMultiplier(8)
-    ->Range(8, 2 << 15)
-    ->Complexity();
+BENCHMARK_TEMPLATE(BM_PushBack, std::vector<ValueType>)->RangeMultiplier(8)->Range(8, 2 << 15)->Complexity();
 
 // -----------------------------------------------------------------------------
 // 2. Pure Random Access Benchmark
 // -----------------------------------------------------------------------------
 
-template <typename Container>
-static void BM_RandomAccess(benchmark::State& state)
-{
+template <typename Container> static void BM_RandomAccess(benchmark::State& state) {
   // Setup container
   size_t    N = state.range(0);
   Container c;
@@ -93,14 +80,11 @@ static void BM_RandomAccess(benchmark::State& state)
   state.SetItemsProcessed(state.iterations() * 1000);
 }
 
-BENCHMARK_TEMPLATE(BM_RandomAccess, segmented_vector<ValueType>)
-    ->Range(1 << 10, 1 << 20); // 1K to 1M elements
+BENCHMARK_TEMPLATE(BM_RandomAccess, segmented_vector<ValueType>)->Range(1 << 10, 1 << 20); // 1K to 1M elements
 
-BENCHMARK_TEMPLATE(BM_RandomAccess, std::deque<ValueType>)
-    ->Range(1 << 10, 1 << 20);
+BENCHMARK_TEMPLATE(BM_RandomAccess, std::deque<ValueType>)->Range(1 << 10, 1 << 20);
 
-BENCHMARK_TEMPLATE(BM_RandomAccess, std::vector<ValueType>)
-    ->Range(1 << 10, 1 << 20);
+BENCHMARK_TEMPLATE(BM_RandomAccess, std::vector<ValueType>)->Range(1 << 10, 1 << 20);
 
 // -----------------------------------------------------------------------------
 // 3. Read/Write Ratio (The "Tipping Point" Test)
@@ -114,9 +98,7 @@ BENCHMARK_TEMPLATE(BM_RandomAccess, std::vector<ValueType>)
 //         0 = All Appends. 100 = All Reads.
 // -----------------------------------------------------------------------------
 
-template <typename Container>
-static void BM_MixedReadWrite(benchmark::State& state)
-{
+template <typename Container> static void BM_MixedReadWrite(benchmark::State& state) {
   size_t current_size    = 0;
   size_t max_size        = state.range(0); // e.g., 100,000
   long   read_percentage = state.range(1);
@@ -128,10 +110,9 @@ static void BM_MixedReadWrite(benchmark::State& state)
   }
   current_size = 1000;
 
-  std::mt19937                        rng(12345);
-  std::uniform_int_distribution<long> op_dist(0, 99);
-  std::uniform_int_distribution<size_t>
-      idx_dist; // distribution changes as size grows
+  std::mt19937                          rng(12345);
+  std::uniform_int_distribution<long>   op_dist(0, 99);
+  std::uniform_int_distribution<size_t> idx_dist; // distribution changes as size grows
 
   for (auto _ : state) {
     state.PauseTiming();
@@ -156,8 +137,7 @@ static void BM_MixedReadWrite(benchmark::State& state)
 
 // Define the arguments: Size fixed at 100k. Vary Read %: 0, 10, 50, 90, 99,
 // 100.
-static void CustomArguments(benchmark::internal::Benchmark* b)
-{
+static void CustomArguments(benchmark::internal::Benchmark* b) {
   // Check ratios at 100k elements
   int N = 100000;
   b->Args({N, 0});   // 100% Write
@@ -170,19 +150,14 @@ static void CustomArguments(benchmark::internal::Benchmark* b)
   b->Args({N, 100}); // 100% Read
 }
 
-BENCHMARK_TEMPLATE(BM_MixedReadWrite, segmented_vector<ValueType>)
-    ->Apply(CustomArguments);
-BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::deque<ValueType>)
-    ->Apply(CustomArguments);
-BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::vector<ValueType>)
-    ->Apply(CustomArguments);
+BENCHMARK_TEMPLATE(BM_MixedReadWrite, segmented_vector<ValueType>)->Apply(CustomArguments);
+BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::deque<ValueType>)->Apply(CustomArguments);
+BENCHMARK_TEMPLATE(BM_MixedReadWrite, std::vector<ValueType>)->Apply(CustomArguments);
 
 // Define a PMR-compatible alias for the segmented_vector
-using PmrSegmentedVector =
-    segmented_vector<size_t, std::pmr::polymorphic_allocator<size_t>>;
+using PmrSegmentedVector = segmented_vector<size_t, std::pmr::polymorphic_allocator<size_t>>;
 
-static void BM_PushBack_Monotonic(benchmark::State& state)
-{
+static void BM_PushBack_Monotonic(benchmark::State& state) {
   size_t N = state.range(0);
 
   // Calculate a buffer size large enough to hold N elements + overhead (spine,
@@ -198,8 +173,7 @@ static void BM_PushBack_Monotonic(benchmark::State& state)
   for (auto _ : state) {
     // Construct a monotonic resource over the pre-allocated buffer.
     // This is extremely fast (just pointer initialization).
-    std::pmr::monotonic_buffer_resource
-        pool(buffer.data(), buffer.size(), std::pmr::null_memory_resource());
+    std::pmr::monotonic_buffer_resource pool(buffer.data(), buffer.size(), std::pmr::null_memory_resource());
 
     // Create vector using the pool
     PmrSegmentedVector sv(&pool);
@@ -216,17 +190,13 @@ static void BM_PushBack_Monotonic(benchmark::State& state)
 }
 
 // Register the benchmark with the same ranges as before
-BENCHMARK(BM_PushBack_Monotonic)
-    ->RangeMultiplier(8)
-    ->Range(8, 2 << 15)
-    ->Complexity();
+BENCHMARK(BM_PushBack_Monotonic)->RangeMultiplier(8)->Range(8, 2 << 15)->Complexity();
 
 // -----------------------------------------------------------------------------
 // 4. Iteration Benchmark (Traverse All Elements)
 // -----------------------------------------------------------------------------
 
-template <typename Container> static void BM_Iteration(benchmark::State& state)
-{
+template <typename Container> static void BM_Iteration(benchmark::State& state) {
   size_t    N = state.range(0);
   Container c;
   // Fill container
@@ -248,16 +218,13 @@ template <typename Container> static void BM_Iteration(benchmark::State& state)
   state.SetItemsProcessed(state.iterations() * N);
 }
 
-BENCHMARK_TEMPLATE(BM_Iteration, segmented_vector<size_t>)
-    ->Range(1 << 12, 1 << 20); // 4k to 1M elements
+BENCHMARK_TEMPLATE(BM_Iteration, segmented_vector<size_t>)->Range(1 << 12, 1 << 20); // 4k to 1M elements
 
 BENCHMARK_TEMPLATE(BM_Iteration, std::deque<size_t>)->Range(1 << 12, 1 << 20);
 
 BENCHMARK_TEMPLATE(BM_Iteration, std::vector<size_t>)->Range(1 << 12, 1 << 20);
 
-template <typename Container>
-static void BM_ForEachSegment(benchmark::State& state)
-{
+template <typename Container> static void BM_ForEachSegment(benchmark::State& state) {
   size_t    N = state.range(0);
   Container c;
   for (size_t i = 0; i < N; ++i) {
@@ -273,7 +240,6 @@ static void BM_ForEachSegment(benchmark::State& state)
   state.SetItemsProcessed(state.iterations() * N);
 }
 
-BENCHMARK_TEMPLATE(BM_ForEachSegment, segmented_vector<size_t>)
-    ->Range(1 << 12, 1 << 20);
+BENCHMARK_TEMPLATE(BM_ForEachSegment, segmented_vector<size_t>)->Range(1 << 12, 1 << 20);
 
 BENCHMARK_MAIN();
