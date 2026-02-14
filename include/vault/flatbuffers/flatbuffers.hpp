@@ -145,6 +145,7 @@ namespace vault::fb {
       if (verifier.template VerifyBuffer<T>(nullptr)) {
         return table{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
       }
+
       return std::nullopt;
     }
 
