@@ -1,88 +1,67 @@
----
 Language: Cpp
-# 1. Base Style (Reset)
 BasedOnStyle: LLVM
 
-# 2. General Settings
+# --- Core Layout ---
+ColumnLimit: 120
 IndentWidth: 2
-TabWidth: 2
+ContinuationIndentWidth: 2
 UseTab: Never
-ColumnLimit: 80
-PointerAlignment: Left
+Standard: Latest
 
-# 3. String Handling (The Fix)
-# Forces multi-line strings to drop to a new line immediately
-AlwaysBreakBeforeMultilineStrings: true
-# Allows strings to be broken at all
-BreakStringLiterals: true
-
-# 4. Vertical Alignment
-AlignConsecutiveAssignments: true
-AlignConsecutiveDeclarations: true
-# (Safely omitted BitFields)
-
-# 5. Vertical Spacing
-SeparateDefinitionBlocks: Always
-EmptyLineBeforeAccessModifier: Always
-SortIncludes: CaseSensitive
-FixNamespaceComments: true
-NamespaceIndentation: All
-
-# 6. Brace Wrapping
-BreakBeforeBraces: Custom
-BraceWrapping:
-  AfterFunction: true           # New line for functions
-  AfterControlStatement: false  # Same line for logic
-  AfterClass: false
-  AfterEnum: false
-  AfterNamespace: false
-  AfterStruct: false
-  AfterUnion: false
-  BeforeElse: false
-  BeforeCatch: false
-  SplitEmptyFunction: false
-
-# 7. Logic Control Blocks
-InsertBraces: true
-RemoveBracesLLVM: false
-AllowShortBlocksOnASingleLine: Never
-AllowShortIfStatementsOnASingleLine: Never
+# --- Braces (Egyptian Style) ---
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 
-# 8. Constructor Initializers
+# --- Indentation & Namespaces ---
+NamespaceIndentation: All
+AccessModifierOffset: -2
+
+# --- Constructor Initializer Lists ---
+# Forces each member to its own line for clarity
 BreakConstructorInitializers: BeforeComma
-ConstructorInitializerIndentWidth: 4
-PackConstructorInitializers: Never
+ConstructorInitializerIndentWidth: 2
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
+AllowAllConstructorInitializersOnNextLine: true
 
-# 9. Short Functions
-AllowShortFunctionsOnASingleLine: All
+# --- Whitespace and Separation ---
+SpaceBeforeParens: ControlStatements
+SpaceAfterTemplateKeyword: true
+PointerAlignment: Left
+MaxEmptyLinesToKeep: 1
+SpaceBeforeAssignmentOperators: true
+SpaceInEmptyParentheses: false
 
-# 10. Arguments & Parameters
-AlignAfterOpenBracket: DontAlign
-ContinuationIndentWidth: 2
-BinPackArguments: false
-BinPackParameters: false
-
-# 11. Penalties (Tuned for Strings & Method Chains)
-# 1. Cheap to break strings (Standard was 1000 -> Now 10)
-PenaltyBreakString: 10
-# 2. Cheap to break after '='
-PenaltyBreakAssignment: 10
-# 3. Expensive to break inside function calls
-PenaltyBreakBeforeFirstCallParameter: 200
-# 4. Global limits
-PenaltyExcessCharacter: 1000000
-PenaltyReturnTypeOnItsOwnLine: 60
-
-# Helps align the 'requires' clause body correctly
+# --- Alignment and Wrapping ---
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignTrailingComments: true
+RequiresClausePosition: OwnLine
 IndentRequiresClause: true
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackParameters: false
+BinPackArguments: false
 
-# --- Binary Operators ---
-# Moves &&, ||, +, -, etc. to the start of the next line.
-# We use 'NonAssignment' so that 'auto x =' keeps the '=' on the first line.
-BreakBeforeBinaryOperators: NonAssignment
+# --- Attribute and Qualifier Handling ---
+AllowShortAttributesOnASingleLine: false
 
-# Stops lines from trying to align vertically with the '=' or '(' above.
-# Instead, it just uses the continuation indent (4 spaces).
-AlignOperands: DontAlign
+# --- Reflow and Comments ---
+ReflowComments: true
+BreakStringLiterals: false
+
+# --- Include Grouping (Up to 3 levels deep) ---
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '^<[^/]+>$'
+    Priority:        10
+  - Regex:           '^<[^/]+/[^/]+>$'
+    Priority:        20
+  - Regex:           '^<[^/]+/[^/]+/[^/]+>$'
+    Priority:        30
+  - Regex:           '^<[^/]+/[^/]+/[^/]+/.+>$'
+    Priority:        40
+  - Regex:           '^"[^"]+"'
+    Priority:        50
