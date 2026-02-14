@@ -22,6 +22,52 @@ AccessModifierOffset: -2
 AlignConsecutiveAssignments: true
 AlignConsecutiveDeclarations: true
 AlignTrailingComments: true
+AlignAfterOpenBracket: BlockIndent
+
+# --- Constructor Initializers ---
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerIndentWidth: 2
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+AllowAllConstructorInitializersOnNextLine: true
+
+# --- Whitespace ---
+SpaceBeforeParens: ControlStatements
+SpaceAfterTemplateKeyword: true
+PointerAlignment: Left
+MaxEmptyLinesToKeep: 1
+SpaceBeforeAssignmentOperators: true
+
+# --- Modern C++ ---
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+RequiresClausePosition: OwnLine
+IndentRequiresClause: true
+
+Language: Cpp
+BasedOnStyle: LLVM
+
+# --- Core Layout ---
+ColumnLimit: 120
+IndentWidth: 2
+ContinuationIndentWidth: 2
+UseTab: Never
+Standard: Latest
+
+# --- Braces (Egyptian) ---
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+
+# --- Indentation ---
+NamespaceIndentation: All
+AccessModifierOffset: -2
+
+# --- ALIGNMENT (Legacy Compatible) ---
+# Using strict booleans to ensure compatibility with older clang-format versions
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignTrailingComments: true
 
 # --- Constructor Initializers ---
 BreakConstructorInitializers: BeforeColon
@@ -57,3 +103,4 @@ IncludeCategories:
     Priority:        40
   - Regex:           '^"[^"]+"'
     Priority:        50
+ 
