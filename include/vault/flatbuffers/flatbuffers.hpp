@@ -24,7 +24,7 @@ namespace vault::fb {
     concept table = std::is_base_of_v<flatbuffers::Table, T>;
 
     template <typename P, typename T>
-    concept table_cache = requires {
+    concept history = requires {
       typename P::mutex_type;
       typename P::read_lock;
       typename P::write_lock;
@@ -40,7 +40,7 @@ namespace vault::fb {
 
   using accessor_id = std::array<std::byte, 16>;
 
-  struct table_cache_mt {
+  struct history_mt {
     using mutex_type = std::shared_mutex;
 
     template <typename T>
@@ -55,7 +55,7 @@ namespace vault::fb {
     }
   };
 
-  struct table_cache_st {
+  struct history_st {
     struct mutex_type {
       constexpr void lock() const noexcept {}
       constexpr void unlock() const noexcept {}
@@ -89,7 +89,7 @@ namespace vault::fb {
     };
 
     template <auto Accessor>
-    const accessor_id id = []() {
+    inline const accessor_id id = []() {
       accessor_id id{};
       auto        accessor_val = Accessor;
       std::memcpy(id.data(), &accessor_val, sizeof(accessor_val));
@@ -114,13 +114,13 @@ namespace vault::fb {
   // Lazy Wrapper Implementation
   // -----------------------------------------------------------------------------
 
-  template <concepts::table T, typename Policy = table_cache_mt>
+  template <concepts::table T, typename Policy = history_mt>
   class table {
-    static_assert(concepts::table_cache<Policy, detail::verification_context<typename Policy::mutex_type>>);
+    static_assert(concepts::history<Policy, detail::verification_context<typename Policy::mutex_type>>);
   };
 
   template <concepts::table T, typename Policy>
-    requires concepts::table_cache<Policy, detail::verification_context<typename Policy::mutex_type>>
+    requires concepts::history<Policy, detail::verification_context<typename Policy::mutex_type>>
   class table<T, Policy> {
     using context_t = detail::verification_context<typename Policy::mutex_type>;
     using storage_t = typename Policy::template storage_type<context_t>;
