@@ -120,19 +120,22 @@ namespace lazyfb {
   // -----------------------------------------------------------------------------
 
   template <concepts::flatbuffer_table T, typename Policy = policies::thread_safe>
-  class lazy_wrapper {
+  class table {
     static_assert(concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>);
   };
 
   template <concepts::flatbuffer_table T, typename Policy>
     requires concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>
-  class lazy_wrapper<T, Policy> {
+  class table<T, Policy> {
     using context_t = detail::verification_context<typename Policy::mutex_type>;
     using storage_t = typename Policy::template storage_type<context_t>;
 
+    template <auto Accessor, typename ExplicitType>
+    using nested_t = typename detail::resolve_nested_type<ExplicitType, Accessor>::type;
+
   public:
     [[nodiscard]]
-    static auto create(const uint8_t* data, size_t size) -> std::optional<lazy_wrapper<T, Policy>> {
+    static auto create(const uint8_t* data, size_t size) -> std::optional<table<T, Policy>> {
       if (!data || size == 0) [[unlikely]] {
         return std::nullopt;
       }
@@ -142,7 +145,7 @@ namespace lazyfb {
       auto verifier                    = flatbuffers::Verifier{data, size, options};
 
       if (verifier.template VerifyBuffer<T>(nullptr)) {
-        return lazy_wrapper{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
+        return table{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
       }
       return std::nullopt;
     }
@@ -156,11 +159,11 @@ namespace lazyfb {
     }
 
     template <auto Accessor, typename ExplicitType = void>
-    [[nodiscard]] auto get_nested() const {
+    [[nodiscard]] auto get_nested() const -> std::optional<table<nested_t<Accessor, ExplicitType>, Policy>> {
       using NestedT = typename detail::resolve_nested_type<ExplicitType, Accessor>::type;
       static_assert(concepts::flatbuffer_table<NestedT>);
 
-      using return_type = std::optional<lazy_wrapper<NestedT, Policy>>;
+      using return_type = std::optional<table<NestedT, Policy>>;
       const auto* vec   = (table_->*Accessor)();
       if (!vec) {
         return return_type{std::nullopt};
@@ -173,7 +176,7 @@ namespace lazyfb {
         auto lock = typename Policy::read_lock(ctx_->mutex);
         for (const auto& [ptr, hist_id] : ctx_->history) {
           if (ptr == nested_data && hist_id == id) {
-            return return_type(lazy_wrapper<NestedT, Policy>(flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
+            return return_type(table<NestedT, Policy>(flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
           }
         }
       }
@@ -181,27 +184,28 @@ namespace lazyfb {
       auto lock = typename Policy::write_lock(ctx_->mutex);
       for (const auto& [ptr, hist_id] : ctx_->history) {
         if (ptr == nested_data && hist_id == id) {
-          return return_type(lazy_wrapper<NestedT, Policy>(flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
+          return return_type(table<NestedT, Policy>(flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
         }
       }
 
       auto verifier = flatbuffers::Verifier{nested_data, vec->size()};
+
       if (verifier.template VerifyBuffer<NestedT>(nullptr)) {
         ctx_->history.emplace_back(nested_data, id);
-        return return_type(lazy_wrapper<NestedT, Policy>(flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
+        return return_type(table<NestedT, Policy>(flatbuffers::GetRoot<NestedT>(nested_data), ctx_));
       }
 
       return return_type{std::nullopt};
     }
 
   private:
-    explicit lazy_wrapper(const T* table, storage_t ctx) : table_(table), ctx_(std::move(ctx)) {}
+    explicit table(const T* table, storage_t ctx) : table_(table), ctx_(std::move(ctx)) {}
 
     const T*  table_;
     storage_t ctx_;
 
     template <concepts::flatbuffer_table U, typename P>
-    friend class lazy_wrapper;
+    friend class table;
   };
 
 } // namespace lazyfb
