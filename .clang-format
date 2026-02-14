@@ -9,6 +9,7 @@ UseTab: Never
 Standard: Latest
 
 # --- Braces (Egyptian) ---
+InsertBraces: true
 BreakBeforeBraces: Attach
 AllowShortBlocksOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Empty

@@ -127,20 +127,22 @@ namespace lazyfb {
   template <concepts::flatbuffer_table T, typename Policy>
     requires concepts::cache_policy<Policy, detail::verification_context<typename Policy::mutex_type>>
   class lazy_wrapper<T, Policy> {
-  public:
-    using context_type = detail::verification_context<typename Policy::mutex_type>;
+    using context_t = detail::verification_context<typename Policy::mutex_type>;
+    using storage_t = typename Policy::template storage_type<context_t>;
 
+  public:
     [[nodiscard]]
     static auto create(const uint8_t* data, size_t size) -> std::optional<lazy_wrapper<T, Policy>> {
-      if (!data || size == 0) [[unlikely]]
+      if (!data || size == 0) [[unlikely]] {
         return std::nullopt;
+      }
 
       auto options                     = flatbuffers::Verifier::Options{};
       options.check_nested_flatbuffers = false;
       auto verifier                    = flatbuffers::Verifier{data, size, options};
 
       if (verifier.template VerifyBuffer<T>(nullptr)) {
-        return lazy_wrapper{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_type>()};
+        return lazy_wrapper{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
       }
       return std::nullopt;
     }
@@ -160,8 +162,9 @@ namespace lazyfb {
 
       using return_type = std::optional<lazy_wrapper<NestedT, Policy>>;
       const auto* vec   = (table_->*Accessor)();
-      if (!vec)
+      if (!vec) {
         return return_type{std::nullopt};
+      }
 
       const auto* nested_data = vec->data();
       const auto& id          = detail::id_generator<Accessor>::value;
@@ -192,12 +195,10 @@ namespace lazyfb {
     }
 
   private:
-    using context_t = typename Policy::template storage_type<context_type>;
-
-    explicit lazy_wrapper(const T* table, context_t ctx) : table_(table), ctx_(std::move(ctx)) {}
+    explicit lazy_wrapper(const T* table, storage_t ctx) : table_(table), ctx_(std::move(ctx)) {}
 
     const T*  table_;
-    context_t ctx_;
+    storage_t ctx_;
 
     template <concepts::flatbuffer_table U, typename P>
     friend class lazy_wrapper;
