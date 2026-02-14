@@ -57,7 +57,7 @@ TEST_CASE("table core features", "[table]") {
   const auto buffer = create_test_buffer();
 
   SECTION("initialization and root access") {
-    auto zone = lazyfb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
+    auto zone = vault::fb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
 
     REQUIRE(zone.has_value());
     // Standard FlatBuffer accessor via operator->
@@ -65,7 +65,7 @@ TEST_CASE("table core features", "[table]") {
   }
 
   SECTION("memoization and pointer stability") {
-    auto zone = lazyfb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
+    auto zone = vault::fb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
 
     // Use auto-generated traits for single-argument call
     auto monster1 = zone->get_nested<&Game::World::Zone::boss>();
@@ -86,7 +86,7 @@ TEST_CASE("table policy variations", "[table][policy]") {
   const auto buffer = create_test_buffer();
 
   SECTION("single-threaded policy (no mutex overhead)") {
-    using fast_zone = lazyfb::table<Game::World::Zone, lazyfb::policies::single_threaded>;
+    using fast_zone = vault::fb::table<Game::World::Zone, vault::fb::policies::single_threaded>;
 
     auto zone = fast_zone::create(buffer.data(), buffer.size());
     REQUIRE(zone.has_value());
@@ -104,7 +104,7 @@ TEST_CASE("table policy variations", "[table][policy]") {
 TEST_CASE("transitive dependency resolution", "[table][transitive]") {
   const auto buffer = create_test_buffer();
 
-  auto  zone_opt = lazyfb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
+  auto  zone_opt = vault::fb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
   auto& zone     = *zone_opt;
 
   // Level 1: Resolve Monster from Zone (Cross-namespace/file)
@@ -126,7 +126,7 @@ TEST_CASE("transitive dependency resolution", "[table][transitive]") {
 
 TEST_CASE("explicit type override", "[table][traits]") {
   const auto buffer = create_test_buffer();
-  auto       zone   = lazyfb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
+  auto       zone   = vault::fb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
 
   // Explicitly providing the type bypasses trait lookup
   auto monster = zone->get_nested<&Game::World::Zone::boss, Game::Monster>();
