@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <bit>
 #include <concepts>
 #include <mutex>
 #include <optional>
@@ -89,13 +90,11 @@ namespace vault::fb {
       mutable MutexType     mutex;
     };
 
+    template <auto Value>
+    constexpr inline auto const identity = std::remove_cvref_t<decltype(Value)>{Value};
+
     template <auto Accessor>
-    inline const accessor_id id = [] {
-      accessor_id id{};
-      auto        accessor_val = Accessor;
-      std::memcpy(id.data(), &accessor_val, sizeof(accessor_val));
-      return id;
-    }();
+    inline const auto id = std::bit_cast<accessor_id>(identity<Accessor>);
 
     template <typename ExplicitType, auto Accessor>
     struct nested_type {
