@@ -9,8 +9,8 @@ UseTab: Never
 Standard: Latest
 
 # --- Braces (Egyptian) ---
-InsertBraces: true
 BreakBeforeBraces: Attach
+InsertBraces: true
 AllowShortBlocksOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Empty
 
@@ -28,16 +28,18 @@ BinPackArguments: false
 AllowAllParametersOfDeclarationOnNextLine: false
 
 # --- Templates & C++20 Constraints ---
-# Forces template <...> to its own line
 AlwaysBreakTemplateDeclarations: Yes
-# Ensures constraints are highly visible and indented for clarity
 RequiresClausePosition: OwnLine
 IndentRequiresClause: true
 
 # --- Constructor Initializers ---
-BreakConstructorInitializers: BeforeColon
+# Forces each initializer to its own line
+PackConstructorInitializers: Never
+# Places the colon and commas at the start of the line for vertical alignment
+BreakConstructorInitializers: BeforeComma
 ConstructorInitializerIndentWidth: 2
-ConstructorInitializerAllOnOneLineOrOnePerLine: true
+# Ensures short lists do not collapse onto one line
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
 AllowAllConstructorInitializersOnNextLine: true
 
 # --- Whitespace ---

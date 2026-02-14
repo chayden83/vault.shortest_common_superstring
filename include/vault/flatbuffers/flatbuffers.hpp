@@ -206,7 +206,9 @@ namespace vault::fb {
     }
 
   private:
-    [[nodiscard]] table(const T* table, history_t ctx) : table_(table), ctx_(std::move(ctx)) {}
+    [[nodiscard]] table(const T* table, history_t ctx)
+      : table_(table)
+      , ctx_(std::move(ctx)) {}
 
     const T*  table_;
     history_t ctx_;
