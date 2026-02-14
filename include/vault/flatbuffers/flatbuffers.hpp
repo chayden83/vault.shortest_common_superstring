@@ -166,13 +166,11 @@ namespace vault::fb {
       const auto* nested_data  = vec->data();
       const auto  history_size = ctx_->history.size();
 
-      const auto& id = detail::id<Accessor>;
-
       {
         auto lock = typename Policy::read_lock(ctx_->mutex);
 
         for (const auto& [ptr, hist_id] : ctx_->history) {
-          if (ptr == nested_data && hist_id == id) {
+          if (ptr == nested_data && hist_id == detail::id<Accessor>) {
             return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
           }
         }
@@ -183,7 +181,7 @@ namespace vault::fb {
       for (auto i = history_size; i != ctx_->history.size(); ++i) {
         const auto& [ptr, hist_id] = ctx_->history[i];
 
-        if (ptr == nested_data && hist_id == id) {
+        if (ptr == nested_data && hist_id == detail::id<Accessor>) {
           return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
         }
       }
@@ -193,7 +191,7 @@ namespace vault::fb {
       if (not verifier.template VerifyBuffer<nested_type>(nullptr)) {
         return std::nullopt;
       } else {
-        ctx_->history.emplace_back(nested_data, id);
+        ctx_->history.emplace_back(nested_data, detail::id<Accessor>);
       }
 
       return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
