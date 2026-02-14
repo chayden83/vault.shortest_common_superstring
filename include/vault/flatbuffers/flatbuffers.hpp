@@ -4,7 +4,6 @@
  */
 #pragma once
 
-#include <bit>
 #include <concepts>
 #include <mutex>
 #include <optional>
@@ -89,12 +88,7 @@ namespace vault::fb {
     };
 
     template <auto Accessor>
-    struct id_generator {
-      static const accessor_id value;
-    };
-
-    template <auto Accessor>
-    const accessor_id id_generator<Accessor>::value = []() {
+    const accessor_id id = []() {
       accessor_id id{};
       auto        accessor_val = Accessor;
       std::memcpy(id.data(), &accessor_val, sizeof(accessor_val));
@@ -172,7 +166,7 @@ namespace vault::fb {
       const auto* nested_data  = vec->data();
       const auto  history_size = ctx_->history.size();
 
-      const auto& id = detail::id_generator<Accessor>::value;
+      const auto& id = detail::id<Accessor>;
 
       {
         auto lock = typename Policy::read_lock(ctx_->mutex);
