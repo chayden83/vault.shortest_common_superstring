@@ -1,0 +1,12 @@
+// world.fbs
+include "monster.fbs";
+
+namespace Game.World;
+
+table Zone {
+  name:string;
+  // Transitive dependency: Game.Monster is defined in monster.fbs
+  boss: [ubyte] (nested_flatbuffer: "Game.Monster");
+}
+
+root_type Zone;

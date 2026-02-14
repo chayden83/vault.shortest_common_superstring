@@ -14,12 +14,14 @@ FetchContent_MakeAvailable(Catch2)
 FetchContent_MakeAvailable(flatbuffers)
 
 include("${flatbuffers_SOURCE_DIR}/CMake/BuildFlatBuffers.cmake")
+include("${PROJECT_SOURCE_DIR}/cmake/LazyFlatBuffers.cmake")
 
-flatbuffers_generate_headers(
-  TARGET         vault.flatbuffers.tests.schema
-  SCHEMAS        "${CMAKE_CURRENT_SOURCE_DIR}/monster.fbs"
-  INCLUDE        "${CMAKE_CURRENT_SOURCE_DIR}"
-  INCLUDE_PREFIX include
+add_lazy_flatbuffers_library(
+    TARGET          vault.flatbuffers.tests.schema
+    SCHEMAS         "${CMAKE_CURRENT_SOURCE_DIR}/monster.fbs"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/world.fbs"
+    INCLUDE         "${CMAKE_CURRENT_SOURCE_DIR}"
+    SCRIPT_PATH     "${CMAKE_SOURCE_DIR}/scripts/generate_lazy_traits.py"
 )
 
 add_executable(vault.flatbuffers.tests)
@@ -29,7 +31,7 @@ target_sources(vault.flatbuffers.tests PRIVATE
 )
 
 target_include_directories(vault.flatbuffers.tests PRIVATE
-  ${CMAKE_CURRENT_BINARY_DIR}/vault.flatbuffers.tests.schema/include
+  ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 target_link_libraries(vault.flatbuffers.tests PRIVATE
