@@ -17,18 +17,16 @@
 
 #include <boost/smart_ptr/local_shared_ptr.hpp>
 #include <boost/smart_ptr/make_local_shared.hpp>
+#include <boost/smart_ptr/make_local_shared_array.hpp>
 
 namespace vault::fb::concepts {
   template <typename T>
   concept table = std::is_base_of_v<flatbuffers::Table, T>;
 
-  template <typename P, typename T>
-  concept thread_safety_policy = requires {
-    typename P::mutex_type;
-    typename P::read_lock;
-    typename P::write_lock;
-
-    { P::template make_context<T>() } -> std::same_as<typename P::template storage_type<T>>;
+  template <template <typename> typename T>
+  concept synchronized_history = requires(T<int>& history) {
+    { history.with_read_lock(std::identity{}) } -> std::same_as<int const&>;
+    { history.with_write_lock(std::identity{}) } -> std::same_as<int&>;
   };
 } // namespace vault::fb::concepts
 
@@ -40,70 +38,48 @@ namespace vault::fb::traits {
 namespace vault::fb {
   using accessor_id = std::array<std::byte, 16>;
 
-  struct thread_safe_policy {
-    using mutex_type = std::shared_mutex;
+  template <typename HistoryT>
+  class synchronized_t {
+    using history_t = HistoryT;
 
-    template <typename T>
-    using storage_type = std::shared_ptr<T>;
-
-    using read_lock  = std::shared_lock<mutex_type>;
-    using write_lock = std::unique_lock<mutex_type>;
-
-    template <typename Context, typename... Args>
-    static auto make_context(Args&&... args) -> storage_type<Context> {
-      return std::make_shared<Context>(std::forward<Args>(args)...);
-    }
-  };
-
-  struct thread_unsafe_policy {
-    struct mutex_type {
-      constexpr void lock() const noexcept {}
-
-      constexpr void unlock() const noexcept {}
-
-      constexpr void lock_shared() const noexcept {}
-
-      constexpr void unlock_shared() const noexcept {}
+    struct impl_t {
+      std::shared_mutex mutex;
+      history_t         history;
     };
 
-    template <typename T>
-    using storage_type = boost::local_shared_ptr<T>;
+    std::shared_ptr<impl_t> impl = std::make_shared<impl_t>();
 
-    struct read_lock {
-      explicit constexpr read_lock(mutex_type&) noexcept {}
-    };
+  public:
+    template <std::invocable<history_t const&> ActionT>
+    std::invoke_result_t<ActionT, history_t const&> with_read_lock(ActionT action) const {
+      auto lock = std::shared_lock{impl->mutex};
+      return std::invoke(action, impl->history);
+    }
 
-    struct write_lock {
-      explicit constexpr write_lock(mutex_type&) noexcept {}
-    };
-
-    template <typename Context, typename... Args>
-    static auto make_context(Args&&... args) -> storage_type<Context> {
-      return boost::make_local_shared<Context>(std::forward<Args>(args)...);
+    template <std::invocable<history_t&> ActionT>
+    std::invoke_result_t<ActionT, history_t&> with_write_lock(ActionT action) {
+      auto lock = std::unique_lock{impl->mutex};
+      return std::invoke(action, impl->history);
     }
   };
 
-  template <typename MutexType>
-  struct linear_history : public std::vector<std::pair<const uint8_t*, accessor_id>> {
-    using std::vector<std::pair<const uint8_t*, accessor_id>>::vector;
-    mutable MutexType mutex;
-  };
+  template <typename HistoryT>
+  class unsynchronized_t {
+    boost::local_shared_ptr<HistoryT> impl = boost::make_local_shared<HistoryT>();
 
-  template <typename MutexType>
-  struct null_history {
-    mutable MutexType mutex;
-
-    [[nodiscard]] std::pair<const uint8_t*, accessor_id> const& operator[](std::size_t) const {
-      assert(false && "You must never call this function because null history contains no elements");
-      std::unreachable();
+  public:
+    template <std::invocable<HistoryT const&> ActionT>
+    std::invoke_result_t<ActionT, HistoryT const&> with_read_lock(ActionT action) const {
+      return std::invoke(action, *impl);
     }
 
-    [[nodiscard]] std::size_t size() const {
-      return 0;
+    template <std::invocable<HistoryT&> ActionT>
+    std::invoke_result_t<ActionT, HistoryT&> with_write_lock(ActionT action) {
+      return std::invoke(action, *impl);
     }
-
-    void emplace_back(auto&&...) {}
   };
+
+  // std::vector<std::pair<const uint8_t*, accessor_id>>
 
   namespace detail {
     template <auto Value>
@@ -130,25 +106,21 @@ namespace vault::fb {
   // Lazy Wrapper Implementation
   // -----------------------------------------------------------------------------
 
-  template <
-    concepts::table T,
-    typename Policy                      = thread_safe_policy,
-    template <typename> typename History = linear_history>
+  template <typename T, template <typename> typename H = synchronized_t>
   class table {
-    static_assert(concepts::thread_safety_policy<Policy, History<typename Policy::mutex_type>>);
+    static_assert(concepts::table<T> && concepts::synchronized_history<H>);
   };
 
-  template <concepts::table T, typename Policy, template <typename> typename History>
-    requires concepts::thread_safety_policy<Policy, History<typename Policy::mutex_type>>
-  class table<T, Policy, History> {
-    using context_t = History<typename Policy::mutex_type>;
-    using history_t = typename Policy::template storage_type<context_t>;
+  template <typename T, template <typename> typename H>
+    requires concepts::table<T> && concepts::synchronized_history<H>
+  class table<T, H> {
+    using history_t = H<std::vector<std::pair<const uint8_t*, accessor_id>>>;
 
     template <auto Accessor, typename ExplicitType>
     using nested_t = detail::nested_type_t<ExplicitType, Accessor>;
 
     template <auto Accessor, typename ExplicitType>
-    using nested_table_t = table<nested_t<Accessor, ExplicitType>, Policy>;
+    using nested_table_t = table<nested_t<Accessor, ExplicitType>, H>;
 
     template <concepts::table NestedT>
     static bool verify(uint8_t const* data, size_t size) {
@@ -163,11 +135,11 @@ namespace vault::fb {
 
   public:
     [[nodiscard]]
-    static auto create(const uint8_t* data, size_t size) -> std::optional<table<T, Policy>> {
+    static auto create(const uint8_t* data, size_t size) -> std::optional<table<T, H>> {
       if (!data || size == 0) [[unlikely]] {
         return std::nullopt;
       } else if (verify<T>(data, size)) {
-        return table{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
+        return table{flatbuffers::GetRoot<T>(data), history_t{}};
       }
 
       return std::nullopt;
@@ -192,43 +164,24 @@ namespace vault::fb {
         return std::nullopt;
       }
 
-      const auto initial_history_size = history_->size(); // Capture initial size
+      const auto hsize  = history_.with_read_lock(std::ranges::size);
+      auto const needle = std::pair{vec->data(), detail::id<Accessor>};
 
-      // Helper lambda to find the nested table in a specified range of history
-      auto find_in_history_range = [&](size_t start_idx, size_t end_idx) -> std::optional<table_type> {
-        for (size_t i = start_idx; i < end_idx; ++i) {
-          const auto& [ptr, hist_id] = (*history_)[i];
+      auto already_verified = history_.with_read_lock([&](auto const& history) -> bool {
+        return std::ranges::find(history, needle) != std::ranges::end(history);
+      });
 
-          if (ptr == vec->data() && hist_id == detail::id<Accessor>) {
-            return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
-          }
-        }
-
+      if (already_verified) {
+        return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
+      } else if (not verify<nested_type>(vec->data(), vec->size())) {
         return std::nullopt;
-      };
+      }
 
-      // 1. Attempt to find the entry with a read lock first
-      if (auto lock = typename Policy::read_lock(history_->mutex); true) {
-        if (auto found_table = find_in_history_range(0, initial_history_size)) {
-          return *found_table;
+      history_.with_write_lock([&](auto& history) {
+        if (std::ranges::find(history, needle) == std::ranges::end(history)) {
+          history.emplace_back(needle);
         }
-      }
-
-      // 2. If not found, acquire a write lock
-      auto lock = typename Policy::write_lock(history_->mutex);
-
-      // 3. Re-check history for elements potentially added by other threads
-      //    while waiting for the write lock. This loop only checks new entries.
-      if (auto found_table = find_in_history_range(initial_history_size, history_->size())) {
-        return *found_table;
-      }
-
-      // 4. If still not found, proceed to verify and add the new entry
-      if (not verify<nested_type>(vec->data(), vec->size())) {
-        return std::nullopt;
-      } else {
-        history_->emplace_back(vec->data(), detail::id<Accessor>);
-      }
+      });
 
       return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
     }
@@ -236,12 +189,15 @@ namespace vault::fb {
   private:
     [[nodiscard]] table(const T* table, history_t history)
       : table_(table)
-      , history_(std::move(history)) {}
+      , history_(std::move(history)) {
 
-    const T*  table_;
-    history_t history_;
+      assert(table != nullptr && "Initializing table with nullptr is invalid");
+    }
 
-    template <concepts::table U, typename P, template <typename> typename H>
+    const T*          table_;
+    mutable history_t history_;
+
+    template <typename, template <typename> typename>
     friend class table;
   };
 

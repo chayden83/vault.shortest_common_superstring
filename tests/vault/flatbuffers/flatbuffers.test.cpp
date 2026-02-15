@@ -86,7 +86,7 @@ TEST_CASE("table policy variations", "[table][policy]") {
   const auto buffer = create_test_buffer();
 
   SECTION("single-threaded policy (no mutex overhead)") {
-    using fast_zone = vault::fb::table<Game::World::Zone, vault::fb::thread_unsafe_policy>;
+    using fast_zone = vault::fb::table<Game::World::Zone, vault::fb::unsynchronized_t>;
 
     auto zone = fast_zone::create(buffer.data(), buffer.size());
     REQUIRE(zone.has_value());
