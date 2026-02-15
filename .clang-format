@@ -48,6 +48,7 @@ SpaceAfterTemplateKeyword: true
 PointerAlignment: Left
 MaxEmptyLinesToKeep: 1
 SpaceBeforeAssignmentOperators: true
+SeparateDefinitionBlocks: Always
 
 # --- Includes ---
 SortIncludes: CaseSensitive

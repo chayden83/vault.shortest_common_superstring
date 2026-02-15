@@ -59,8 +59,11 @@ namespace vault::fb {
   struct history_st_policy {
     struct mutex_type {
       constexpr void lock() const noexcept {}
+
       constexpr void unlock() const noexcept {}
+
       constexpr void lock_shared() const noexcept {}
+
       constexpr void unlock_shared() const noexcept {}
     };
 
@@ -166,42 +169,57 @@ namespace vault::fb {
 
       const auto* vec = (table_->*Accessor)();
 
-      if (!vec) {
+      if (not vec or not vec->size()) {
         return std::nullopt;
       }
 
-      const auto* nested_data  = vec->data();
-      const auto  history_size = ctx_->history.size();
+      const auto initial_history_size = ctx_->history.size(); // Capture initial size
 
+      // Helper lambda to find the nested table in a specified range of history
+      auto find_in_history_range = [&](size_t start_idx, size_t end_idx) -> std::optional<table_type> {
+        for (size_t i = start_idx; i < end_idx; ++i) {
+          const auto& [ptr, hist_id] = ctx_->history[i];
+
+          if (ptr == vec->data() && hist_id == detail::id<Accessor>) {
+            return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), ctx_);
+          }
+        }
+
+        return std::nullopt;
+      };
+
+      // 1. Attempt to find the entry with a read lock first
       {
         auto lock = typename Policy::read_lock(ctx_->mutex);
 
-        for (const auto& [ptr, hist_id] : ctx_->history) {
-          if (ptr == nested_data && hist_id == detail::id<Accessor>) {
-            return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
-          }
+        if (auto found_table = find_in_history_range(0, initial_history_size)) {
+          return *found_table;
         }
       }
 
+      // 2. If not found, acquire a write lock
       auto lock = typename Policy::write_lock(ctx_->mutex);
 
-      for (auto i = history_size; i != ctx_->history.size(); ++i) {
-        const auto& [ptr, hist_id] = ctx_->history[i];
-
-        if (ptr == nested_data && hist_id == detail::id<Accessor>) {
-          return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
-        }
+      // 3. Re-check history for elements potentially added by other threads
+      //    while waiting for the write lock. This loop only checks new entries.
+      if (auto found_table = find_in_history_range(initial_history_size, ctx_->history.size())) {
+        return *found_table;
       }
 
-      auto verifier = flatbuffers::Verifier{nested_data, vec->size()};
+      // 4. If still not found, proceed to verify and add the new entry
+      // clang-format off
+      auto verifier = flatbuffers::Verifier {
+	vec->data(), vec->size(), flatbuffers::Verifier::Options {.check_nested_flatbuffers = false}
+      };
+      // clang-format on
 
       if (not verifier.template VerifyBuffer<nested_type>(nullptr)) {
         return std::nullopt;
       } else {
-        ctx_->history.emplace_back(nested_data, detail::id<Accessor>);
+        ctx_->history.emplace_back(vec->data(), detail::id<Accessor>);
       }
 
-      return table_type(flatbuffers::GetRoot<nested_type>(nested_data), ctx_);
+      return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), ctx_);
     }
 
   private:
