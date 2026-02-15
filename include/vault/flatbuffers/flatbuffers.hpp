@@ -178,7 +178,7 @@ namespace vault::fb {
       }
 
       history_.with_write_lock([&](auto& history) {
-        if (std::ranges::find(history, needle) == std::ranges::end(history)) {
+        if (not std::ranges::contains(std::ranges::subrange(history, hsize), needle)) {
           history.emplace_back(needle);
         }
       });
