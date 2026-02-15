@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <bit>
 #include <concepts>
 #include <mutex>
@@ -164,11 +165,10 @@ namespace vault::fb {
         return std::nullopt;
       }
 
-      const auto hsize  = history_.with_read_lock(std::ranges::size);
       auto const needle = std::pair{vec->data(), detail::id<Accessor>};
 
-      auto already_verified = history_.with_read_lock([&](auto const& history) -> bool {
-        return std::ranges::find(history, needle) != std::ranges::end(history);
+      auto [hsize, already_verified] = history_.with_read_lock([&](auto const& history) {
+        return std::pair{std::ranges::size(history), std::ranges::contains(history, needle)};
       });
 
       if (already_verified) {
