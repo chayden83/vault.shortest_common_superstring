@@ -13,11 +13,10 @@
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <flatbuffers/verifier.h>
 
 #include <boost/smart_ptr/local_shared_ptr.hpp>
 #include <boost/smart_ptr/make_local_shared.hpp>
-
-#include "flatbuffers/verifier.h"
 
 namespace vault::fb::concepts {
   template <typename T>
