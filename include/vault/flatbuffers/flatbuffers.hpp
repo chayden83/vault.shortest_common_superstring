@@ -89,7 +89,7 @@ namespace vault::fb {
     struct history {
       using key_type = std::pair<const uint8_t*, accessor_id>;
 
-      std::vector<key_type> history;
+      std::vector<key_type> cache;
       mutable MutexType     mutex;
     };
 
@@ -134,20 +134,23 @@ namespace vault::fb {
     template <auto Accessor, typename ExplicitType>
     using nested_table_t = table<nested_t<Accessor, ExplicitType>, Policy>;
 
+    template <concepts::table NestedT>
+    static bool verify(uint8_t const* data, size_t size) {
+      // clang-format off
+      auto verifier = flatbuffers::Verifier{data, size,
+        flatbuffers::Verifier::Options{.check_nested_flatbuffers = false}
+      };
+      // clang-format on
+
+      return verifier.template VerifyBuffer<NestedT>(nullptr);
+    }
+
   public:
     [[nodiscard]]
     static auto create(const uint8_t* data, size_t size) -> std::optional<table<T, Policy>> {
       if (!data || size == 0) [[unlikely]] {
         return std::nullopt;
-      }
-
-      // clang-format off
-      auto verifier = flatbuffers::Verifier {
-	data, size, flatbuffers::Verifier::Options {.check_nested_flatbuffers = false}
-      };
-      // clang-format on
-
-      if (verifier.template VerifyBuffer<T>(nullptr)) {
+      } else if (verify<T>(data, size)) {
         return table{flatbuffers::GetRoot<T>(data), Policy::template make_context<context_t>()};
       }
 
@@ -173,15 +176,15 @@ namespace vault::fb {
         return std::nullopt;
       }
 
-      const auto initial_history_size = ctx_->history.size(); // Capture initial size
+      const auto initial_history_size = history_->cache.size(); // Capture initial size
 
       // Helper lambda to find the nested table in a specified range of history
       auto find_in_history_range = [&](size_t start_idx, size_t end_idx) -> std::optional<table_type> {
         for (size_t i = start_idx; i < end_idx; ++i) {
-          const auto& [ptr, hist_id] = ctx_->history[i];
+          const auto& [ptr, hist_id] = history_->cache[i];
 
           if (ptr == vec->data() && hist_id == detail::id<Accessor>) {
-            return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), ctx_);
+            return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
           }
         }
 
@@ -189,46 +192,38 @@ namespace vault::fb {
       };
 
       // 1. Attempt to find the entry with a read lock first
-      {
-        auto lock = typename Policy::read_lock(ctx_->mutex);
-
+      if (auto lock = typename Policy::read_lock(history_->mutex); true) {
         if (auto found_table = find_in_history_range(0, initial_history_size)) {
           return *found_table;
         }
       }
 
       // 2. If not found, acquire a write lock
-      auto lock = typename Policy::write_lock(ctx_->mutex);
+      auto lock = typename Policy::write_lock(history_->mutex);
 
       // 3. Re-check history for elements potentially added by other threads
       //    while waiting for the write lock. This loop only checks new entries.
-      if (auto found_table = find_in_history_range(initial_history_size, ctx_->history.size())) {
+      if (auto found_table = find_in_history_range(initial_history_size, history_->cache.size())) {
         return *found_table;
       }
 
       // 4. If still not found, proceed to verify and add the new entry
-      // clang-format off
-      auto verifier = flatbuffers::Verifier {
-	vec->data(), vec->size(), flatbuffers::Verifier::Options {.check_nested_flatbuffers = false}
-      };
-      // clang-format on
-
-      if (not verifier.template VerifyBuffer<nested_type>(nullptr)) {
+      if (not verify<nested_type>(vec->data(), vec->size())) {
         return std::nullopt;
       } else {
-        ctx_->history.emplace_back(vec->data(), detail::id<Accessor>);
+        history_->cache.emplace_back(vec->data(), detail::id<Accessor>);
       }
 
-      return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), ctx_);
+      return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
     }
 
   private:
-    [[nodiscard]] table(const T* table, history_t ctx)
+    [[nodiscard]] table(const T* table, history_t history)
       : table_(table)
-      , ctx_(std::move(ctx)) {}
+      , history_(std::move(history)) {}
 
     const T*  table_;
-    history_t ctx_;
+    history_t history_;
 
     template <concepts::table U, typename P>
     friend class table;
