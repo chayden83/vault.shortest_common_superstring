@@ -9,6 +9,7 @@
 #include <concepts>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <shared_mutex>
 #include <utility>
 #include <vector>
@@ -178,7 +179,7 @@ namespace vault::fb {
       }
 
       history_.with_write_lock([&](auto& history) {
-        if (not std::ranges::contains(std::ranges::subrange(history, hsize), needle)) {
+        if (not std::ranges::contains(std::views::drop(history, hsize), needle)) {
           history.emplace_back(needle);
         }
       });
