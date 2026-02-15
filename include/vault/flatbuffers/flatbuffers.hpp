@@ -83,15 +83,29 @@ namespace vault::fb {
     }
   };
 
+  template <typename MutexType>
+  struct linear_history : public std::vector<std::pair<const uint8_t*, accessor_id>> {
+    using std::vector<std::pair<const uint8_t*, accessor_id>>::vector;
+    mutable MutexType mutex;
+  };
+
+  template <typename MutexType>
+  struct null_history {
+    mutable MutexType mutex;
+
+    [[nodiscard]] std::pair<const uint8_t*, accessor_id> const& operator[](std::size_t) const {
+      assert(false && "You must never call this function because null history contains no elements");
+      std::unreachable();
+    }
+
+    [[nodiscard]] std::size_t size() const {
+      return 0;
+    }
+
+    void emplace_back(auto&&...) {}
+  };
+
   namespace detail {
-    template <typename MutexType>
-    struct history {
-      using key_type = std::pair<const uint8_t*, accessor_id>;
-
-      std::vector<key_type> cache;
-      mutable MutexType     mutex;
-    };
-
     template <auto Value>
     constexpr inline auto const lvalue = std::remove_cvref_t<decltype(Value)>{Value};
 
@@ -116,15 +130,18 @@ namespace vault::fb {
   // Lazy Wrapper Implementation
   // -----------------------------------------------------------------------------
 
-  template <concepts::table T, typename Policy = thread_safe_policy>
+  template <
+    concepts::table T,
+    typename Policy                      = thread_safe_policy,
+    template <typename> typename History = linear_history>
   class table {
-    static_assert(concepts::thread_safety_policy<Policy, detail::history<typename Policy::mutex_type>>);
+    static_assert(concepts::thread_safety_policy<Policy, History<typename Policy::mutex_type>>);
   };
 
-  template <concepts::table T, typename Policy>
-    requires concepts::thread_safety_policy<Policy, detail::history<typename Policy::mutex_type>>
-  class table<T, Policy> {
-    using context_t = detail::history<typename Policy::mutex_type>;
+  template <concepts::table T, typename Policy, template <typename> typename History>
+    requires concepts::thread_safety_policy<Policy, History<typename Policy::mutex_type>>
+  class table<T, Policy, History> {
+    using context_t = History<typename Policy::mutex_type>;
     using history_t = typename Policy::template storage_type<context_t>;
 
     template <auto Accessor, typename ExplicitType>
@@ -175,12 +192,12 @@ namespace vault::fb {
         return std::nullopt;
       }
 
-      const auto initial_history_size = history_->cache.size(); // Capture initial size
+      const auto initial_history_size = history_->size(); // Capture initial size
 
       // Helper lambda to find the nested table in a specified range of history
       auto find_in_history_range = [&](size_t start_idx, size_t end_idx) -> std::optional<table_type> {
         for (size_t i = start_idx; i < end_idx; ++i) {
-          const auto& [ptr, hist_id] = history_->cache[i];
+          const auto& [ptr, hist_id] = (*history_)[i];
 
           if (ptr == vec->data() && hist_id == detail::id<Accessor>) {
             return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
@@ -202,7 +219,7 @@ namespace vault::fb {
 
       // 3. Re-check history for elements potentially added by other threads
       //    while waiting for the write lock. This loop only checks new entries.
-      if (auto found_table = find_in_history_range(initial_history_size, history_->cache.size())) {
+      if (auto found_table = find_in_history_range(initial_history_size, history_->size())) {
         return *found_table;
       }
 
@@ -210,7 +227,7 @@ namespace vault::fb {
       if (not verify<nested_type>(vec->data(), vec->size())) {
         return std::nullopt;
       } else {
-        history_->cache.emplace_back(vec->data(), detail::id<Accessor>);
+        history_->emplace_back(vec->data(), detail::id<Accessor>);
       }
 
       return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
@@ -224,7 +241,7 @@ namespace vault::fb {
     const T*  table_;
     history_t history_;
 
-    template <concepts::table U, typename P>
+    template <concepts::table U, typename P, template <typename> typename H>
     friend class table;
   };
 
