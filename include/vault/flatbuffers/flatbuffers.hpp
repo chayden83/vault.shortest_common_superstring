@@ -156,6 +156,11 @@ namespace vault::fb {
       return table_;
     }
 
+    [[nodiscard]]
+    static auto create(std::span<uint8_t const> bytes) -> std::optional<table<T, H>> {
+      return create(std::ranges::data(bytes), std::ranges::size(bytes));
+    }
+
     template <auto Accessor, typename ExplicitType = void>
     [[nodiscard]] auto get_nested() const -> std::optional<nested_table_t<Accessor, ExplicitType>> {
       using nested_type = nested_t<Accessor, ExplicitType>;
@@ -186,11 +191,6 @@ namespace vault::fb {
       });
 
       return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
-    }
-
-    [[nodiscard]]
-    static auto create(std::span<uint8_t const> bytes) -> std::optional<table<T, H>> {
-      return create(std::ranges::data(bytes), std::ranges::size(bytes));
     }
 
     template <auto Accessor>
