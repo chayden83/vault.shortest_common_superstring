@@ -187,6 +187,20 @@ namespace vault::fb {
       return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
     }
 
+    template <auto Accessor>
+    [[nodiscard]] auto get_list() const {
+      auto const* fb_vector = (table_->*Accessor)();
+
+      // clang-format off
+      auto nth_table = [&, fb_vector](std::size_t n) {
+	return table{fb_vector->Get(n), history_};
+      };
+
+      return std::views::iota(0U, fb_vector ? fb_vector->size() : 0U)
+	| std::views::transform(nth_table);
+      // clang-format on
+    }
+
   private:
     [[nodiscard]] table(const T* table, history_t history)
       : table_(table)
