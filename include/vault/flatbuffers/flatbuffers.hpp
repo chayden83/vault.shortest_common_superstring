@@ -11,6 +11,7 @@
 #include <optional>
 #include <ranges>
 #include <shared_mutex>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -193,7 +194,7 @@ namespace vault::fb {
 
       // clang-format off
       auto nth_table = [&, fb_vector](std::size_t n) {
-	return table{fb_vector->Get(n), history_};
+	return vault::fb::table { fb_vector->Get(n), history_ };
       };
 
       return std::views::iota(0U, fb_vector ? fb_vector->size() : 0U)
@@ -215,5 +216,8 @@ namespace vault::fb {
     template <typename, template <typename> typename>
     friend class table;
   };
+
+  template <typename T, template <typename> typename H, typename V>
+  table(T*, H<V>) -> table<T, H>;
 
 } // namespace vault::fb

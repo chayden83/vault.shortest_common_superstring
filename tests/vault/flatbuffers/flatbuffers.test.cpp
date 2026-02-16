@@ -10,6 +10,7 @@
 
 #include <vault/flatbuffers/flatbuffers.hpp>
 
+#include "flatbuffers/buffer.h"
 #include "monster_generated.h"
 #include "monster_traits.hpp"
 #include "world_generated.h"
@@ -39,9 +40,19 @@ namespace {
 
     // 3. Create Zone (Root)
     fbb.Clear();
+    auto minions = std::vector<flatbuffers::Offset<Game::Monster>>{};
+
+    for (int i = 0; i < 10; ++i) {
+      auto m_name = fbb.CreateString("Dragon");
+      auto m_gear = flatbuffers::Offset<flatbuffers::Vector<uint8_t>>{};
+      auto m      = Game::CreateMonster(fbb, m_name, 500, m_gear);
+
+      minions.emplace_back(m);
+    }
     auto z_name = fbb.CreateString("Forbidden Forest");
     auto z_boss = fbb.CreateVector(m_bytes);
-    auto z      = Game::World::CreateZone(fbb, z_name, z_boss);
+    auto z_mnns = fbb.CreateVector(minions);
+    auto z      = Game::World::CreateZone(fbb, z_name, z_boss, z_mnns);
     fbb.Finish(z);
 
     return {fbb.GetBufferPointer(), fbb.GetBufferPointer() + fbb.GetSize()};
@@ -75,6 +86,14 @@ TEST_CASE("table core features", "[table]") {
     REQUIRE(monster2.has_value());
     // Verify memoization: internal pointer is identical
     REQUIRE(monster1->get() == monster2->get());
+  }
+
+  SECTION("list of sub-tables") {
+    auto zone = vault::fb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
+
+    for (auto&& minion : zone->get_list<&Game::World::Zone::minions>()) {
+      // pass
+    }
   }
 }
 

@@ -3,14 +3,10 @@ include "monster.fbs";
 
 namespace Game.World;
 
-table Minion {
-  minion: [ubyte] (nested_flatbuffer: "Game.Monster");
-}
-
 table Zone {
   name:string;
   boss: [ubyte] (nested_flatbuffer: "Game.Monster");
-  minions: [Minion];
+  minions: [Monster];
 }
 
 root_type Zone;
