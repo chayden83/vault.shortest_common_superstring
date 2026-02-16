@@ -188,6 +188,11 @@ namespace vault::fb {
       return table_type(flatbuffers::GetRoot<nested_type>(vec->data()), history_);
     }
 
+    [[nodiscard]]
+    static auto create(std::span<uint8_t const> bytes) -> std::optional<table<T, H>> {
+      return create(std::ranges::data(bytes), std::ranges::size(bytes));
+    }
+
     template <auto Accessor>
       requires concepts::table<std::remove_cvref_t<decltype(*(std::declval<T>().*Accessor)()->Get(0))>>
     [[nodiscard]] auto get_list() const {
