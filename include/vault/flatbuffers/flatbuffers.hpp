@@ -189,7 +189,7 @@ namespace vault::fb {
     }
 
     template <auto Accessor>
-      requires concepts::table<std::remove_cvref_t<decltype(*(std::declval<T*>()->*Accessor)()->Get(0))>>
+      requires concepts::table<std::remove_cvref_t<decltype(*(std::declval<T>().*Accessor)()->Get(0))>>
     [[nodiscard]] auto get_list() const {
       auto const* fb_vector = (table_->*Accessor)();
 
