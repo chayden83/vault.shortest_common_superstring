@@ -165,7 +165,7 @@ namespace vault::fb {
 
     [[nodiscard]]
     static auto create_size_prefixed(const uint8_t* data, size_t size) -> std::optional<table<T, H>> {
-      if (!data || size < sizeof(flatbuffers::uoffset_t)) [[unlikely]] {
+      if (!data) {
         return std::nullopt;
       } else if (verify_size_prefixed(data, size)) {
         return table{flatbuffers::GetSizePrefixedRoot<T>(data), history_t{}};
