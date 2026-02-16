@@ -62,5 +62,9 @@ IncludeCategories:
     Priority:        30
   - Regex:           '^<[^/]+/[^/]+/[^/]+/.+>$'
     Priority:        40
-  - Regex:           '^"[^"]+"'
+  - Regex:           '^"[^"/]+"'
     Priority:        50
+  - Regex:           '^"[^"/]+/[^"/]+"'
+    Priority:        60
+  - Regex:           '^"[^"/]+/[^"/]+/[^"]+"'
+    Priority:        70
