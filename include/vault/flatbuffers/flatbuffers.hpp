@@ -136,6 +136,16 @@ namespace vault::fb {
       return verifier.template VerifyBuffer<NestedT>(nullptr);
     }
 
+    static bool verify_size_prefixed(uint8_t const* data, size_t size) {
+      // clang-format off
+      auto verifier = flatbuffers::Verifier{data, size,
+        flatbuffers::Verifier::Options{.check_nested_flatbuffers = false}
+      };
+      // clang-format on
+
+      return verifier.template VerifySizePrefixedBuffer<T>(nullptr);
+    }
+
   public:
     [[nodiscard]]
     static auto create(const uint8_t* data, size_t size) -> std::optional<table<T, H>> {
@@ -148,17 +158,33 @@ namespace vault::fb {
       return std::nullopt;
     }
 
+    [[nodiscard]]
+    static auto create(std::span<uint8_t const> bytes) -> std::optional<table<T, H>> {
+      return create(std::ranges::data(bytes), std::ranges::size(bytes));
+    }
+
+    [[nodiscard]]
+    static auto create_size_prefixed(const uint8_t* data, size_t size) -> std::optional<table<T, H>> {
+      if (!data || size < sizeof(flatbuffers::uoffset_t)) [[unlikely]] {
+        return std::nullopt;
+      } else if (verify_size_prefixed(data, size)) {
+        return table{flatbuffers::GetSizePrefixedRoot<T>(data), history_t{}};
+      }
+
+      return std::nullopt;
+    }
+
+    [[nodiscard]]
+    static auto create_size_prefixed(std::span<uint8_t const> bytes) -> std::optional<table<T, H>> {
+      return create_size_prefixed(std::ranges::data(bytes), std::ranges::size(bytes));
+    }
+
     [[nodiscard]] auto operator->() const noexcept -> const T* {
       return table_;
     }
 
     [[nodiscard]] auto get() const noexcept -> const T* {
       return table_;
-    }
-
-    [[nodiscard]]
-    static auto create(std::span<uint8_t const> bytes) -> std::optional<table<T, H>> {
-      return create(std::ranges::data(bytes), std::ranges::size(bytes));
     }
 
     template <auto Accessor, typename ExplicitType = void>
