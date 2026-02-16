@@ -43,7 +43,7 @@ namespace {
     auto minions = std::vector<flatbuffers::Offset<Game::Monster>>{};
 
     for (int i = 0; i < 10; ++i) {
-      auto m_name = fbb.CreateString("Dragon");
+      auto m_name = fbb.CreateString("Minion");
       auto m_gear = flatbuffers::Offset<flatbuffers::Vector<uint8_t>>{};
       auto m      = Game::CreateMonster(fbb, m_name, 500, m_gear);
 
@@ -92,8 +92,10 @@ TEST_CASE("table core features", "[table]") {
     auto zone = vault::fb::table<Game::World::Zone>::create(buffer.data(), buffer.size());
 
     for (auto&& minion : zone->get_list<&Game::World::Zone::minions>()) {
-      // pass
+      REQUIRE(minion->name()->str() == "Minion");
     }
+
+    REQUIRE(zone->get_list<&Game::World::Zone::minions>().size() == 10);
   }
 }
 
