@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -28,7 +29,7 @@ namespace vault::containers {
   };
 
   struct key_128_high {
-    [[nodiscard]] static constexpr inline uint64_t operator()(auto const &, key_128 const& key) noexcept {
+    [[nodiscard]] static constexpr inline uint64_t operator()(auto const&, key_128 const& key) noexcept {
       return key.high;
     }
   };
@@ -70,6 +71,64 @@ namespace vault::containers {
     [[nodiscard]] static_index_base(std::shared_ptr<const impl> ptr);
   };
 
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  struct specialized_static_index_base {
+    static constexpr inline auto const npos = static_index_base::npos;
+
+    [[nodiscard]] specialized_static_index_base() = default;
+
+    [[nodiscard]] specialized_static_index_base(const specialized_static_index_base&)     = default;
+    [[nodiscard]] specialized_static_index_base(specialized_static_index_base&&) noexcept = default;
+
+    specialized_static_index_base& operator=(const specialized_static_index_base&)     = default;
+    specialized_static_index_base& operator=(specialized_static_index_base&&) noexcept = default;
+
+    ~specialized_static_index_base();
+
+    // --- Generalized Lookup ---
+
+    using bytes_sequence_visitor_t = fu2::function_view<void(std::span<std::byte const>)>;
+    using bytes_sequence_channel_t = fu2::function_view<void(bytes_sequence_visitor_t)>;
+
+    [[nodiscard]] std::tuple<std::size_t, key_128, Fingerprint> operator[](key_128) const;
+    [[nodiscard]] std::tuple<std::size_t, key_128, Fingerprint> operator[](bytes_sequence_channel_t) const;
+
+    [[nodiscard]] bool   empty() const noexcept;
+    [[nodiscard]] size_t memory_usage_bytes() const noexcept;
+
+    [[nodiscard]] static key_128 hash(bytes_sequence_channel_t);
+
+    // clang-format off
+    [[nodiscard]] static specialized_static_index_base build
+      (std::span<key_128 const>, std::span<Fingerprint const>);
+    // clang-format on
+
+  private:
+    struct impl;
+    std::shared_ptr<const impl> pimpl_;
+
+    [[nodiscard]] specialized_static_index_base(std::shared_ptr<const impl> ptr);
+  };
+
+  extern template class specialized_static_index_base<bool>;
+  extern template class specialized_static_index_base<char>;
+  extern template class specialized_static_index_base<signed char>;
+  extern template class specialized_static_index_base<unsigned char>;
+  extern template class specialized_static_index_base<short>;
+  extern template class specialized_static_index_base<unsigned short>;
+  extern template class specialized_static_index_base<int>;
+  extern template class specialized_static_index_base<unsigned int>;
+  extern template class specialized_static_index_base<long>;
+  extern template class specialized_static_index_base<unsigned long>;
+  extern template class specialized_static_index_base<long long>;
+  extern template class specialized_static_index_base<unsigned long long>;
+
+  extern template class specialized_static_index_base<wchar_t>;
+  extern template class specialized_static_index_base<char8_t>;
+  extern template class specialized_static_index_base<char16_t>;
+  extern template class specialized_static_index_base<char32_t>;
+
   template <typename Fingerprint = std::size_t, typename Proj = key_128_high, typename Comp = std::equal_to<>>
   class static_index : private static_index_base {
     frozen::frozen_vector<Fingerprint> fingerprints_;
@@ -91,13 +150,9 @@ namespace vault::containers {
     friend class static_index_builder<Fingerprint, Proj, Comp>;
 
   public:
-    using static_index_base::npos;
     using static_index_base::empty;
     using static_index_base::memory_usage_bytes;
-    
-    [[nodiscard]] bool empty() const noexcept {
-      return std::ranges::empty(fingerprints_);
-    }
+    using static_index_base::npos;
 
     template <concepts::underlying_byte_sequences K>
       requires std::predicate<
@@ -112,6 +167,46 @@ namespace vault::containers {
       auto [slot, hash] = static_index_base::operator[](byte_sequence_channel);
 
       if (std::invoke(comp_, std::invoke(proj_, item, hash), fingerprints_[slot])) {
+        return slot;
+      }
+
+      return std::nullopt;
+    }
+  };
+
+  template <typename Fingerprint, typename Proj, typename Comp>
+    requires std::is_integral_v<Fingerprint>
+  class static_index<Fingerprint, Proj, Comp> : private specialized_static_index_base<Fingerprint> {
+    using base_t = specialized_static_index_base<Fingerprint>;
+
+    [[no_unique_address]] Comp comp_;
+    [[no_unique_address]] Proj proj_;
+
+    [[nodiscard]] static_index(base_t base, Proj proj, Comp comp)
+      : base_t(std::move(base))
+      , comp_(std::move(comp))
+      , proj_(std::move(proj)) {}
+
+    friend class static_index_builder<Fingerprint, Proj, Comp>;
+
+  public:
+    using base_t::empty;
+    using base_t::memory_usage_bytes;
+    using base_t::npos;
+
+    template <concepts::underlying_byte_sequences K>
+      requires std::predicate<
+        Comp,
+        std::invoke_result_t<Proj, K const&, key_128 const&>,
+        std::invoke_result_t<Proj, K const&, key_128 const&>>
+    [[nodiscard]] std::optional<std::size_t> operator[](K&& item) const noexcept {
+      auto byte_sequence_channel = [&](concepts::byte_sequence_visitor auto visitor) {
+        traits::underlying_byte_sequences<std::remove_cvref_t<K>>::visit(std::forward<K>(item), visitor);
+      };
+
+      auto [slot, hash, fingerprint] = base_t::operator[](byte_sequence_channel);
+
+      if (std::invoke(comp_, std::invoke(proj_, item, hash), fingerprint)) {
         return slot;
       }
 
@@ -181,12 +276,36 @@ namespace vault::containers {
       return {std::move(base), std::move(permuted_fingerprints).freeze(), std::move(proj_), std::move(comp_)};
     }
 
+    [[nodiscard]] static_index<Fingerprint, Proj, Comp> build() &&
+      requires std::is_integral_v<Fingerprint>
+    {
+      auto base = specialized_static_index_base<Fingerprint>::build(hashes_, fingerprints_);
+      return {std::move(base), std::move(proj_), std::move(comp_)};
+    }
+
     template <std::invocable<std::size_t> Sink>
     [[nodiscard]] std::pair<static_index<Fingerprint, Proj, Comp>, Sink> build(Sink sink) && {
       auto self = std::move(*this).build();
 
       for (auto const& hash : hashes_) {
-        std::invoke(sink, static_cast<static_index_base const &>(self)[hash].first);
+        std::invoke(sink, static_cast<static_index_base const&>(self)[hash].first);
+      }
+
+      return {std::move(self), std::move(sink)};
+    }
+
+    template <std::invocable<std::size_t> Sink>
+      requires std::is_integral_v<Fingerprint>
+    [[nodiscard]] std::pair<static_index<Fingerprint, Proj, Comp>, Sink> build(Sink sink) && {
+      auto self = std::move(*this).build();
+
+      for (auto const& hash : hashes_) {
+	// clang-format off
+        auto [slot, _1, _2] = static_cast
+	  <specialized_static_index_base<Fingerprint> const&>(self)[hash];
+        // clang-format on
+        
+        std::invoke(sink, slot);
       }
 
       return {std::move(self), std::move(sink)};
