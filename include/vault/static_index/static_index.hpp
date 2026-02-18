@@ -175,7 +175,7 @@ namespace vault::containers {
       auto permuted_fingerprints = frozen::frozen_vector_builder<Fingerprint>(fingerprints_.size(), Fingerprint{});
 
       for (auto const& [index, hash] : std::views::enumerate(hashes_)) {
-        permuted_fingerprints[index] = std::move(fingerprints_[base[hash].first]);
+        permuted_fingerprints[base[hash].first] = std::move(fingerprints_[index]);
       }
 
       return {std::move(base), std::move(permuted_fingerprints).freeze(), std::move(proj_), std::move(comp_)};
