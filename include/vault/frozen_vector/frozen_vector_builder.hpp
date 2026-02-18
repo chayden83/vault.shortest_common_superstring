@@ -70,6 +70,24 @@ namespace frozen {
       check_invariants();
     }
 
+    // New constructor: count and value
+    [[nodiscard]]
+    frozen_vector_builder(
+        size_type count, const T& value, const allocator_type& a = allocator_type()
+    )
+        : allocator_(a)
+        , size_(count)
+        , capacity_(count)
+    {
+      data_ = ptr_policy::allocate(count, allocator_);
+      if (data_) {
+        std::fill_n(data_.get(), count, value);
+      } else {
+        assert(count == 0 && "Allocation failed but didn't throw");
+      }
+      check_invariants();
+    }
+
     // Conditional Copy Constructor
     [[nodiscard]]
     frozen_vector_builder(const frozen_vector_builder& other)

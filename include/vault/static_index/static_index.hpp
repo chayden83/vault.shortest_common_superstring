@@ -2,181 +2,144 @@
 #define VAULT_STATIC_INDEX_STATIC_INDEX_HPP
 
 #include <concepts>
+#include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <utility>
 #include <vector>
 
 #include <function2/function2.hpp>
+
+#include <vault/frozen_vector/frozen_vector.hpp>
+#include <vault/frozen_vector/frozen_vector_builder.hpp>
+
 #include <vault/static_index/traits.hpp>
 
 namespace vault::containers {
 
-  /**
-   * @brief A 128-bit hash key used for indexing.
-   */
   struct key_128 {
-    /// The lower 64 bits of the 128-bit hash.
     uint64_t low;
-    /// The higher 64 bits of the 128-bit hash.
     uint64_t high;
 
-    /**
-     * @brief Checks if two keys are identical.
-     *
-     * @param other The key to compare against.
-     * @return true if both the low and high components match, false otherwise.
-     */
     bool operator==(const key_128& other) const = default;
   };
 
+  struct key_128_high {
+    [[nodiscard]] static constexpr inline uint64_t operator()(auto const &, key_128 const& key) noexcept {
+      return key.high;
+    }
+  };
+
+  template <typename Fingerprint, typename Proj, typename Comp>
   class static_index_builder;
 
-  /**
-   * @brief A read-only, static index for checking set membership or
-   * retrieving associated values.
-   *
-   * The static_index is optimized for read-heavy workloads where the
-   * dataset is immutable after construction. It uses a perfect
-   * hashing scheme or similar static structure to ensure O(1)
-   * lookups.
-   *
-   * The implementation details are hidden behind a Pimpl (Pointer to
-   * Implementation) interface to ensure ABI stability and reduce
-   * compile-time dependencies.
-   *
-   * @note This class is thread-safe for const access.
-   */
-  class static_index {
-    friend class static_index_builder;
+  struct static_index_base {
+    static constexpr inline auto npos = std::numeric_limits<std::size_t>::max();
 
-  public:
-    /**
-     * @brief Default constructor.
-     *
-     * Creates an empty index.
-     */
-    [[nodiscard]] static_index() = default;
+    [[nodiscard]] static_index_base() = default;
 
-    /**
-     * @brief Copy constructor.
-     *
-     * Creates a new index sharing the underlying immutable implementation.
-     * This is a cheap operation (pointer copy).
-     */
-    [[nodiscard]] static_index(const static_index&) = default;
+    [[nodiscard]] static_index_base(const static_index_base&)     = default;
+    [[nodiscard]] static_index_base(static_index_base&&) noexcept = default;
 
-    /**
-     * @brief Move constructor.
-     *
-     * Transfers ownership of the underlying implementation.
-     */
-    [[nodiscard]] static_index(static_index&&) noexcept = default;
+    static_index_base& operator=(const static_index_base&)     = default;
+    static_index_base& operator=(static_index_base&&) noexcept = default;
 
-    /**
-     * @brief Copy assignment operator.
-     */
-    static_index& operator=(const static_index&) = default;
-
-    /**
-     * @brief Move assignment operator.
-     */
-    static_index& operator=(static_index&&) noexcept = default;
-
-    /**
-     * @brief Destructor.
-     */
-    ~static_index();
+    ~static_index_base();
 
     // --- Generalized Lookup ---
 
-    /**
-     * @brief Looks up an item in the index.
-     *
-     * Hashes the provided item and checks for its existence in the
-     * index.
-     *
-     * @tparam T The type of the item to lookup. Must satisfy the
-     * concepts::underlying_byte_sequences constraint.
-     *
-     * @param item The item to search for.
-     *
-     * @return std::optional<size_t> containing the index of the item
-     * if found, or std::nullopt if the item is not present.
-     */
-    template <typename T>
-      requires concepts::underlying_byte_sequences<std::remove_cvref_t<T>>
-    [[nodiscard]] std::optional<size_t> operator[](T&& item) const noexcept
-    {
-      return lookup_impl([&](concepts::byte_sequence_visitor auto visitor) {
-        traits::underlying_byte_sequences<std::remove_cvref_t<T>>::visit(
-          std::forward<T>(item), visitor);
-      });
-    }
+    using bytes_sequence_visitor_t = fu2::function_view<void(std::span<std::byte const>)>;
+    using bytes_sequence_channel_t = fu2::function_view<void(bytes_sequence_visitor_t)>;
 
-    /**
-     * @brief Returns the estimated memory usage of the index in bytes.
-     *
-     * @return The size of the internal data structures in bytes.
-     */
+    [[nodiscard]] std::pair<std::size_t, key_128> operator[](key_128) const;
+    [[nodiscard]] std::pair<std::size_t, key_128> operator[](bytes_sequence_channel_t) const;
+
+    [[nodiscard]] bool   empty() const noexcept;
     [[nodiscard]] size_t memory_usage_bytes() const noexcept;
 
-    /**
-     * @brief Checks if the index is empty.
-     *
-     * @return true if the index contains no elements, false otherwise.
-     */
-    [[nodiscard]] bool empty() const noexcept;
+    [[nodiscard]] static key_128           hash(bytes_sequence_channel_t);
+    [[nodiscard]] static static_index_base build(std::span<key_128 const>);
 
   private:
     struct impl;
-    /**
-     * @brief Pointer to the implementation.
-     *
-     * Uses shared_ptr to allow cheap copying of the read-only index.
-     */
     std::shared_ptr<const impl> pimpl_;
 
-    /**
-     * @brief Private constructor used by the Builder.
-     *
-     * @param ptr Shared pointer to the constructed implementation.
-     */
-    explicit static_index(std::shared_ptr<const impl> ptr);
-
-    using bytes_sequence_sink =
-      fu2::function_view<void(std::span<std::byte const>)>;
-
-    [[nodiscard]] std::optional<std::size_t> lookup_impl(
-      fu2::function_view<void(bytes_sequence_sink)> visitor) const;
-
-    // --- Internal Hashing Helpers (Shared with Builder) ---
+    [[nodiscard]] static_index_base(std::shared_ptr<const impl> ptr);
   };
 
-  /**
-   * @brief Builder class for constructing a static_index.
-   *
-   * Accumulates items, hashes them, and constructs an immutable static_index.
-   * Uses "Deducing This" pattern to support method chaining for both lvalues
-   * and rvalues.
-   */
-  struct static_index_builder {
+  template <typename Fingerprint = std::size_t, typename Proj = key_128_high, typename Comp = std::equal_to<>>
+  class static_index : private static_index_base {
+    frozen::frozen_vector<Fingerprint> fingerprints_;
 
-    /**
-     * @brief Adds a range of items to the builder.
-     *
-     * @tparam Self The type of the builder (deduced).
-     * @tparam R The type of the range.
-     * @param self The builder instance.
-     * @param items The range of items to add.
-     * @return Self&& The updated builder instance.
-     */
+    [[no_unique_address]] Comp comp_;
+    [[no_unique_address]] Proj proj_;
+
+    [[nodiscard]] static_index(
+      static_index_base                  base,
+      frozen::frozen_vector<Fingerprint> fingerprints,
+      Proj                               proj,
+      Comp                               comp
+    )
+      : static_index_base(std::move(base))
+      , fingerprints_(std::move(fingerprints))
+      , comp_(std::move(comp))
+      , proj_(std::move(proj)) {}
+
+    friend class static_index_builder<Fingerprint, Proj, Comp>;
+
+  public:
+    using static_index_base::npos;
+    using static_index_base::empty;
+    using static_index_base::memory_usage_bytes;
+    
+    [[nodiscard]] bool empty() const noexcept {
+      return std::ranges::empty(fingerprints_);
+    }
+
+    template <concepts::underlying_byte_sequences K>
+      requires std::predicate<
+        Comp,
+        std::invoke_result_t<Proj, K const&, key_128 const&>,
+        std::invoke_result_t<Proj, K const&, key_128 const&>>
+    [[nodiscard]] std::optional<std::size_t> operator[](K&& item) const noexcept {
+      auto byte_sequence_channel = [&](concepts::byte_sequence_visitor auto visitor) {
+        traits::underlying_byte_sequences<std::remove_cvref_t<K>>::visit(std::forward<K>(item), visitor);
+      };
+
+      auto [slot, hash] = static_index_base::operator[](byte_sequence_channel);
+
+      if (std::invoke(comp_, std::invoke(proj_, item, hash), fingerprints_[slot])) {
+        return slot;
+      }
+
+      return std::nullopt;
+    }
+  };
+
+  template <typename Fingerprint = std::size_t, typename Proj = key_128_high, typename Comp = std::equal_to<>>
+  class static_index_builder {
+    std::vector<key_128>     hashes_;
+    std::vector<Fingerprint> fingerprints_;
+
+    [[no_unique_address]] Comp comp_;
+    [[no_unique_address]] Proj proj_;
+
+  public:
+    [[nodiscard]] static_index_builder() = default;
+
+    [[nodiscard]] explicit static_index_builder(Proj proj)
+      : proj_(std::move(proj)) {}
+
+    [[nodiscard]] static_index_builder(Proj proj, Comp comp)
+      : comp_(std::move(comp))
+      , proj_(std::move(proj)) {}
+
     template <typename Self, std::ranges::input_range R>
-      requires concepts::underlying_byte_sequences<
-        std::remove_cvref_t<std::ranges::range_reference_t<R>>>
-    Self add_n(this Self&& self, R&& items)
-    {
+      requires concepts::underlying_byte_sequences<std::remove_cvref_t<std::ranges::range_reference_t<R>>>
+    Self add_n(this Self&& self, R&& items) {
       for (auto&& item : items) {
         self.add_1(std::forward<decltype(item)>(item));
       }
@@ -184,57 +147,56 @@ namespace vault::containers {
       return std::forward<Self>(self);
     }
 
-    /**
-     * @brief Adds a single item to the builder.
-     *
-     * Hashes the item immediately and stores the hash key.
-     *
-     * @tparam Self The type of the builder (deduced).
-     * @tparam T The type of the item.
-     * @param self The builder instance.
-     * @param item The item to add.
-     * @return Self&& The updated builder instance.
-     */
     template <typename Self, typename T>
       requires concepts::underlying_byte_sequences<std::remove_cvref_t<T>>
-    Self add_1(this Self&& self, T&& item)
-    {
-      self.add_1_impl([&](concepts::byte_sequence_visitor auto visitor) {
-        traits::underlying_byte_sequences<std::remove_cvref_t<T>>::visit(
-          std::forward<T>(item), visitor);
+    Self add_1(this Self&& self, T&& item) {
+      auto hash = static_index_base::hash([&](concepts::byte_sequence_visitor auto visitor) {
+        traits::underlying_byte_sequences<std::remove_cvref_t<T>>::visit(item, visitor);
       });
+
+      self.fingerprints_.emplace_back(std::invoke(self.proj_, std::forward<T>(item), hash));
+
+      try {
+        self.hashes_.emplace_back(hash);
+      } catch (...) {
+        self.fingerprints_.pop_back();
+        throw;
+      }
 
       return std::forward<Self>(self);
     }
 
-    [[nodiscard]] static_index build() &&;
+    [[nodiscard]] static_index<Fingerprint, Proj, Comp> build() && {
+      auto base = static_index_base::build(hashes_);
+
+      // Permute the fingerprints according to the perfect
+      // hash. Otherwise they will not align with the indexes returned
+      // when we perofrm a lookup.
+      auto permuted_fingerprints = frozen::frozen_vector_builder<Fingerprint>(fingerprints_.size(), Fingerprint{});
+
+      for (auto const& [index, hash] : std::views::enumerate(hashes_)) {
+        permuted_fingerprints[index] = std::move(fingerprints_[base[hash].first]);
+      }
+
+      return {std::move(base), std::move(permuted_fingerprints).freeze(), std::move(proj_), std::move(comp_)};
+    }
 
     template <std::invocable<std::size_t> Sink>
-    [[nodiscard]] std::pair<static_index, Sink> build(Sink sink) &&
-    {
-      auto index = std::move(*this).build_impl(std::ref(sink));
-      return {std::move(index), std::move(sink)};
+    [[nodiscard]] std::pair<static_index<Fingerprint, Proj, Comp>, Sink> build(Sink sink) && {
+      auto self = std::move(*this).build();
+
+      for (auto const& hash : hashes_) {
+        std::invoke(sink, static_cast<static_index_base const &>(self)[hash].first);
+      }
+
+      return {std::move(self), std::move(sink)};
     }
 
     template <std::output_iterator<std::size_t> O>
-    [[nodiscard]] std::pair<static_index, O> build(O out) &&
-    {
-      auto index =
-        std::move(*this).build_impl([&](std::size_t idx) { *out++ = idx; });
-
-      return {std::move(index), out};
+    [[nodiscard]] std::pair<static_index<Fingerprint, Proj, Comp>, O> build(O out) && {
+      auto [self, _] = std::move(*this).build([&](std::size_t target) { *out++ = target; });
+      return {std::move(self), std::move(out)};
     }
-
-  private:
-    using bytes_sequence_sink =
-      fu2::function_view<void(std::span<std::byte const>)>;
-
-    void add_1_impl(fu2::function_view<void(bytes_sequence_sink)>);
-
-    [[nodiscard]] static_index build_impl(
-      fu2::function_view<void(std::size_t)>) &&;
-
-    std::vector<key_128> hash_cache_;
   };
 
 } // namespace vault::containers

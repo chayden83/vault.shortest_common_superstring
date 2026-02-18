@@ -52,7 +52,7 @@ SeparateDefinitionBlocks: Always
 
 # --- Includes ---
 SortIncludes: CaseSensitive
-IncludeBlocks: Regroup
+IncludeBlocks: Preserve
 IncludeCategories:
   - Regex:           '^<[^/]+>$'
     Priority:        10
