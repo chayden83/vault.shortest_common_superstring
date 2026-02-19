@@ -212,14 +212,19 @@ namespace vault::containers {
     requires std::is_integral_v<Fingerprint>
   std::tuple<std::size_t, key_128, Fingerprint> specialized_static_index_base<Fingerprint>::operator[](key_128 hash
   ) const {
-    return {}; // TODO
+    if (!pimpl_) [[unlikely]] {
+      return {npos, hash, {}};
+    } else {
+      auto slot = pimpl_->mph_function(hash);
+      return { slot, hash, pimpl_->fingerprints[slot] };
+    }      
   }
 
   template <typename Fingerprint>
     requires std::is_integral_v<Fingerprint>
   std::tuple<std::size_t, key_128, Fingerprint>
   specialized_static_index_base<Fingerprint>::operator[](bytes_sequence_channel_t channel) const {
-    return {}; // TODO
+    return operator[](hash(channel));
   }
 
   template <typename Fingerprint>
