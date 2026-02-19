@@ -23,6 +23,7 @@ add_subdirectory(src/vault/frozen_vector)
 add_subdirectory(src/vault/segmented_vector)
 add_subdirectory(src/vault/flatbuffers)
 add_subdirectory(src/vault/map_view)
+add_subdirectory(src/vault/allocators)
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
 #  add_subdirectory(tests/vault/flat_map)
