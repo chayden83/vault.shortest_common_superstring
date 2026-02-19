@@ -167,3 +167,85 @@ namespace vault::containers {
   }
 
 } // namespace vault::containers
+
+// --- Specialized Static Index for Integral Type Fingerprints ---
+
+namespace vault::containers {
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  struct specialized_static_index_base<Fingerprint>::impl {
+    pthash::single_phf<hasher_128, pthash::skew_bucketer, pthash::dictionary_dictionary, true> mph_function;
+
+    std::size_t nfingerprints = 0;
+    Fingerprint fingerprints[];
+  };
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  specialized_static_index_base<Fingerprint>::specialized_static_index_base(std::shared_ptr<impl const> pimpl)
+    : pimpl_(std::move(pimpl)) {}
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  specialized_static_index_base<Fingerprint>::~specialized_static_index_base() = default;
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  bool specialized_static_index_base<Fingerprint>::empty() const noexcept {
+    return pimpl_->nfingerprints == 0;
+  }
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  size_t specialized_static_index_base<Fingerprint>::memory_usage_bytes() const noexcept {
+    return (pimpl_->mph_function.num_bits() / 8) + sizeof(pimpl_->nfingerprints) +
+           (pimpl_->nfingerprints * sizeof(Fingerprint));
+  }
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  key_128 specialized_static_index_base<Fingerprint>::hash(bytes_sequence_channel_t channel) {
+    return static_index_base::hash(channel);
+  }
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  std::tuple<std::size_t, key_128, Fingerprint> specialized_static_index_base<Fingerprint>::operator[](key_128 hash
+  ) const {
+    return {}; // TODO
+  }
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  std::tuple<std::size_t, key_128, Fingerprint>
+  specialized_static_index_base<Fingerprint>::operator[](bytes_sequence_channel_t channel) const {
+    return {}; // TODO
+  }
+
+  template <typename Fingerprint>
+    requires std::is_integral_v<Fingerprint>
+  specialized_static_index_base<Fingerprint> specialized_static_index_base<Fingerprint>::build(
+    std::span<key_128 const>     hashes,
+    std::span<Fingerprint const> fingerprints
+  ) {
+    return {}; // TODO
+  }
+
+  template class specialized_static_index_base<bool>;
+  template class specialized_static_index_base<char>;
+  template class specialized_static_index_base<signed char>;
+  template class specialized_static_index_base<unsigned char>;
+  template class specialized_static_index_base<short>;
+  template class specialized_static_index_base<unsigned short>;
+  template class specialized_static_index_base<int>;
+  template class specialized_static_index_base<unsigned int>;
+  template class specialized_static_index_base<long>;
+  template class specialized_static_index_base<unsigned long>;
+  template class specialized_static_index_base<long long>;
+  template class specialized_static_index_base<unsigned long long>;
+
+  template class specialized_static_index_base<wchar_t>;
+  template class specialized_static_index_base<char8_t>;
+  template class specialized_static_index_base<char16_t>;
+  template class specialized_static_index_base<char32_t>;
+} // namespace vault::containers
