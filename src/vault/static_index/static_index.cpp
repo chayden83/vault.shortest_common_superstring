@@ -1,4 +1,6 @@
+#include <cstdlib>
 #include <xxhash.h>
+
 #include <sys/mman.h>
 
 #include <cstring>
@@ -37,13 +39,11 @@ namespace vault::containers {
     // --- Custom Deleter ---
 
     struct impl_deleter {
-      size_t total_size_bytes;
-
       template <typename T>
       void operator()(T const* ptr) const {
         if (ptr) {
           std::destroy_at(const_cast<T*>(ptr));
-          munmap(const_cast<T*>(ptr), total_size_bytes);
+          free(const_cast<T*>(ptr));
         }
       }
     };
@@ -138,16 +138,18 @@ namespace vault::containers {
     // 2. Allocate Memory
     size_t total_bytes = sizeof(static_index_base::impl);
 
-    auto* ptr = mmap(
-      nullptr, total_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0
-    );
+    void* ptr = nullptr;
 
-    if (ptr == MAP_FAILED) {
-      ptr = mmap(nullptr, total_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    }
+    if (total_bytes >= 2 * 1024 * 1024) {
+      posix_memalign(&ptr, 2 * 1024 * 1024, total_bytes);
 
-    if (ptr == MAP_FAILED) {
-      throw std::bad_alloc();
+#if defined(MADV_COLLAPSE)
+      ::madvise(ptr, total_bytes, MADV_COLLAPSE);
+#elif defined(MADV_HUGEPAGE)
+      ::madvise(ptr, total_bytes, MADV_HUGEPAGE);
+#endif
+    } else {
+      ptr = malloc(total_bytes);
     }
 
     try {
@@ -155,13 +157,13 @@ namespace vault::containers {
 
       try {
         impl_ptr->mph_function = std::move(temp_mph);
-        return static_index_base(std::shared_ptr<const static_index_base::impl>(impl_ptr, impl_deleter{total_bytes}));
+        return static_index_base(std::shared_ptr<const static_index_base::impl>(impl_ptr, impl_deleter{}));
       } catch (...) {
         std::destroy_at(impl_ptr);
         throw;
       }
     } catch (...) {
-      munmap(ptr, total_bytes);
+      free(ptr);
       throw;
     }
   }
@@ -216,8 +218,8 @@ namespace vault::containers {
       return {npos, hash, {}};
     } else {
       auto slot = pimpl_->mph_function(hash);
-      return { slot, hash, pimpl_->fingerprints[slot] };
-    }      
+      return {slot, hash, pimpl_->fingerprints[slot]};
+    }
   }
 
   template <typename Fingerprint>
@@ -233,7 +235,63 @@ namespace vault::containers {
     std::span<key_128 const>     hashes,
     std::span<Fingerprint const> fingerprints
   ) {
-    return {}; // TODO
+    if (hashes.size() == 0) {
+      return {};
+    }
+
+    // 1. Build PTHash structure temporarily
+    auto temp_mph = pthash::single_phf<hasher_128, pthash::skew_bucketer, pthash::dictionary_dictionary, true>();
+
+    {
+      pthash::build_configuration config;
+
+      config.alpha   = 0.94;
+      config.lambda  = 3.5;
+      config.verbose = false;
+
+      temp_mph.build_in_internal_memory(hashes.begin(), hashes.size(), config);
+    }
+
+    // 2. Allocate Memory
+    size_t total_bytes = sizeof(impl) + (hashes.size() * sizeof(Fingerprint));
+
+    void* ptr = nullptr;
+
+    if (total_bytes >= 2 * 1024 * 1024) {
+      posix_memalign(&ptr, 2 * 1024 * 1024, total_bytes);
+
+#if defined(MADV_COLLAPSE)
+      ::madvise(ptr, total_bytes, MADV_COLLAPSE);
+#elif defined(MADV_HUGEPAGE)
+      ::madvise(ptr, total_bytes, MADV_HUGEPAGE);
+#endif
+    } else {
+      ptr = malloc(total_bytes);
+    }
+
+    try {
+      auto* impl_ptr = new (ptr) impl();
+
+      try {
+        impl_ptr->mph_function  = std::move(temp_mph);
+        impl_ptr->nfingerprints = hashes.size();
+
+        Fingerprint* raw_data = impl_ptr->fingerprints;
+
+        for (auto const& h : hashes) {
+          auto slot      = impl_ptr->mph_function(h);
+          raw_data[slot] = static_cast<Fingerprint>(h.high);
+        }
+
+        return specialized_static_index_base(std::shared_ptr<const impl>(impl_ptr, impl_deleter{}));
+      } catch (...) {
+        std::destroy_at(impl_ptr);
+        throw;
+      }
+    } catch (...) {
+      free(ptr);
+      throw;
+    }
   }
 
   template class specialized_static_index_base<bool>;
