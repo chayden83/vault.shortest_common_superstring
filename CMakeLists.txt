@@ -33,6 +33,7 @@ if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
   add_subdirectory(tests/vault/segmented_vector)
   add_subdirectory(tests/vault/flatbuffers)
   add_subdirectory(tests/vault/map_view)
+  add_subdirectory(tests/vault/allocators)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_EXAMPLES)

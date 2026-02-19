@@ -61,9 +61,12 @@ namespace static_data {
         throw std::bad_array_new_length();
       }
 
-      // Standard conformance: allow use within constexpr containers (like std::vector).
+      // Standard conformance: allow use within constexpr containers.
+      // We must use a typed allocator (like std::allocator) rather
+      // than ::operator new to satisfy the constexpr evaluator's
+      // typing requirements.
       if consteval {
-        return static_cast<T*>(::operator new(n * sizeof(T)));
+        return std::allocator<T>{}.allocate(n);
       }
 
       const std::size_t bytes = n * sizeof(T);
@@ -100,13 +103,13 @@ namespace static_data {
     using std::allocation_result;
 #else
     // Fallback for compilers that don't support C++23's allocation_result yet
-    template<typename Pointer>
+    template <typename Pointer>
     struct allocation_result {
-        Pointer ptr;
-        std::size_t count;
+      Pointer     ptr;
+      std::size_t count;
     };
 #endif
-    
+
     /**
      * @brief Allocates at least n elements, returning the actual allocated size.
      * Required for full C++23 standard library optimization support.
@@ -125,8 +128,10 @@ namespace static_data {
         return;
       }
 
+      // Standard conformance: In constexpr, deallocation must match
+      // the allocation method's type-tracking.
       if consteval {
-        ::operator delete(p);
+        std::allocator<T>{}.deallocate(p, n);
         return;
       }
 
