@@ -13,7 +13,7 @@ FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
   map_view
-#  flat_map
+  flat_map
 #  static_index
   frozen_vector
   fsst_dictionary
@@ -37,7 +37,7 @@ foreach(benchmark ${ALL_BENCHMARKS})
     benchmark::benchmark
     benchmark::benchmark_main
     vault::map_view
-#    vault::flat_map
+    vault::flat_map
     vault::static_index
     vault::frozen_vector
     vault::segmented_vector
