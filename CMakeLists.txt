@@ -16,7 +16,7 @@ include(GNUInstallDirs)
 
 include(cmake/vault-configure.cmake)
 
-#add_subdirectory(src/vault/flat_map)
+add_subdirectory(src/vault/flat_map)
 add_subdirectory(src/vault/algorithm)
 add_subdirectory(src/vault/static_index)
 add_subdirectory(src/vault/frozen_vector)
@@ -26,7 +26,7 @@ add_subdirectory(src/vault/map_view)
 add_subdirectory(src/vault/allocators)
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
-#  add_subdirectory(tests/vault/flat_map)
+  add_subdirectory(tests/vault/flat_map)
   add_subdirectory(tests/vault/algorithm)
   add_subdirectory(tests/vault/static_index)
   add_subdirectory(tests/vault/frozen_vector)
@@ -37,7 +37,7 @@ if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_EXAMPLES)
-#  add_subdirectory(examples)
+  add_subdirectory(examples)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_BENCHMARKS)
