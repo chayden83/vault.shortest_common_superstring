@@ -512,33 +512,57 @@ namespace eytzinger {
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
 
-    template <typename HaystackIter, typename NeedleIter, typename Comp, search_bound Bound>
-    struct search_job {
-      using ValT = std::iter_value_t<HaystackIter>;
+    template <typename HaystackIter, typename NeedleIter>
+    struct search_state {
+      NeedleIter  needle_iter;
+      std::size_t k = 0;
+      std::size_t result_idx;
 
-      HaystackIter begin_it;
-      std::size_t  n;
-      NeedleIter   needle_iter; // Storing iterator
-      Comp         comp;
-      std::size_t  k = 0;
-      std::size_t  result_idx;
+      [[nodiscard]] explicit search_state(NeedleIter iter)
+        : needle_iter(iter)
+        , result_idx(std::numeric_limits<std::size_t>::max()) {}
 
-      [[nodiscard]] search_job(HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
+      [[nodiscard]] NeedleIter get_needle_cursor() const {
+        return needle_iter;
+      }
+
+      [[nodiscard]] HaystackIter result(HaystackIter begin) const {
+        if (result_idx == std::numeric_limits<std::size_t>::max()) {
+          return begin + std::numeric_limits<std::ptrdiff_t>::max();
+        }
+        return begin + result_idx;
+      }
+    };
+
+    template <typename HaystackIter, typename Comp, search_bound Bound>
+    struct search_context {
+      HaystackIter               begin_it;
+      std::size_t                n;
+      [[no_unique_address]] Comp comp;
+
+      [[nodiscard]] constexpr explicit search_context(HaystackIter first, HaystackIter last, Comp c)
         : begin_it(first)
-        , n(size)
-        , needle_iter(n_iter)
-        , comp(c)
-        , result_idx(size) {}
+        , n(static_cast<std::size_t>(std::distance(first, last)))
+        , comp(c) {}
 
-      [[nodiscard]] vault::amac::step_result<1> init() {
+      [[nodiscard]] static constexpr uint64_t fanout() {
+        return implicit_btree_layout_policy::FANOUT;
+      }
+
+      template <typename State>
+      [[nodiscard]] vault::amac::step_result<1> init(State& state) const {
         if (n == 0) {
           return {nullptr};
         }
+        state.result_idx = n;
         return {std::to_address(begin_it)};
       }
 
-      [[nodiscard]] vault::amac::step_result<1> step() {
-        std::size_t block_start = k * B;
+      template <typename State>
+      [[nodiscard]] vault::amac::step_result<1> step(State& state) const {
+        using ValT = std::iter_value_t<HaystackIter>;
+
+        std::size_t block_start = state.k * B;
         if (block_start >= n) {
           return {nullptr};
         }
@@ -547,87 +571,48 @@ namespace eytzinger {
           std::size_t idx_in_block = [&] {
             if constexpr (Bound == search_bound::upper) {
               return block_searcher<ValT, Comp, B>::upper_bound(
-                std::to_address(begin_it + block_start), *needle_iter, comp, std::identity{}
+                std::to_address(begin_it + block_start), *state.needle_iter, comp, std::identity{}
               );
             } else {
               return block_searcher<ValT, Comp, B>::lower_bound(
-                std::to_address(begin_it + block_start), *needle_iter, comp, std::identity{}
+                std::to_address(begin_it + block_start), *state.needle_iter, comp, std::identity{}
               );
             }
           }();
 
           if (idx_in_block < B) {
-            result_idx = block_start + idx_in_block;
+            state.result_idx = block_start + idx_in_block;
           }
-          k = detail::btree_child_block_index(k, idx_in_block, B);
+          state.k = detail::btree_child_block_index(state.k, idx_in_block, B);
         } else {
           std::size_t count       = n - block_start;
           std::size_t idx_in_tail = [&] {
             if constexpr (Bound == search_bound::upper) {
               return scalar_block_searcher::upper_bound_n(
-                std::to_address(begin_it + block_start), count, *needle_iter, comp, std::identity{}
+                std::to_address(begin_it + block_start), count, *state.needle_iter, comp, std::identity{}
               );
             } else {
               return scalar_block_searcher::lower_bound_n(
-                std::to_address(begin_it + block_start), count, *needle_iter, comp, std::identity{}
+                std::to_address(begin_it + block_start), count, *state.needle_iter, comp, std::identity{}
               );
             }
           }();
 
           if (idx_in_tail < count) {
-            result_idx = block_start + idx_in_tail;
-            k          = detail::btree_child_block_index(k, idx_in_tail, B);
+            state.result_idx = block_start + idx_in_tail;
+            state.k          = detail::btree_child_block_index(state.k, idx_in_tail, B);
           } else {
-            k = detail::btree_child_block_index(k, count, B);
+            state.k = detail::btree_child_block_index(state.k, count, B);
           }
         }
 
-        if (k * B >= n) {
+        if (state.k * B >= n) {
           return {nullptr};
         }
 
-        return {std::to_address(begin_it + (k * B))};
-      }
-
-      [[nodiscard]] HaystackIter haystack_cursor() const {
-        return (result_idx == n) ? (begin_it + n) : (begin_it + result_idx);
-      }
-
-      [[nodiscard]] NeedleIter needle_cursor() const {
-        return needle_iter;
+        return {std::to_address(begin_it + (state.k * B))};
       }
     };
-
-    // TODO: Encapsulate shared context.
-    static constexpr inline struct search_context_t {
-      [[nodiscard]] static constexpr uint64_t fanout() {
-        return implicit_btree_layout_policy::FANOUT;
-      }
-
-      auto init(auto &job) const -> decltype(job.init()) { return job.init(); }
-      auto step(auto &job) const -> decltype(job.step()) { return job.init(); }
-    } search_context { };      
-    
-    struct lower_bound_job_fn {
-      template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
-      [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {
-        return search_job<std::ranges::iterator_t<Haystack>, NeedleIter, Comp, search_bound::lower>(
-          std::ranges::begin(haystack), std::ranges::size(haystack), needle, comp
-        );
-      }
-    };
-
-    struct upper_bound_job_fn {
-      template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
-      [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {
-        return search_job<std::ranges::iterator_t<Haystack>, NeedleIter, Comp, search_bound::upper>(
-          std::ranges::begin(haystack), std::ranges::size(haystack), needle, comp
-        );
-      }
-    };
-
-    static constexpr inline lower_bound_job_fn lower_bound_job{};
-    static constexpr inline upper_bound_job_fn upper_bound_job{};
   };
 
 } // namespace eytzinger

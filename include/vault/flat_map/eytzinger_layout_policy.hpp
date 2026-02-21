@@ -303,92 +303,84 @@ namespace eytzinger {
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
 
-    template <typename HaystackIter, typename NeedleIter, typename Comp, search_bound Bound>
-    struct search_job {
-      using ValT = std::iter_value_t<HaystackIter>;
+    template <typename HaystackIter, typename NeedleIter>
+    struct search_state {
+      NeedleIter  needle_iter;
+      std::size_t i = 0;
 
-      HaystackIter begin_it;
-      std::size_t  n;
-      NeedleIter   needle_iter; // Storing iterator, not value
-      Comp         comp;
-      std::size_t  i = 0;
+      [[nodiscard]] explicit search_state(NeedleIter iter)
+          : needle_iter(iter) {}
 
-      [[nodiscard]] search_job(HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
-        : begin_it(first)
-        , n(size)
-        , needle_iter(n_iter)
-        , comp(c) {}
+      [[nodiscard]] NeedleIter get_needle_cursor() const {
+        return needle_iter;
+      }
 
-      [[nodiscard]] vault::amac::step_result<1> init() {
+      [[nodiscard]] HaystackIter result(HaystackIter begin) const {
+        std::size_t const idx = restore_lower_bound_index(i);
+        if (idx == static_cast<std::size_t>(-1)) {
+          // Equivalent to end(), but we can't form end() without size.
+          // However, -1 usually indicates > max index.
+          // The reporter logic will check distance anyway.
+          // We return a sentinel-like iterator (conceptually out of bounds).
+          // But actually, for iterator arithmetic, we need to return something safe.
+          // If we return begin, distance is 0. That's wrong.
+          // We need to return an iterator such that distance(begin, it) >= n.
+          // But we don't know n here.
+          // Wait, if idx is -1, it means the search fell off the tree.
+          // For lower_bound, this means "end".
+          // We must return a way for layout_map to reconstruct 'end'.
+          // Since we don't know 'n', we rely on layout_map bounds checking?
+          // No, layout_map does `result_it = (result_idx >= size) ? end : ...`
+          // So if we return `begin + numeric_limits::max`, distance will be huge.
+          return begin + std::numeric_limits<std::ptrdiff_t>::max();
+        }
+        return begin + idx;
+      }
+    };
+
+    template <typename HaystackIter, typename Comp, search_bound Bound>
+    struct search_context {
+      HaystackIter          begin_it;
+      std::size_t           n;
+      [[no_unique_address]] Comp comp;
+
+      [[nodiscard]] constexpr explicit search_context(HaystackIter first, HaystackIter last, Comp c)
+          : begin_it(first)
+          , n(static_cast<std::size_t>(std::distance(first, last)))
+          , comp(c) {}
+
+      [[nodiscard]] static constexpr uint64_t fanout() {
+        return eytzinger_layout_policy::FANOUT;
+      }
+
+      template <typename State>
+      [[nodiscard]] vault::amac::step_result<1> init(State& state) const {
         if (n == 0) {
           return {nullptr};
         }
         return {std::to_address(begin_it)};
       }
 
-      [[nodiscard]] vault::amac::step_result<1> step() {
+      template <typename State>
+      [[nodiscard]] vault::amac::step_result<1> step(State& state) const {
         bool const go_right = [&] {
-          // Dereference needle_iter for comparison
           if constexpr (Bound == search_bound::upper) {
-            return !std::invoke(comp, *needle_iter, begin_it[i]);
+            return !std::invoke(comp, *state.needle_iter, begin_it[state.i]);
           } else {
-            return std::invoke(comp, begin_it[i], *needle_iter);
+            return std::invoke(comp, begin_it[state.i], *state.needle_iter);
           }
         }();
 
-        i = (i << 1) + 1 + static_cast<std::size_t>(go_right);
+        state.i = (state.i << 1) + 1 + static_cast<std::size_t>(go_right);
 
-        if (i >= n) {
+        if (state.i >= n) {
           return {nullptr};
         }
 
-        const std::size_t future_i = ((i + 1) << L) - 1;
+        const std::size_t future_i = ((state.i + 1) << L) - 1;
         return {std::to_address(begin_it + future_i)};
       }
-
-      // Accessor for the reporter
-      [[nodiscard]] HaystackIter haystack_cursor() const {
-        std::size_t result_idx = restore_lower_bound_index(i);
-        // Correctly maps internal -1 to public n (end)
-        return (result_idx == static_cast<std::size_t>(-1)) ? (begin_it + n) : (begin_it + result_idx);
-      }
-
-      // Accessor for the reporter
-      [[nodiscard]] NeedleIter needle_cursor() const {
-        return needle_iter;
-      }
     };
-
-    // TODO: Encapsulate shared context.
-    static constexpr inline struct search_context_t {
-      [[nodiscard]] static constexpr uint64_t fanout() {
-        return eytzinger_layout_policy::FANOUT;
-      }
-
-      auto init(auto &job) const -> decltype(job.init()) { return job.init(); }
-      auto step(auto &job) const -> decltype(job.step()) { return job.init(); }
-    } search_context { };      
-    
-    struct lower_bound_job_fn {
-      template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
-      [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {
-        return search_job<std::ranges::iterator_t<Haystack>, NeedleIter, Comp, search_bound::lower>(
-          std::ranges::begin(haystack), std::ranges::size(haystack), needle, comp
-        );
-      }
-    };
-
-    struct upper_bound_job_fn {
-      template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
-      [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {
-        return search_job<std::ranges::iterator_t<Haystack>, NeedleIter, Comp, search_bound::upper>(
-          std::ranges::begin(haystack), std::ranges::size(haystack), needle, comp
-        );
-      }
-    };
-
-    static constexpr inline lower_bound_job_fn lower_bound_job{};
-    static constexpr inline upper_bound_job_fn upper_bound_job{};
   };
 
 } // namespace eytzinger

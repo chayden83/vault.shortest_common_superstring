@@ -303,64 +303,99 @@ namespace eytzinger {
       requires std::
         output_iterator<OutputIt, std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>, const_iterator>>
       void batch_lower_bound(Executor&& executor, Needles&& needles, OutputIt output) const {
-      auto job_factory =
-        std::bind_front(policy_type::lower_bound_job, std::ranges::subrange(unordered_keys()), compare_);
+      using NeedleIter    = std::ranges::iterator_t<std::remove_reference_t<Needles>>;
+      using HaystackIter  = std::ranges::iterator_t<const key_storage_type>;
+      using SearchContext = typename policy_type::template search_context<HaystackIter, Compare, search_bound::lower>;
+      using SearchState   = typename policy_type::template search_state<HaystackIter, NeedleIter>;
 
-      auto reporter = [&, this](auto const& job) mutable {
-        auto offset = std::ranges::distance(std::ranges::begin(unordered_keys()), job.haystack_cursor());
+      static_assert(
+        LayoutSearchContext<SearchContext, HaystackIter, Compare>, "Policy does not satisfy Search Context concept"
+      );
+      static_assert(LayoutSearchState<SearchState, HaystackIter>, "Policy does not satisfy Search State concept");
 
-        *output++ = std::pair{job.needle_cursor(), const_iterator{*this, offset}};
+      auto context = SearchContext{std::ranges::begin(unordered_keys()), std::ranges::end(unordered_keys()), compare_};
+
+      auto state_factory = [](NeedleIter needle) { return SearchState(needle); };
+
+      auto reporter = [&, this](auto const& state) mutable {
+        auto           result_ptr = state.result(std::ranges::begin(unordered_keys()));
+        auto           result_idx = std::distance(std::ranges::begin(unordered_keys()), result_ptr);
+        const_iterator result_it  = (result_idx >= static_cast<std::ptrdiff_t>(size()))
+                                      ? end()
+                                      : const_iterator{*this, static_cast<std::ptrdiff_t>(result_idx)};
+        *output++                 = std::pair{state.get_needle_cursor(), result_it};
       };
 
       auto needle_cursors = std::views::iota(std::ranges::begin(needles), std::ranges::end(needles));
-
-      executor(std::views::transform(needle_cursors, job_factory), policy_type::search_context, reporter);
+      executor(std::views::transform(needle_cursors, state_factory), context, reporter);
     }
 
     template <typename Executor, std::ranges::input_range Needles, typename OutputIt>
       requires std::
         output_iterator<OutputIt, std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>, const_iterator>>
       void batch_upper_bound(Executor&& executor, Needles&& needles, OutputIt output) const {
-      auto job_factory =
-        std::bind_front(policy_type::upper_bound_job, std::ranges::subrange(unordered_keys()), compare_);
+      using NeedleIter    = std::ranges::iterator_t<std::remove_reference_t<Needles>>;
+      using HaystackIter  = std::ranges::iterator_t<const key_storage_type>;
+      using SearchContext = typename policy_type::template search_context<HaystackIter, Compare, search_bound::upper>;
+      using SearchState   = typename policy_type::template search_state<HaystackIter, NeedleIter>;
 
-      auto reporter = [&, this](auto const& job) mutable {
-        auto offset = std::ranges::distance(std::ranges::begin(unordered_keys()), job.haystack_cursor());
+      static_assert(
+        LayoutSearchContext<SearchContext, HaystackIter, Compare>, "Policy does not satisfy Search Context concept"
+      );
+      static_assert(LayoutSearchState<SearchState, HaystackIter>, "Policy does not satisfy Search State concept");
 
-        *output++ = std::pair{job.needle_cursor(), const_iterator{*this, offset}};
+      auto context = SearchContext{std::ranges::begin(unordered_keys()), std::ranges::end(unordered_keys()), compare_};
+
+      auto state_factory = [](NeedleIter needle) { return SearchState(needle); };
+
+      auto reporter = [&, this](auto const& state) mutable {
+        auto           result_ptr = state.result(std::ranges::begin(unordered_keys()));
+        auto           result_idx = std::distance(std::ranges::begin(unordered_keys()), result_ptr);
+        const_iterator result_it  = (result_idx >= static_cast<std::ptrdiff_t>(size()))
+                                      ? end()
+                                      : const_iterator{*this, static_cast<std::ptrdiff_t>(result_idx)};
+        *output++                 = std::pair{state.get_needle_cursor(), result_it};
       };
 
       auto needle_cursors = std::views::iota(std::ranges::begin(needles), std::ranges::end(needles));
-
-      executor(std::views::transform(needle_cursors, job_factory), policy_type::search_context, reporter);
+      executor(std::views::transform(needle_cursors, state_factory), context, reporter);
     }
 
     template <typename Executor, std::ranges::input_range Needles, typename OutputIt>
       requires std::
         output_iterator<OutputIt, std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>, const_iterator>>
       void batch_find(Executor&& executor, Needles&& needles, OutputIt output) const {
-      auto job_factory =
-        std::bind_front(policy_type::lower_bound_job, std::ranges::subrange(unordered_keys()), compare_);
+      using NeedleIter    = std::ranges::iterator_t<std::remove_reference_t<Needles>>;
+      using HaystackIter  = std::ranges::iterator_t<const key_storage_type>;
+      using SearchContext = typename policy_type::template search_context<HaystackIter, Compare, search_bound::lower>;
+      using SearchState   = typename policy_type::template search_state<HaystackIter, NeedleIter>;
 
-      auto reporter = [&, this](auto const& job) mutable {
-        auto result = std::pair{job.needle_cursor(), end()};
+      static_assert(
+        LayoutSearchContext<SearchContext, HaystackIter, Compare>, "Policy does not satisfy Search Context concept"
+      );
+      static_assert(LayoutSearchState<SearchState, HaystackIter>, "Policy does not satisfy Search State concept");
 
-        if (job.haystack_cursor() == unordered_keys().end()) {
-          // pass
-        } else if (compare_(*job.needle_cursor(), *job.haystack_cursor())) {
-          // pass
-        } else {
-          auto offset = std::ranges::distance(std::ranges::begin(unordered_keys()), job.haystack_cursor());
+      auto context = SearchContext{std::ranges::begin(unordered_keys()), std::ranges::end(unordered_keys()), compare_};
 
-          result.second = const_iterator{*this, offset};
+      auto state_factory = [](NeedleIter needle) { return SearchState(needle); };
+
+      auto reporter = [&, this](auto const& state) mutable {
+        auto result = std::pair{state.get_needle_cursor(), end()};
+
+        auto result_ptr = state.result(std::ranges::begin(unordered_keys()));
+        auto result_idx = std::distance(std::ranges::begin(unordered_keys()), result_ptr);
+
+        if (result_idx < static_cast<std::ptrdiff_t>(size())) {
+          const auto& key_found = keys_[result_idx];
+          if (!compare_(*state.get_needle_cursor(), key_found) && !compare_(key_found, *state.get_needle_cursor())) {
+            result.second = const_iterator{*this, static_cast<std::ptrdiff_t>(result_idx)};
+          }
         }
-
         *output++ = std::move(result);
       };
 
       auto needle_cursors = std::views::iota(std::ranges::begin(needles), std::ranges::end(needles));
-
-      executor(std::views::transform(needle_cursors, job_factory), policy_type::search_context, reporter);
+      executor(std::views::transform(needle_cursors, state_factory), context, reporter);
     }
 
     [[nodiscard]] constexpr size_type size() const noexcept {
