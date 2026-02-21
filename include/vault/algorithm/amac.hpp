@@ -11,7 +11,6 @@
 #include <memory>
 #include <ranges>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 /**
@@ -91,18 +90,25 @@ namespace vault::amac::concepts {
    *   in subsequent calls. Failure to adhere to this leads to
    *   undefined behavior during range compaction.
    */
-  template <typename C, typename J>
-  concept job_context = std::move_constructible<J> && C::fanout() > 0uz && requires(C& context, J& job) {
-    { context.init(job) } -> step_result;
-    { context.step(job) } -> step_result;
+  template <typename J>
+  concept job = std::move_constructible<J> && J::fanout() > 0uz && requires(J& job) {
+    { job.init() } -> step_result;
+    { job.step() } -> step_result;
   };
+
+  /**
+   * @brief Concept for a factory that produces AMAC jobs.
+   * @ingroup vault_amac
+   */
+  template <typename F, typename R, typename I>
+  concept job_factory = job<std::invoke_result_t<F, R const&, I>>;
 
   /**
    * @brief Concept for a reporter that handles completed AMAC jobs.
    * @ingroup vault_amac
    */
   template <typename R, typename J>
-  concept job_reporter = std::invocable<R, J&&>;
+  concept reporter = job<J> && std::invocable<R, J&&>;
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
@@ -200,15 +206,13 @@ namespace vault::amac {
      * @pre The value type of the ijobs range must satisfy
      *   vault::amac::concepts::job.
      */
-    template <std::ranges::input_range Jobs, typename Context, typename Reporter>
-      requires concepts::job_context<std::remove_cvref_t<Context>, std::ranges::range_reference_t<Jobs>> &&
-               concepts::job_reporter<std::remove_cvref_t<Reporter>, std::ranges::range_value_t<Jobs>>
-    static constexpr void operator()(Jobs&& ijobs, Context&& context, Reporter&& reporter) {
+    template <std::ranges::input_range Jobs, concepts::reporter<std::ranges::range_value_t<Jobs>> Reporter>
+    static constexpr void operator()(Jobs&& ijobs, Reporter&& reporter) {
       using job_t = std::ranges::range_value_t<Jobs>;
 
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
-      static constexpr auto const JOB_COUNT = (TotalFanout + context.fanout() - 1) / context.fanout();
+      static constexpr auto const JOB_COUNT = (TotalFanout + job_t::fanout() - 1) / job_t::fanout();
 
       auto jobs = std::array<job_slot<job_t>, JOB_COUNT>{};
 
@@ -218,7 +222,7 @@ namespace vault::amac {
         while (jobs_first != jobs_last and ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
-          if (auto addresses = context.init(job)) {
+          if (auto addresses = job.init()) {
             prefetch(addresses);
             std::construct_at(jobs_first->get(), std::forward<decltype(job)>(job));
             ++jobs_first;
@@ -234,7 +238,7 @@ namespace vault::amac {
       // but also takes the appropriate action depending on the jobs
       // state.
       auto is_inactive = [&](auto& job) {
-        if (auto addresses = context.step(*job.get())) {
+        if (auto addresses = job.get()->step()) {
           return prefetch(addresses), false;
         } else {
           return std::invoke(reporter, std::move(*job.get())), true;
@@ -250,7 +254,7 @@ namespace vault::amac {
         while (jobs_cursor != jobs_last && ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
-          if (auto addresses = context.init(job)) {
+          if (auto addresses = job.init()) {
             prefetch(addresses);
             *jobs_cursor->get() = std::forward<decltype(job)>(job);
             ++jobs_cursor;
@@ -274,7 +278,7 @@ namespace vault::amac {
         std::destroy_at(jobs_first->get());
       }
     }
-  }; // namespace vault::amac
+  };
 
   /**
    * @brief Global instance of the executor.
