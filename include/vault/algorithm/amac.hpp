@@ -120,7 +120,7 @@ namespace vault::amac {
    *   Search, 3 for Binary Fuse Filter).
    */
   template <std::size_t N>
-  struct job_step_result : public std::array<void const*, N> {
+  struct step_result : public std::array<void const*, N> {
     /**
      * @brief Checks if the job has further work to perform.
      *
@@ -295,12 +295,12 @@ namespace vault::amac {
 } // namespace vault::amac
 
 template <std::size_t N>
-struct std::tuple_size<vault::amac::job_step_result<N>> {
+struct std::tuple_size<vault::amac::step_result<N>> {
   static constexpr inline auto const value = std::size_t{N};
 };
 
 template <std::size_t I, std::size_t N>
-struct std::tuple_element<I, vault::amac::job_step_result<N>> {
+struct std::tuple_element<I, vault::amac::step_result<N>> {
   using type = void const*;
 };
 

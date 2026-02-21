@@ -14,7 +14,8 @@
 
 namespace eytzinger {
 
-  template <std::size_t Arity = 2> struct sorted_layout_policy {
+  template <std::size_t Arity = 2>
+  struct sorted_layout_policy {
     static constexpr inline auto const ARITY  = Arity;
     static constexpr inline auto const FANOUT = ARITY - 1;
 
@@ -32,23 +33,20 @@ namespace eytzinger {
      */
     static constexpr inline auto const UID_V001 = 4185834535822629149uLL;
 
-    template <typename I> struct is_compatible_key_iterator {
+    template <typename I>
+    struct is_compatible_key_iterator {
       static constexpr bool value = std::random_access_iterator<I>;
     };
 
     struct sorted_rank_to_index_fn {
-      [[nodiscard]] static constexpr std::size_t operator()(
-        std::size_t rank, std::size_t n) noexcept
-      {
+      [[nodiscard]] static constexpr std::size_t operator()(std::size_t rank, std::size_t n) noexcept {
         assert(rank < n && "Rank out of bounds");
         return rank;
       }
     };
 
     struct index_to_sorted_rank_fn {
-      [[nodiscard]] static constexpr std::size_t operator()(
-        std::size_t i, std::size_t n) noexcept
-      {
+      [[nodiscard]] static constexpr std::size_t operator()(std::size_t i, std::size_t n) noexcept {
         assert(i < n && "Index out of bounds");
         return i;
       }
@@ -59,15 +57,12 @@ namespace eytzinger {
 
     struct permute_fn {
       template <typename... Args>
-      static constexpr void operator()(Args&&...) noexcept
-      {}
+      static constexpr void operator()(Args&&...) noexcept {}
     };
 
     struct get_nth_sorted_fn {
       template <std::random_access_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] static constexpr std::iter_reference_t<I> operator()(
-        I first, S last, std::size_t n)
-      {
+      [[nodiscard]] static constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) {
         const auto size = static_cast<std::size_t>(std::distance(first, last));
         if (n >= size) {
           throw std::out_of_range("sorted_layout_policy index out of range");
@@ -77,18 +72,13 @@ namespace eytzinger {
       }
 
       template <std::ranges::random_access_range R>
-      [[nodiscard]] static constexpr std::ranges::range_reference_t<R>
-      operator()(R&& range, std::size_t n)
-      {
-        return operator()(
-          std::ranges::begin(range), std::ranges::end(range), n);
+      [[nodiscard]] static constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) {
+        return operator()(std::ranges::begin(range), std::ranges::end(range), n);
       }
     };
 
     struct next_index_fn {
-      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
-        std::ptrdiff_t i, std::size_t n_sz) noexcept
-      {
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept {
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
         // Valid to increment: [0, n-1].
         // Sentinel 'n' cannot be incremented.
@@ -98,9 +88,7 @@ namespace eytzinger {
     };
 
     struct prev_index_fn {
-      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
-        std::ptrdiff_t i, std::size_t n_sz) noexcept
-      {
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) noexcept {
         std::ptrdiff_t n = static_cast<std::ptrdiff_t>(n_sz);
         assert(i >= 0 && i <= n && "Index out of bounds");
 
@@ -115,47 +103,45 @@ namespace eytzinger {
     };
 
     struct lower_bound_fn {
-      template <std::random_access_iterator I,
-        std::sentinel_for<I>                S,
+      template <
+        std::random_access_iterator I,
+        std::sentinel_for<I>        S,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr I operator()(
-        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
-      {
+      [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
         return std::ranges::lower_bound(first, last, value, comp, proj);
       }
 
-      template <std::ranges::random_access_range R,
+      template <
+        std::ranges::random_access_range R,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
-        R&& range, const T& value, Comp comp = {}, Proj proj = {})
-      {
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R>
+      operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
         return std::ranges::lower_bound(range, value, comp, proj);
       }
     };
 
     struct upper_bound_fn {
-      template <std::random_access_iterator I,
-        std::sentinel_for<I>                S,
+      template <
+        std::random_access_iterator I,
+        std::sentinel_for<I>        S,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr I operator()(
-        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
-      {
+      [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
         return std::ranges::upper_bound(first, last, value, comp, proj);
       }
 
-      template <std::ranges::random_access_range R,
+      template <
+        std::ranges::random_access_range R,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
-        R&& range, const T& value, Comp comp = {}, Proj proj = {})
-      {
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R>
+      operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
         return std::ranges::upper_bound(range, value, comp, proj);
       }
     };
@@ -171,8 +157,7 @@ namespace eytzinger {
 
     template <typename HaystackI, typename NeedleI, typename Compare>
     struct kary_search_job {
-      [[nodiscard]] static constexpr uint64_t fanout()
-      {
+      [[nodiscard]] static constexpr uint64_t fanout() {
         return sorted_layout_policy::FANOUT;
       }
 
@@ -184,20 +169,16 @@ namespace eytzinger {
       [[no_unique_address]] Compare compare_;
 
       template <std::forward_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] static constexpr std::array<I, FANOUT> kary_pivots(
-        I first, S last)
-      {
+      [[nodiscard]] static constexpr std::array<I, FANOUT> kary_pivots(I first, S last) {
         auto chunk_size = std::distance(first, last) / ARITY;
 
         return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-          return std::array<I, FANOUT>{
-            std::next(first, chunk_size * (Is + 1))...};
+          return std::array<I, FANOUT>{std::next(first, chunk_size * (Is + 1))...};
         }(std::make_index_sequence<FANOUT>{});
       }
 
-      [[nodiscard]] constexpr vault::amac::job_step_result<FANOUT> init()
-      {
-        using result = vault::amac::job_step_result<FANOUT>;
+      [[nodiscard]] constexpr vault::amac::step_result<FANOUT> init() {
+        using result = vault::amac::step_result<FANOUT>;
 
         if (haystack_cursor_ == haystack_last_) {
           return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -212,13 +193,11 @@ namespace eytzinger {
         }
       }
 
-      [[nodiscard]] constexpr vault::amac::job_step_result<FANOUT> step()
-      {
+      [[nodiscard]] constexpr vault::amac::step_result<FANOUT> step() {
         auto pivots = kary_pivots(haystack_cursor_, haystack_last_);
 
         for (auto&& pivot : pivots) {
-          assert(pivot != haystack_last_
-            && "Pivot should never be one past the end of the haystack");
+          assert(pivot != haystack_last_ && "Pivot should never be one past the end of the haystack");
 
           if (std::invoke(compare_, *pivot, *needle_cursor_)) {
             haystack_cursor_ = std::next(pivot);
@@ -231,59 +210,42 @@ namespace eytzinger {
         return init();
       }
 
-      [[nodiscard]] constexpr HaystackI haystack_cursor() const
-      {
+      [[nodiscard]] constexpr HaystackI haystack_cursor() const {
         return haystack_cursor_;
       }
 
-      [[nodiscard]] constexpr NeedleI needle_cursor() const
-      {
+      [[nodiscard]] constexpr NeedleI needle_cursor() const {
         return needle_cursor_;
       }
     };
 
     struct lower_bound_job_fn {
-      template <std::ranges::forward_range Haystack,
-        typename Compare,
-        std::forward_iterator needle_iterator>
-      [[nodiscard]] static constexpr auto operator()(Haystack const& haystack,
-        Compare                                                      compare,
-        needle_iterator needle_cursor)
-      {
-        using haystack_iterator =
-          std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
+      template <std::ranges::forward_range Haystack, typename Compare, std::forward_iterator needle_iterator>
+      [[nodiscard]] static constexpr auto
+      operator()(Haystack const& haystack, Compare compare, needle_iterator needle_cursor) {
+        using haystack_iterator = std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
 
         return kary_search_job<haystack_iterator, needle_iterator, Compare>{
-          needle_cursor,
-          std::ranges::begin(haystack),
-          std::ranges::end(haystack),
-          compare};
+          needle_cursor, std::ranges::begin(haystack), std::ranges::end(haystack), compare
+        };
       }
     };
 
     struct upper_bound_job_fn {
-      template <std::ranges::forward_range Haystack,
-        typename Compare,
-        std::forward_iterator needle_iterator>
-      [[nodiscard]] static constexpr auto operator()(Haystack const& haystack,
-        Compare                                                      compare,
-        needle_iterator needle_cursor)
-      {
+      template <std::ranges::forward_range Haystack, typename Compare, std::forward_iterator needle_iterator>
+      [[nodiscard]] static constexpr auto
+      operator()(Haystack const& haystack, Compare compare, needle_iterator needle_cursor) {
         auto adapted_compare = [=](auto const& haystrand, auto const& needle) {
           return not std::invoke(compare, needle, haystrand);
         };
 
-        using haystack_iterator =
-          std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
+        using haystack_iterator = std::ranges::iterator_t<std::remove_reference_t<Haystack>>;
 
         using AdaptedCompare = decltype(std::ref(adapted_compare));
 
-        return kary_search_job<haystack_iterator,
-          needle_iterator,
-          AdaptedCompare>{needle_cursor,
-          std::ranges::begin(haystack),
-          std::ranges::end(haystack),
-          std::ref(adapted_compare)};
+        return kary_search_job<haystack_iterator, needle_iterator, AdaptedCompare>{
+          needle_cursor, std::ranges::begin(haystack), std::ranges::end(haystack), std::ref(adapted_compare)
+        };
       }
     };
 

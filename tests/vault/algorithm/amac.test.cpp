@@ -30,7 +30,7 @@ public:
   // Returns a tuple-like result of 1 pointer.
   // If counter is 0, returns {nullptr} (Finished).
   // Otherwise, decrements and returns {this} (Active).
-  [[nodiscard]] vault::amac::job_step_result<1> init() {
+  [[nodiscard]] vault::amac::step_result<1> init() {
     if (m_counter <= 0) {
       return {nullptr};
     }
@@ -40,7 +40,7 @@ public:
     return {this};
   }
 
-  [[nodiscard]] vault::amac::job_step_result<1> step() {
+  [[nodiscard]] vault::amac::step_result<1> step() {
     return init(); // Step logic is identical to init for this test
   }
 
@@ -181,7 +181,7 @@ TEST_CASE("AMAC Executor: Double Free Regression Test", "[amac][resource][asan]"
     ResourceJob(ResourceJob&&)                 = default;
     ResourceJob& operator=(ResourceJob&&)      = default;
 
-    [[nodiscard]] vault::amac::job_step_result<1> init() {
+    [[nodiscard]] vault::amac::step_result<1> init() {
       if (m_steps_remaining <= 0) {
         return {nullptr};
       }
@@ -190,7 +190,7 @@ TEST_CASE("AMAC Executor: Double Free Regression Test", "[amac][resource][asan]"
       return {m_resource.get()};
     }
 
-    [[nodiscard]] vault::amac::job_step_result<1> step() {
+    [[nodiscard]] vault::amac::step_result<1> step() {
       return init();
     }
 

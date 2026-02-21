@@ -18,8 +18,7 @@
 #define LAYOUT_PREFETCH(ptr) __builtin_prefetch(ptr, 0, 3)
 #elif defined(_MSC_VER)
 #include <intrin.h>
-#define LAYOUT_PREFETCH(ptr)                                                   \
-  _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0)
+#define LAYOUT_PREFETCH(ptr) _mm_prefetch(reinterpret_cast<const char*>(ptr), _MM_HINT_T0)
 #else
 #define LAYOUT_PREFETCH(ptr)
 #endif
@@ -33,78 +32,59 @@ namespace eytzinger {
   // --- Concepts ---
 
   template <typename Comp, typename T>
-  concept IsStandardLess = std::same_as<Comp, std::less<T>>
-    || std::same_as<Comp, std::less<void>> || std::same_as<Comp, std::less<>>
-    || std::same_as<Comp, std::ranges::less>;
+  concept IsStandardLess = std::same_as<Comp, std::less<T>> || std::same_as<Comp, std::less<void>> ||
+                           std::same_as<Comp, std::less<>> || std::same_as<Comp, std::ranges::less>;
 
   template <typename Comp, typename T>
-  concept IsStandardGreater = std::same_as<Comp, std::greater<T>>
-    || std::same_as<Comp, std::greater<void>>
-    || std::same_as<Comp, std::greater<>>
-    || std::same_as<Comp, std::ranges::greater>;
+  concept IsStandardGreater = std::same_as<Comp, std::greater<T>> || std::same_as<Comp, std::greater<void>> ||
+                              std::same_as<Comp, std::greater<>> || std::same_as<Comp, std::ranges::greater>;
 
   // --- Internal Declarations (Implemented in .cpp) ---
 
   namespace detail {
     // Topology / Math Helpers
-    [[nodiscard]] std::size_t btree_child_block_index(
-      std::size_t block_idx, std::size_t child_slot, std::size_t B);
-    [[nodiscard]] std::size_t btree_sorted_rank_to_index(
-      std::size_t rank, std::size_t n, std::size_t B);
-    [[nodiscard]] std::size_t btree_index_to_sorted_rank(
-      std::size_t index, std::size_t n, std::size_t B);
-    [[nodiscard]] std::ptrdiff_t btree_next_index(
-      std::ptrdiff_t i, std::size_t n, std::size_t B);
-    [[nodiscard]] std::ptrdiff_t btree_prev_index(
-      std::ptrdiff_t i, std::size_t n, std::size_t B);
+    [[nodiscard]] std::size_t    btree_child_block_index(std::size_t block_idx, std::size_t child_slot, std::size_t B);
+    [[nodiscard]] std::size_t    btree_sorted_rank_to_index(std::size_t rank, std::size_t n, std::size_t B);
+    [[nodiscard]] std::size_t    btree_index_to_sorted_rank(std::size_t index, std::size_t n, std::size_t B);
+    [[nodiscard]] std::ptrdiff_t btree_next_index(std::ptrdiff_t i, std::size_t n, std::size_t B);
+    [[nodiscard]] std::ptrdiff_t btree_prev_index(std::ptrdiff_t i, std::size_t n, std::size_t B);
 
 #ifdef LAYOUT_USE_AVX2
     // Fast Path Full-Loop Implementations
-    [[nodiscard]] std::size_t search_loop_lb_uint64_less(
-      const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
-    [[nodiscard]] std::size_t search_loop_ub_uint64_less(
-      const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
-    [[nodiscard]] std::size_t search_loop_lb_int64_less(
-      const int64_t* base, std::size_t n, int64_t key, std::size_t B);
-    [[nodiscard]] std::size_t search_loop_ub_int64_less(
-      const int64_t* base, std::size_t n, int64_t key, std::size_t B);
+    [[nodiscard]] std::size_t
+    search_loop_lb_uint64_less(const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
+    [[nodiscard]] std::size_t
+    search_loop_ub_uint64_less(const uint64_t* base, std::size_t n, uint64_t key, std::size_t B);
+    [[nodiscard]] std::size_t search_loop_lb_int64_less(const int64_t* base, std::size_t n, int64_t key, std::size_t B);
+    [[nodiscard]] std::size_t search_loop_ub_int64_less(const int64_t* base, std::size_t n, int64_t key, std::size_t B);
 
     // SIMD Block Searcher Trampolines
     [[nodiscard]] std::size_t simd_lb_int64_less(const int64_t* b, int64_t k);
     std::size_t               simd_ub_int64_less(const int64_t* b, int64_t k);
-    [[nodiscard]] std::size_t simd_lb_uint64_less(
-      const uint64_t* b, uint64_t k);
-    std::size_t simd_ub_uint64_less(const uint64_t* b, uint64_t k);
-    [[nodiscard]] std::size_t simd_lb_int64_greater(
-      const int64_t* b, int64_t k);
-    std::size_t simd_ub_int64_greater(const int64_t* b, int64_t k);
-    [[nodiscard]] std::size_t simd_lb_uint64_greater(
-      const uint64_t* b, uint64_t k);
-    std::size_t simd_ub_uint64_greater(const uint64_t* b, uint64_t k);
+    [[nodiscard]] std::size_t simd_lb_uint64_less(const uint64_t* b, uint64_t k);
+    std::size_t               simd_ub_uint64_less(const uint64_t* b, uint64_t k);
+    [[nodiscard]] std::size_t simd_lb_int64_greater(const int64_t* b, int64_t k);
+    std::size_t               simd_ub_int64_greater(const int64_t* b, int64_t k);
+    [[nodiscard]] std::size_t simd_lb_uint64_greater(const uint64_t* b, uint64_t k);
+    std::size_t               simd_ub_uint64_greater(const uint64_t* b, uint64_t k);
 
     [[nodiscard]] std::size_t simd_lb_int32_less(const int32_t* b, int32_t k);
     std::size_t               simd_ub_int32_less(const int32_t* b, int32_t k);
-    [[nodiscard]] std::size_t simd_lb_uint32_less(
-      const uint32_t* b, uint32_t k);
-    std::size_t simd_ub_uint32_less(const uint32_t* b, uint32_t k);
-    [[nodiscard]] std::size_t simd_lb_int32_greater(
-      const int32_t* b, int32_t k);
-    std::size_t simd_ub_int32_greater(const int32_t* b, int32_t k);
-    [[nodiscard]] std::size_t simd_lb_uint32_greater(
-      const uint32_t* b, uint32_t k);
-    std::size_t simd_ub_uint32_greater(const uint32_t* b, uint32_t k);
+    [[nodiscard]] std::size_t simd_lb_uint32_less(const uint32_t* b, uint32_t k);
+    std::size_t               simd_ub_uint32_less(const uint32_t* b, uint32_t k);
+    [[nodiscard]] std::size_t simd_lb_int32_greater(const int32_t* b, int32_t k);
+    std::size_t               simd_ub_int32_greater(const int32_t* b, int32_t k);
+    [[nodiscard]] std::size_t simd_lb_uint32_greater(const uint32_t* b, uint32_t k);
+    std::size_t               simd_ub_uint32_greater(const uint32_t* b, uint32_t k);
 
     [[nodiscard]] std::size_t simd_lb_int16_less(const int16_t* b, int16_t k);
     std::size_t               simd_ub_int16_less(const int16_t* b, int16_t k);
-    [[nodiscard]] std::size_t simd_lb_uint16_less(
-      const uint16_t* b, uint16_t k);
-    std::size_t simd_ub_uint16_less(const uint16_t* b, uint16_t k);
-    [[nodiscard]] std::size_t simd_lb_int16_greater(
-      const int16_t* b, int16_t k);
-    std::size_t simd_ub_int16_greater(const int16_t* b, int16_t k);
-    [[nodiscard]] std::size_t simd_lb_uint16_greater(
-      const uint16_t* b, uint16_t k);
-    std::size_t simd_ub_uint16_greater(const uint16_t* b, uint16_t k);
+    [[nodiscard]] std::size_t simd_lb_uint16_less(const uint16_t* b, uint16_t k);
+    std::size_t               simd_ub_uint16_less(const uint16_t* b, uint16_t k);
+    [[nodiscard]] std::size_t simd_lb_int16_greater(const int16_t* b, int16_t k);
+    std::size_t               simd_ub_int16_greater(const int16_t* b, int16_t k);
+    [[nodiscard]] std::size_t simd_lb_uint16_greater(const uint16_t* b, uint16_t k);
+    std::size_t               simd_ub_uint16_greater(const uint16_t* b, uint16_t k);
 
     [[nodiscard]] std::size_t simd_lb_int8_less(const int8_t* b, int8_t k);
     std::size_t               simd_ub_int8_less(const int8_t* b, int8_t k);
@@ -112,9 +92,8 @@ namespace eytzinger {
     std::size_t               simd_ub_uint8_less(const uint8_t* b, uint8_t k);
     [[nodiscard]] std::size_t simd_lb_int8_greater(const int8_t* b, int8_t k);
     std::size_t               simd_ub_int8_greater(const int8_t* b, int8_t k);
-    [[nodiscard]] std::size_t simd_lb_uint8_greater(
-      const uint8_t* b, uint8_t k);
-    std::size_t simd_ub_uint8_greater(const uint8_t* b, uint8_t k);
+    [[nodiscard]] std::size_t simd_lb_uint8_greater(const uint8_t* b, uint8_t k);
+    std::size_t               simd_ub_uint8_greater(const uint8_t* b, uint8_t k);
 #endif
   } // namespace detail
 
@@ -122,9 +101,7 @@ namespace eytzinger {
 
   struct scalar_block_searcher {
     template <typename T, std::size_t B, typename Comp, typename Proj>
-    [[nodiscard]] static constexpr std::size_t lower_bound(
-      const T* block, const T& key, Comp comp, Proj proj)
-    {
+    [[nodiscard]] static constexpr std::size_t lower_bound(const T* block, const T& key, Comp comp, Proj proj) {
       assert(block != nullptr && "Block pointer must not be null");
       std::size_t i = 0;
       for (; i < B; ++i) {
@@ -136,9 +113,7 @@ namespace eytzinger {
     }
 
     template <typename T, std::size_t B, typename Comp, typename Proj>
-    [[nodiscard]] static constexpr std::size_t upper_bound(
-      const T* block, const T& key, Comp comp, Proj proj)
-    {
+    [[nodiscard]] static constexpr std::size_t upper_bound(const T* block, const T& key, Comp comp, Proj proj) {
       assert(block != nullptr && "Block pointer must not be null");
       std::size_t i = 0;
       for (; i < B; ++i) {
@@ -150,9 +125,8 @@ namespace eytzinger {
     }
 
     template <typename T, typename Comp, typename Proj>
-    [[nodiscard]] static constexpr std::size_t lower_bound_n(
-      const T* block, std::size_t n, const T& key, Comp comp, Proj proj)
-    {
+    [[nodiscard]] static constexpr std::size_t
+    lower_bound_n(const T* block, std::size_t n, const T& key, Comp comp, Proj proj) {
       assert(block != nullptr || n == 0);
       std::size_t i = 0;
       for (; i < n; ++i) {
@@ -164,9 +138,8 @@ namespace eytzinger {
     }
 
     template <typename T, typename Comp, typename Proj>
-    [[nodiscard]] static constexpr std::size_t upper_bound_n(
-      const T* block, std::size_t n, const T& key, Comp comp, Proj proj)
-    {
+    [[nodiscard]] static constexpr std::size_t
+    upper_bound_n(const T* block, std::size_t n, const T& key, Comp comp, Proj proj) {
       assert(block != nullptr || n == 0);
       std::size_t i = 0;
       for (; i < n; ++i) {
@@ -180,53 +153,46 @@ namespace eytzinger {
 
   // --- Block Searcher Primary Template ---
 
-  template <typename T, typename Comp, std::size_t B> struct block_searcher {
+  template <typename T, typename Comp, std::size_t B>
+  struct block_searcher {
     template <typename Proj>
-    [[nodiscard]] static constexpr std::size_t lower_bound(
-      const T* block, const T& key, Comp comp, Proj proj)
-    {
+    [[nodiscard]] static constexpr std::size_t lower_bound(const T* block, const T& key, Comp comp, Proj proj) {
       return scalar_block_searcher::lower_bound<T, B>(block, key, comp, proj);
     }
 
     template <typename Proj>
-    [[nodiscard]] static constexpr std::size_t upper_bound(
-      const T* block, const T& key, Comp comp, Proj proj)
-    {
+    [[nodiscard]] static constexpr std::size_t upper_bound(const T* block, const T& key, Comp comp, Proj proj) {
       return scalar_block_searcher::upper_bound<T, B>(block, key, comp, proj);
     }
   };
 
 #ifdef LAYOUT_USE_AVX2
-#define DEFINE_SIMD_SPECIALIZATION(TYPE, BLOCK_SIZE, CONCEPT, SUFFIX)          \
-  template <typename Comp>                                                     \
-    requires CONCEPT<Comp, TYPE##_t>                                           \
-  struct block_searcher<TYPE##_t, Comp, BLOCK_SIZE> {                          \
-    template <typename Proj>                                                   \
-    [[nodiscard]] static std::size_t lower_bound(                              \
-      const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj)        \
-    {                                                                          \
-      assert((reinterpret_cast<uintptr_t>(block) % alignof(TYPE##_t) == 0)     \
-        && "Block pointer should be aligned for SIMD");                        \
-      if constexpr (std::is_same_v<Proj, std::identity>) {                     \
-        return detail::simd_lb_##TYPE##_##SUFFIX(block, key);                  \
-      } else {                                                                 \
-        return scalar_block_searcher::lower_bound<TYPE##_t, BLOCK_SIZE>(       \
-          block, key, comp, proj);                                             \
-      }                                                                        \
-    }                                                                          \
-    template <typename Proj>                                                   \
-    [[nodiscard]] static std::size_t upper_bound(                              \
-      const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj)        \
-    {                                                                          \
-      assert((reinterpret_cast<uintptr_t>(block) % alignof(TYPE##_t) == 0)     \
-        && "Block pointer should be aligned for SIMD");                        \
-      if constexpr (std::is_same_v<Proj, std::identity>) {                     \
-        return detail::simd_ub_##TYPE##_##SUFFIX(block, key);                  \
-      } else {                                                                 \
-        return scalar_block_searcher::upper_bound<TYPE##_t, BLOCK_SIZE>(       \
-          block, key, comp, proj);                                             \
-      }                                                                        \
-    }                                                                          \
+#define DEFINE_SIMD_SPECIALIZATION(TYPE, BLOCK_SIZE, CONCEPT, SUFFIX)                                                  \
+  template <typename Comp>                                                                                             \
+    requires CONCEPT<Comp, TYPE##_t>                                                                                   \
+  struct block_searcher<TYPE##_t, Comp, BLOCK_SIZE> {                                                                  \
+    template <typename Proj>                                                                                           \
+    [[nodiscard]] static std::size_t lower_bound(const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj) {   \
+      assert(                                                                                                          \
+        (reinterpret_cast<uintptr_t>(block) % alignof(TYPE##_t) == 0) && "Block pointer should be aligned for SIMD"    \
+      );                                                                                                               \
+      if constexpr (std::is_same_v<Proj, std::identity>) {                                                             \
+        return detail::simd_lb_##TYPE##_##SUFFIX(block, key);                                                          \
+      } else {                                                                                                         \
+        return scalar_block_searcher::lower_bound<TYPE##_t, BLOCK_SIZE>(block, key, comp, proj);                       \
+      }                                                                                                                \
+    }                                                                                                                  \
+    template <typename Proj>                                                                                           \
+    [[nodiscard]] static std::size_t upper_bound(const TYPE##_t* block, const TYPE##_t& key, Comp comp, Proj proj) {   \
+      assert(                                                                                                          \
+        (reinterpret_cast<uintptr_t>(block) % alignof(TYPE##_t) == 0) && "Block pointer should be aligned for SIMD"    \
+      );                                                                                                               \
+      if constexpr (std::is_same_v<Proj, std::identity>) {                                                             \
+        return detail::simd_ub_##TYPE##_##SUFFIX(block, key);                                                          \
+      } else {                                                                                                         \
+        return scalar_block_searcher::upper_bound<TYPE##_t, BLOCK_SIZE>(block, key, comp, proj);                       \
+      }                                                                                                                \
+    }                                                                                                                  \
   };
 
   DEFINE_SIMD_SPECIALIZATION(int64, 8, IsStandardLess, less)
@@ -254,17 +220,18 @@ namespace eytzinger {
 
   // --- Main Layout Policy ---
 
-  template <std::size_t B = 16> struct implicit_btree_layout_policy {
+  template <std::size_t B = 16>
+  struct implicit_btree_layout_policy {
     static_assert(B >= 2, "Block size B must be at least 2");
-    static_assert((B % 2 == 0),
-      "Block size should be even for proper alignment/node sizing");
+    static_assert((B % 2 == 0), "Block size should be even for proper alignment/node sizing");
 
     static constexpr inline auto const ARITY  = B + 1;
     static constexpr inline auto const FANOUT = 1;
 
     static constexpr inline auto const UID_V001 = 15922480214965706541uLL;
 
-    template <typename I> struct is_compatible_key_iterator {
+    template <typename I>
+    struct is_compatible_key_iterator {
       static constexpr bool value = std::contiguous_iterator<I>;
     };
 
@@ -272,9 +239,8 @@ namespace eytzinger {
 
   private:
     template <typename T, typename Comp, typename Proj>
-    static constexpr std::size_t lower_bound_generic(
-      const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj)
-    {
+    static constexpr std::size_t
+    lower_bound_generic(const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj) {
       assert(base != nullptr || n == 0);
       std::size_t k          = 0;
       std::size_t result_idx = n;
@@ -290,8 +256,7 @@ namespace eytzinger {
         LAYOUT_PREFETCH(&base[child_start]);
 
         if (block_start + B <= n) {
-          std::size_t idx_in_block = block_searcher<T, Comp, B>::lower_bound(
-            base + block_start, value, comp, proj);
+          std::size_t idx_in_block = block_searcher<T, Comp, B>::lower_bound(base + block_start, value, comp, proj);
 
           if (idx_in_block < B) {
             result_idx = block_start + idx_in_block;
@@ -299,8 +264,7 @@ namespace eytzinger {
           k = detail::btree_child_block_index(k, idx_in_block, B);
         } else {
           std::size_t count       = n - block_start;
-          std::size_t idx_in_tail = scalar_block_searcher::lower_bound_n(
-            base + block_start, count, value, comp, proj);
+          std::size_t idx_in_tail = scalar_block_searcher::lower_bound_n(base + block_start, count, value, comp, proj);
 
           if (idx_in_tail < count) {
             result_idx = block_start + idx_in_tail;
@@ -314,9 +278,8 @@ namespace eytzinger {
     }
 
     template <typename T, typename Comp, typename Proj>
-    static constexpr std::size_t upper_bound_generic(
-      const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj)
-    {
+    static constexpr std::size_t
+    upper_bound_generic(const T* base, std::size_t n, const T& value, Comp& comp, Proj& proj) {
       assert(base != nullptr || n == 0);
       std::size_t k          = 0;
       std::size_t result_idx = n;
@@ -332,8 +295,7 @@ namespace eytzinger {
         LAYOUT_PREFETCH(&base[child_start]);
 
         if (block_start + B <= n) {
-          std::size_t idx_in_block = block_searcher<T, Comp, B>::upper_bound(
-            base + block_start, value, comp, proj);
+          std::size_t idx_in_block = block_searcher<T, Comp, B>::upper_bound(base + block_start, value, comp, proj);
 
           if (idx_in_block < B) {
             result_idx = block_start + idx_in_block;
@@ -341,8 +303,7 @@ namespace eytzinger {
           k = detail::btree_child_block_index(k, idx_in_block, B);
         } else {
           std::size_t count       = n - block_start;
-          std::size_t idx_in_tail = scalar_block_searcher::upper_bound_n(
-            base + block_start, count, value, comp, proj);
+          std::size_t idx_in_tail = scalar_block_searcher::upper_bound_n(base + block_start, count, value, comp, proj);
 
           if (idx_in_tail < count) {
             result_idx = block_start + idx_in_tail;
@@ -357,27 +318,21 @@ namespace eytzinger {
 
   public:
     struct sorted_rank_to_index_fn {
-      [[nodiscard]] static constexpr std::size_t operator()(
-        std::size_t rank, std::size_t n)
-      {
+      [[nodiscard]] static constexpr std::size_t operator()(std::size_t rank, std::size_t n) {
         assert(rank < n && "Rank out of bounds");
         return detail::btree_sorted_rank_to_index(rank, n, B);
       }
     };
 
     struct index_to_sorted_rank_fn {
-      [[nodiscard]] static constexpr std::size_t operator()(
-        std::size_t index, std::size_t n)
-      {
+      [[nodiscard]] static constexpr std::size_t operator()(std::size_t index, std::size_t n) {
         assert(index < n && "Index out of bounds");
         return detail::btree_index_to_sorted_rank(index, n, B);
       }
     };
 
     struct next_index_fn {
-      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
-        std::ptrdiff_t i, std::size_t n_sz)
-      {
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) {
         assert(i >= 0 && i < static_cast<std::ptrdiff_t>(n_sz));
         std::ptrdiff_t res = detail::btree_next_index(i, n_sz, B);
         return (res == -1) ? static_cast<std::ptrdiff_t>(n_sz) : res;
@@ -385,12 +340,9 @@ namespace eytzinger {
     };
 
     struct prev_index_fn {
-      [[nodiscard]] static constexpr std::ptrdiff_t operator()(
-        std::ptrdiff_t i, std::size_t n_sz)
-      {
+      [[nodiscard]] static constexpr std::ptrdiff_t operator()(std::ptrdiff_t i, std::size_t n_sz) {
         // Handle n_sz (end) as -1 for detail impl
-        std::ptrdiff_t input_i = (i == static_cast<std::ptrdiff_t>(n_sz)) ? -1
-                                                                          : i;
+        std::ptrdiff_t input_i = (i == static_cast<std::ptrdiff_t>(n_sz)) ? -1 : i;
         std::ptrdiff_t res     = detail::btree_prev_index(input_i, n_sz, B);
         // Map output -1 (underflow) to n_sz
         return (res == -1) ? static_cast<std::ptrdiff_t>(n_sz) : res;
@@ -405,8 +357,7 @@ namespace eytzinger {
 
     struct permute_fn {
       template <std::random_access_iterator I, std::sentinel_for<I> S>
-      static constexpr void operator()(I first, S last)
-      {
+      static constexpr void operator()(I first, S last) {
         const auto n = static_cast<std::size_t>(std::distance(first, last));
         if (n <= 1) {
           return;
@@ -417,25 +368,18 @@ namespace eytzinger {
         I current_source = first;
         fill_in_order(temp, current_source, 0, n);
 
-        assert(
-          std::distance(first, current_source) == static_cast<std::ptrdiff_t>(n)
-          && "Not all elements consumed");
+        assert(std::distance(first, current_source) == static_cast<std::ptrdiff_t>(n) && "Not all elements consumed");
         std::ranges::move(temp, first);
       }
 
       template <std::ranges::random_access_range R>
-      static constexpr void operator()(R&& range)
-      {
+      static constexpr void operator()(R&& range) {
         operator()(std::ranges::begin(range), std::ranges::end(range));
       }
 
     private:
       template <typename SrcIter, typename TempVec>
-      static constexpr void fill_in_order(TempVec& temp,
-        SrcIter&                                   source_iter,
-        std::size_t                                block_idx,
-        std::size_t                                n)
-      {
+      static constexpr void fill_in_order(TempVec& temp, SrcIter& source_iter, std::size_t block_idx, std::size_t n) {
         std::size_t block_start = block_idx * B;
         if (block_start >= n) {
           return;
@@ -448,8 +392,7 @@ namespace eytzinger {
           if (i < B) {
             std::size_t key_idx = block_start + i;
             if (key_idx < n) {
-              assert(key_idx < temp.size()
-                && "Permutation target index out of bounds");
+              assert(key_idx < temp.size() && "Permutation target index out of bounds");
               temp[key_idx] = *source_iter;
               ++source_iter;
             }
@@ -462,9 +405,7 @@ namespace eytzinger {
 
     struct get_nth_sorted_fn {
       template <std::random_access_iterator I, std::sentinel_for<I> S>
-      [[nodiscard]] constexpr std::iter_reference_t<I> operator()(
-        I first, S last, std::size_t n) const
-      {
+      [[nodiscard]] constexpr std::iter_reference_t<I> operator()(I first, S last, std::size_t n) const {
         const auto size = static_cast<std::size_t>(std::distance(first, last));
         if (n >= size) {
           throw std::out_of_range("eytzinger index out of range");
@@ -475,9 +416,7 @@ namespace eytzinger {
       }
 
       template <std::ranges::random_access_range R>
-      [[nodiscard]] constexpr std::ranges::range_reference_t<R> operator()(
-        R&& range, std::size_t n) const
-      {
+      [[nodiscard]] constexpr std::ranges::range_reference_t<R> operator()(R&& range, std::size_t n) const {
         return (*this)(std::ranges::begin(range), std::ranges::end(range), n);
       }
     };
@@ -485,14 +424,13 @@ namespace eytzinger {
     static constexpr inline get_nth_sorted_fn get_nth_sorted{};
 
     struct lower_bound_fn {
-      template <std::random_access_iterator I,
-        std::sentinel_for<I>                S,
+      template <
+        std::random_access_iterator I,
+        std::sentinel_for<I>        S,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr I operator()(
-        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
-      {
+      [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
         if (first == last) {
           return last;
         }
@@ -501,15 +439,13 @@ namespace eytzinger {
         assert(base != nullptr && "Search base pointer is null");
 
 #ifdef LAYOUT_USE_AVX2
-        if constexpr (B == 8 && std::is_same_v<T, uint64_t>
-          && IsStandardLess<Comp, T> && std::is_same_v<Proj, std::identity>) {
-          std::size_t idx =
-            detail::search_loop_lb_uint64_less(base, n, value, B);
+        if constexpr (B == 8 && std::is_same_v<T, uint64_t> && IsStandardLess<Comp, T> &&
+                      std::is_same_v<Proj, std::identity>) {
+          std::size_t idx = detail::search_loop_lb_uint64_less(base, n, value, B);
           return (idx == n) ? last : (first + idx);
-        } else if constexpr (B == 8 && std::is_same_v<T, int64_t>
-          && IsStandardLess<Comp, T> && std::is_same_v<Proj, std::identity>) {
-          std::size_t idx =
-            detail::search_loop_lb_int64_less(base, n, value, B);
+        } else if constexpr (B == 8 && std::is_same_v<T, int64_t> && IsStandardLess<Comp, T> &&
+                             std::is_same_v<Proj, std::identity>) {
+          std::size_t idx = detail::search_loop_lb_int64_less(base, n, value, B);
           return (idx == n) ? last : (first + idx);
         } else
 #endif
@@ -519,30 +455,25 @@ namespace eytzinger {
         }
       }
 
-      template <std::ranges::random_access_range R,
+      template <
+        std::ranges::random_access_range R,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
-        R&& range, const T& value, Comp comp = {}, Proj proj = {})
-      {
-        return operator()(std::ranges::begin(range),
-          std::ranges::end(range),
-          value,
-          std::ref(comp),
-          std::ref(proj));
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R>
+      operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
+        return operator()(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
       }
     };
 
     struct upper_bound_fn {
-      template <std::random_access_iterator I,
-        std::sentinel_for<I>                S,
+      template <
+        std::random_access_iterator I,
+        std::sentinel_for<I>        S,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr I operator()(
-        I first, S last, const T& value, Comp comp = {}, Proj proj = {})
-      {
+      [[nodiscard]] static constexpr I operator()(I first, S last, const T& value, Comp comp = {}, Proj proj = {}) {
         if (first == last) {
           return last;
         }
@@ -551,15 +482,13 @@ namespace eytzinger {
         assert(base != nullptr && "Search base pointer is null");
 
 #ifdef LAYOUT_USE_AVX2
-        if constexpr (B == 8 && std::is_same_v<T, uint64_t>
-          && IsStandardLess<Comp, T> && std::is_same_v<Proj, std::identity>) {
-          std::size_t idx =
-            detail::search_loop_ub_uint64_less(base, n, value, B);
+        if constexpr (B == 8 && std::is_same_v<T, uint64_t> && IsStandardLess<Comp, T> &&
+                      std::is_same_v<Proj, std::identity>) {
+          std::size_t idx = detail::search_loop_ub_uint64_less(base, n, value, B);
           return (idx == n) ? last : (first + idx);
-        } else if constexpr (B == 8 && std::is_same_v<T, int64_t>
-          && IsStandardLess<Comp, T> && std::is_same_v<Proj, std::identity>) {
-          std::size_t idx =
-            detail::search_loop_ub_int64_less(base, n, value, B);
+        } else if constexpr (B == 8 && std::is_same_v<T, int64_t> && IsStandardLess<Comp, T> &&
+                             std::is_same_v<Proj, std::identity>) {
+          std::size_t idx = detail::search_loop_ub_int64_less(base, n, value, B);
           return (idx == n) ? last : (first + idx);
         } else
 #endif
@@ -569,31 +498,23 @@ namespace eytzinger {
         }
       }
 
-      template <std::ranges::random_access_range R,
+      template <
+        std::ranges::random_access_range R,
         typename T,
         typename Comp = std::ranges::less,
         typename Proj = std::identity>
-      [[nodiscard]] static constexpr std::ranges::iterator_t<R> operator()(
-        R&& range, const T& value, Comp comp = {}, Proj proj = {})
-      {
-        return operator()(std::ranges::begin(range),
-          std::ranges::end(range),
-          value,
-          std::ref(comp),
-          std::ref(proj));
+      [[nodiscard]] static constexpr std::ranges::iterator_t<R>
+      operator()(R&& range, const T& value, Comp comp = {}, Proj proj = {}) {
+        return operator()(std::ranges::begin(range), std::ranges::end(range), value, std::ref(comp), std::ref(proj));
       }
     };
 
     static constexpr inline lower_bound_fn lower_bound{};
     static constexpr inline upper_bound_fn upper_bound{};
 
-    template <typename HaystackIter,
-      typename NeedleIter,
-      typename Comp,
-      search_bound Bound>
+    template <typename HaystackIter, typename NeedleIter, typename Comp, search_bound Bound>
     struct search_job {
-      [[nodiscard]] static constexpr uint64_t fanout()
-      {
+      [[nodiscard]] static constexpr uint64_t fanout() {
         return implicit_btree_layout_policy::FANOUT;
       }
 
@@ -606,25 +527,21 @@ namespace eytzinger {
       std::size_t  k = 0;
       std::size_t  result_idx;
 
-      [[nodiscard]] search_job(
-        HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
-          : begin_it(first)
-          , n(size)
-          , needle_iter(n_iter)
-          , comp(c)
-          , result_idx(size)
-      {}
+      [[nodiscard]] search_job(HaystackIter first, std::size_t size, NeedleIter n_iter, Comp c)
+        : begin_it(first)
+        , n(size)
+        , needle_iter(n_iter)
+        , comp(c)
+        , result_idx(size) {}
 
-      [[nodiscard]] vault::amac::job_step_result<1> init()
-      {
+      [[nodiscard]] vault::amac::step_result<1> init() {
         if (n == 0) {
           return {nullptr};
         }
         return {std::to_address(begin_it)};
       }
 
-      [[nodiscard]] vault::amac::job_step_result<1> step()
-      {
+      [[nodiscard]] vault::amac::step_result<1> step() {
         std::size_t block_start = k * B;
         if (block_start >= n) {
           return {nullptr};
@@ -634,16 +551,12 @@ namespace eytzinger {
           std::size_t idx_in_block = [&] {
             if constexpr (Bound == search_bound::upper) {
               return block_searcher<ValT, Comp, B>::upper_bound(
-                std::to_address(begin_it + block_start),
-                *needle_iter,
-                comp,
-                std::identity{});
+                std::to_address(begin_it + block_start), *needle_iter, comp, std::identity{}
+              );
             } else {
               return block_searcher<ValT, Comp, B>::lower_bound(
-                std::to_address(begin_it + block_start),
-                *needle_iter,
-                comp,
-                std::identity{});
+                std::to_address(begin_it + block_start), *needle_iter, comp, std::identity{}
+              );
             }
           }();
 
@@ -656,18 +569,12 @@ namespace eytzinger {
           std::size_t idx_in_tail = [&] {
             if constexpr (Bound == search_bound::upper) {
               return scalar_block_searcher::upper_bound_n(
-                std::to_address(begin_it + block_start),
-                count,
-                *needle_iter,
-                comp,
-                std::identity{});
+                std::to_address(begin_it + block_start), count, *needle_iter, comp, std::identity{}
+              );
             } else {
               return scalar_block_searcher::lower_bound_n(
-                std::to_address(begin_it + block_start),
-                count,
-                *needle_iter,
-                comp,
-                std::identity{});
+                std::to_address(begin_it + block_start), count, *needle_iter, comp, std::identity{}
+              );
             }
           }();
 
@@ -686,45 +593,30 @@ namespace eytzinger {
         return {std::to_address(begin_it + (k * B))};
       }
 
-      [[nodiscard]] HaystackIter haystack_cursor() const
-      {
+      [[nodiscard]] HaystackIter haystack_cursor() const {
         return (result_idx == n) ? (begin_it + n) : (begin_it + result_idx);
       }
 
-      [[nodiscard]] NeedleIter needle_cursor() const { return needle_iter; }
+      [[nodiscard]] NeedleIter needle_cursor() const {
+        return needle_iter;
+      }
     };
 
     struct lower_bound_job_fn {
-      template <std::ranges::random_access_range Haystack,
-        typename Comp,
-        typename NeedleIter>
-      [[nodiscard]] static auto operator()(
-        Haystack&& haystack, Comp comp, NeedleIter needle)
-      {
-        return search_job<std::ranges::iterator_t<Haystack>,
-          NeedleIter,
-          Comp,
-          search_bound::lower>(std::ranges::begin(haystack),
-          std::ranges::size(haystack),
-          needle,
-          comp);
+      template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
+      [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {
+        return search_job<std::ranges::iterator_t<Haystack>, NeedleIter, Comp, search_bound::lower>(
+          std::ranges::begin(haystack), std::ranges::size(haystack), needle, comp
+        );
       }
     };
 
     struct upper_bound_job_fn {
-      template <std::ranges::random_access_range Haystack,
-        typename Comp,
-        typename NeedleIter>
-      [[nodiscard]] static auto operator()(
-        Haystack&& haystack, Comp comp, NeedleIter needle)
-      {
-        return search_job<std::ranges::iterator_t<Haystack>,
-          NeedleIter,
-          Comp,
-          search_bound::upper>(std::ranges::begin(haystack),
-          std::ranges::size(haystack),
-          needle,
-          comp);
+      template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
+      [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {
+        return search_job<std::ranges::iterator_t<Haystack>, NeedleIter, Comp, search_bound::upper>(
+          std::ranges::begin(haystack), std::ranges::size(haystack), needle, comp
+        );
       }
     };
 
