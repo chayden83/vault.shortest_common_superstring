@@ -73,7 +73,7 @@ namespace vault::amac::concepts {
    * is a `void const*`.
    */
   template <typename T>
-  concept job_step_result = std::constructible_from<bool, T> && []<std::size_t... Is>(std::index_sequence<Is...>) {
+  concept step_result = std::constructible_from<bool, T> && []<std::size_t... Is>(std::index_sequence<Is...>) {
     return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
   }(std::make_index_sequence<std::tuple_size_v<T>>{});
 
@@ -92,8 +92,8 @@ namespace vault::amac::concepts {
    */
   template <typename J>
   concept job = std::move_constructible<J> && J::fanout() > 0uz && requires(J& job) {
-    { job.init() } -> job_step_result;
-    { job.step() } -> job_step_result;
+    { job.init() } -> step_result;
+    { job.step() } -> step_result;
   };
 
   /**
@@ -142,7 +142,7 @@ namespace vault::amac {
    */
   template <uint8_t TotalFanout = 16>
   class executor_fn {
-    template <concepts::job_step_result J>
+    template <concepts::step_result J>
     static constexpr void prefetch(J const& step_result) {
       [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         (__builtin_prefetch(std::get<Is>(step_result), 0, 3), ...);
