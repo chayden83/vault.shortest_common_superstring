@@ -14,7 +14,7 @@
 #include <utility>
 
 /**
- * @defgroup vault_amac Asynchronous Memory Access Coordinator (AMAC)
+ * @defgroup vault_amac Asynchronous Memory Access Executor (AMAC)
  *
  * @brief A software-pipelining engine for hiding memory latency.
  *
@@ -26,7 +26,7 @@
  *
  * **Memory Pressure and Prefetch Volume**
  *
- * The coordinator manages up to $N$ active jobs
+ * The executor manages up to $N$ active jobs
  * simultaneously. During each coordination cycle, the total number of
  * outstanding prefetches is defined as $N \times K$, where $K$ is the
  * number of pointers returned by the Job's `init()` or `step()`
@@ -44,7 +44,7 @@
  * and minimizing overhead. Consider the following factors:
  *
  * 1. **Data Locality**: If the "haystack" fits in the L2 or L3 cache,
- * $N$ should be small (e.g., 2–4). The overhead of the coordinator
+ * $N$ should be small (e.g., 2–4). The overhead of the executor
  * loop outweighs the benefit of hiding the relatively low latency of
  * a cache hit.
  *
@@ -73,10 +73,9 @@ namespace vault::amac::concepts {
    * is a `void const*`.
    */
   template <typename T>
-  concept job_step_result = std::constructible_from<bool, T> &&
-    []<std::size_t... Is>(std::index_sequence<Is...>) {
-      return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
-    }(std::make_index_sequence<std::tuple_size_v<T>>{});
+  concept job_step_result = std::constructible_from<bool, T> && []<std::size_t... Is>(std::index_sequence<Is...>) {
+    return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
+  }(std::make_index_sequence<std::tuple_size_v<T>>{});
 
   /**
    * @brief Defines the interface for an AMAC-compatible job.
@@ -92,11 +91,10 @@ namespace vault::amac::concepts {
    *   undefined behavior during range compaction.
    */
   template <typename J>
-  concept job =
-    std::move_constructible<J> && J::fanout() > 0uz && requires(J& job) {
-      { job.init() } -> job_step_result;
-      { job.step() } -> job_step_result;
-    };
+  concept job = std::move_constructible<J> && J::fanout() > 0uz && requires(J& job) {
+    { job.init() } -> job_step_result;
+    { job.step() } -> job_step_result;
+  };
 
   /**
    * @brief Concept for a factory that produces AMAC jobs.
@@ -128,8 +126,7 @@ namespace vault::amac {
      *
      * @return true if at least one pointer in the result is non-null.
      */
-    [[nodiscard]] constexpr explicit operator bool() const noexcept
-    {
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
       return [this]<std::size_t... Is>(std::index_sequence<Is...>) {
         return (((*this)[Is] != nullptr) || ...);
       }(std::make_index_sequence<N>{});
@@ -137,16 +134,16 @@ namespace vault::amac {
   };
 
   /**
-   * @brief Functional coordinator for managing a batch of AMAC jobs.
+   * @brief Functional executor for managing a batch of AMAC jobs.
    * @ingroup vault_amac
    *
    * @tparam TotalFanout The interleaving degree. Typical values are
    *   8-16.
    */
-  template <uint8_t TotalFanout = 16> class coordinator_fn {
+  template <uint8_t TotalFanout = 16>
+  class executor_fn {
     template <concepts::job_step_result J>
-    static constexpr void prefetch(J const& step_result)
-    {
+    static constexpr void prefetch(J const& step_result) {
       [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         (__builtin_prefetch(std::get<Is>(step_result), 0, 3), ...);
       }(std::make_index_sequence<std::tuple_size_v<J>>{});
@@ -162,7 +159,8 @@ namespace vault::amac {
      *
      * @tparam J The specific job type being stored.
      */
-    template <typename J> class alignas(J) job_slot {
+    template <typename J>
+    class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
 
     public:
@@ -170,8 +168,7 @@ namespace vault::amac {
 
       job_slot(job_slot const&) = delete;
 
-      job_slot& operator=(job_slot&& other)
-      {
+      job_slot& operator=(job_slot&& other) {
         if (this != std::addressof(other)) {
           *this->get() = std::move(*other.get());
         }
@@ -181,8 +178,7 @@ namespace vault::amac {
 
       job_slot& operator=(job_slot const&) = delete;
 
-      [[nodiscard]] J* get() noexcept
-      {
+      [[nodiscard]] J* get() noexcept {
         return reinterpret_cast<J*>(&storage[0]);
       }
     };
@@ -210,16 +206,13 @@ namespace vault::amac {
      * @pre The value type of the ijobs range must satisfy
      *   vault::amac::concepts::job.
      */
-    template <std::ranges::input_range                         Jobs,
-      concepts::job_reporter<std::ranges::range_value_t<Jobs>> Reporter>
-    static constexpr void operator()(Jobs&& ijobs, Reporter&& reporter)
-    {
+    template <std::ranges::input_range Jobs, concepts::job_reporter<std::ranges::range_value_t<Jobs>> Reporter>
+    static constexpr void operator()(Jobs&& ijobs, Reporter&& reporter) {
       using job_t = std::ranges::range_value_t<Jobs>;
 
       auto [ijobs_cursor, ijobs_last] = std::ranges::subrange(ijobs);
 
-      static constexpr auto const JOB_COUNT =
-        (TotalFanout + job_t::fanout() - 1) / job_t::fanout();
+      static constexpr auto const JOB_COUNT = (TotalFanout + job_t::fanout() - 1) / job_t::fanout();
 
       auto jobs = std::array<job_slot<job_t>, JOB_COUNT>{};
 
@@ -231,8 +224,7 @@ namespace vault::amac {
 
           if (auto addresses = job.init()) {
             prefetch(addresses);
-            std::construct_at(
-              jobs_first->get(), std::forward<decltype(job)>(job));
+            std::construct_at(jobs_first->get(), std::forward<decltype(job)>(job));
             ++jobs_first;
           } else {
             std::invoke(reporter, std::move(job));
@@ -289,17 +281,17 @@ namespace vault::amac {
   };
 
   /**
-   * @brief Global instance of the coordinator.
+   * @brief Global instance of the executor.
    * @ingroup vault_amac
    *
-   * Usage: `vault::amac::coordinator<16>(haystack, needles, factory,
+   * Usage: `vault::amac::executor<16>(haystack, needles, factory,
    * reporter);`
    *
    * @tparam TotalFanout The interleaving degree. Typical values are
    *   8-16.
    */
   template <uint8_t TotalFanout = 16>
-  constexpr inline auto const coordinator = coordinator_fn{};
+  constexpr inline auto const executor = executor_fn{};
 } // namespace vault::amac
 
 template <std::size_t N>
