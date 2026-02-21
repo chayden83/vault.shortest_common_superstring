@@ -108,7 +108,7 @@ namespace vault::amac::concepts {
    * @ingroup vault_amac
    */
   template <typename R, typename J>
-  concept job_reporter = job<J> && std::invocable<R, J&&>;
+  concept reporter = job<J> && std::invocable<R, J&&>;
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
@@ -206,7 +206,7 @@ namespace vault::amac {
      * @pre The value type of the ijobs range must satisfy
      *   vault::amac::concepts::job.
      */
-    template <std::ranges::input_range Jobs, concepts::job_reporter<std::ranges::range_value_t<Jobs>> Reporter>
+    template <std::ranges::input_range Jobs, concepts::reporter<std::ranges::range_value_t<Jobs>> Reporter>
     static constexpr void operator()(Jobs&& ijobs, Reporter&& reporter) {
       using job_t = std::ranges::range_value_t<Jobs>;
 
