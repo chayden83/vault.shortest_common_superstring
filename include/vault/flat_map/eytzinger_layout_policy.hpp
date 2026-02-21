@@ -305,10 +305,6 @@ namespace eytzinger {
 
     template <typename HaystackIter, typename NeedleIter, typename Comp, search_bound Bound>
     struct search_job {
-      [[nodiscard]] static constexpr uint64_t fanout() {
-        return eytzinger_layout_policy::FANOUT;
-      }
-
       using ValT = std::iter_value_t<HaystackIter>;
 
       HaystackIter begin_it;
@@ -363,6 +359,16 @@ namespace eytzinger {
       }
     };
 
+    // TODO: Encapsulate shared context.
+    static constexpr inline struct search_context_t {
+      [[nodiscard]] static constexpr uint64_t fanout() {
+        return eytzinger_layout_policy::FANOUT;
+      }
+
+      auto init(auto &job) const -> decltype(job.init()) { return job.init(); }
+      auto step(auto &job) const -> decltype(job.step()) { return job.init(); }
+    } search_context { };      
+    
     struct lower_bound_job_fn {
       template <std::ranges::random_access_range Haystack, typename Comp, typename NeedleIter>
       [[nodiscard]] static auto operator()(Haystack&& haystack, Comp comp, NeedleIter needle) {

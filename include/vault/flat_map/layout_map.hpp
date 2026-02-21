@@ -25,20 +25,21 @@ namespace std {
 
 namespace eytzinger {
 
-  template <typename K,
+  template <
+    typename K,
     typename V,
-    std::strict_weak_order<K, K> Compare = std::less<>,
-    typename LayoutPolicy                = eytzinger_layout_policy<6>,
-    typename Allocator = std::allocator<std::pair<const K, V>>,
+    std::strict_weak_order<K, K> Compare                  = std::less<>,
+    typename LayoutPolicy                                 = eytzinger_layout_policy<6>,
+    typename Allocator                                    = std::allocator<std::pair<const K, V>>,
     template <typename, typename> typename KeyContainer   = std::vector,
     template <typename, typename> typename ValueContainer = std::vector>
-    requires OrderedForwardLayoutPolicy<LayoutPolicy,
-               std::ranges::iterator_t<const KeyContainer<K,
-                 typename std::allocator_traits<
-                   Allocator>::template rebind_alloc<K>>>,
-               Compare>
-    && std::ranges::random_access_range<ValueContainer<V,
-      typename std::allocator_traits<Allocator>::template rebind_alloc<V>>>
+    requires OrderedForwardLayoutPolicy<
+               LayoutPolicy,
+               std::ranges::iterator_t<
+                 const KeyContainer<K, typename std::allocator_traits<Allocator>::template rebind_alloc<K>>>,
+               Compare> &&
+             std::ranges::random_access_range<
+               ValueContainer<V, typename std::allocator_traits<Allocator>::template rebind_alloc<V>>>
   class layout_map {
   public:
     using key_type        = K;
@@ -50,18 +51,16 @@ namespace eytzinger {
     using difference_type = std::ptrdiff_t;
     using key_compare     = Compare;
 
-    using key_allocator_type =
-      typename std::allocator_traits<Allocator>::template rebind_alloc<K>;
-    using value_allocator_type =
-      typename std::allocator_traits<Allocator>::template rebind_alloc<V>;
-    using key_storage_type   = KeyContainer<K, key_allocator_type>;
-    using value_storage_type = ValueContainer<V, value_allocator_type>;
+    using key_allocator_type   = typename std::allocator_traits<Allocator>::template rebind_alloc<K>;
+    using value_allocator_type = typename std::allocator_traits<Allocator>::template rebind_alloc<V>;
+    using key_storage_type     = KeyContainer<K, key_allocator_type>;
+    using value_storage_type   = ValueContainer<V, value_allocator_type>;
 
     using iterator               = layout_iterator<const layout_map>;
     using const_iterator         = layout_iterator<const layout_map>;
     using reverse_iterator       = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
-    using reference = std::pair<const key_type&, const mapped_type&>;
+    using reference              = std::pair<const key_type&, const mapped_type&>;
 
   private:
     key_storage_type              keys_;
@@ -69,60 +68,50 @@ namespace eytzinger {
     [[no_unique_address]] Compare compare_;
 
   public:
-    [[nodiscard]] constexpr allocator_type get_allocator() const noexcept
-    {
+    [[nodiscard]] constexpr allocator_type get_allocator() const noexcept {
       return allocator_type(keys_.get_allocator());
     }
 
     [[nodiscard]] constexpr layout_map()
-        : layout_map(Compare(), Allocator())
-    {}
+      : layout_map(Compare(), Allocator()) {}
 
-    [[nodiscard]] constexpr explicit layout_map(
-      const Compare& comp, const Allocator& alloc = Allocator())
-        : keys_(key_allocator_type(alloc))
-        , values_(value_allocator_type(alloc))
-        , compare_(comp)
-    {
+    [[nodiscard]] constexpr explicit layout_map(const Compare& comp, const Allocator& alloc = Allocator())
+      : keys_(key_allocator_type(alloc))
+      , values_(value_allocator_type(alloc))
+      , compare_(comp) {
       assert(keys_.empty());
     }
 
     [[nodiscard]] constexpr explicit layout_map(const Allocator& alloc)
-        : layout_map(Compare(), alloc)
-    {}
+      : layout_map(Compare(), alloc) {}
 
     [[nodiscard]] constexpr layout_map(const layout_map& other)     = default;
     [[nodiscard]] constexpr layout_map(layout_map&& other) noexcept = default;
 
-    [[nodiscard]] constexpr layout_map(
-      const layout_map& other, const Allocator& alloc)
-        : keys_(other.keys_, key_allocator_type(alloc))
-        , values_(other.values_, value_allocator_type(alloc))
-        , compare_(other.compare_)
-    {
-      assert(
-        keys_.size() == values_.size() && "Inconsistent copy construction");
+    [[nodiscard]] constexpr layout_map(const layout_map& other, const Allocator& alloc)
+      : keys_(other.keys_, key_allocator_type(alloc))
+      , values_(other.values_, value_allocator_type(alloc))
+      , compare_(other.compare_) {
+      assert(keys_.size() == values_.size() && "Inconsistent copy construction");
     }
 
-    [[nodiscard]] constexpr layout_map(
-      layout_map&& other, const Allocator& alloc)
-        : keys_(std::move(other.keys_), key_allocator_type(alloc))
-        , values_(std::move(other.values_), value_allocator_type(alloc))
-        , compare_(std::move(other.compare_))
-    {
-      assert(
-        keys_.size() == values_.size() && "Inconsistent move construction");
+    [[nodiscard]] constexpr layout_map(layout_map&& other, const Allocator& alloc)
+      : keys_(std::move(other.keys_), key_allocator_type(alloc))
+      , values_(std::move(other.values_), value_allocator_type(alloc))
+      , compare_(std::move(other.compare_)) {
+      assert(keys_.size() == values_.size() && "Inconsistent move construction");
     }
 
     template <std::input_iterator It>
-    [[nodiscard]] constexpr layout_map(It first,
-      It                                  last,
-      const Compare&                      comp  = Compare(),
-      const Allocator&                    alloc = Allocator())
-        : keys_(key_allocator_type(alloc))
-        , values_(value_allocator_type(alloc))
-        , compare_(comp)
-    {
+    [[nodiscard]] constexpr layout_map(
+      It               first,
+      It               last,
+      const Compare&   comp  = Compare(),
+      const Allocator& alloc = Allocator()
+    )
+      : keys_(key_allocator_type(alloc))
+      , values_(value_allocator_type(alloc))
+      , compare_(comp) {
       for (; first != last; ++first) {
         keys_.push_back(first->first);
         values_.push_back(first->second);
@@ -134,31 +123,29 @@ namespace eytzinger {
     }
 
     template <std::input_iterator It>
-    [[nodiscard]] constexpr layout_map(
-      It first, It last, const Allocator& alloc)
-        : layout_map(first, last, Compare(), alloc)
-    {}
-
-    [[nodiscard]] constexpr layout_map(std::initializer_list<value_type> init,
-      const Compare&   comp  = Compare(),
-      const Allocator& alloc = Allocator())
-        : layout_map(init.begin(), init.end(), comp, alloc)
-    {}
+    [[nodiscard]] constexpr layout_map(It first, It last, const Allocator& alloc)
+      : layout_map(first, last, Compare(), alloc) {}
 
     [[nodiscard]] constexpr layout_map(
-      std::initializer_list<value_type> init, const Allocator& alloc)
-        : layout_map(init.begin(), init.end(), Compare(), alloc)
-    {}
+      std::initializer_list<value_type> init,
+      const Compare&                    comp  = Compare(),
+      const Allocator&                  alloc = Allocator()
+    )
+      : layout_map(init.begin(), init.end(), comp, alloc) {}
+
+    [[nodiscard]] constexpr layout_map(std::initializer_list<value_type> init, const Allocator& alloc)
+      : layout_map(init.begin(), init.end(), Compare(), alloc) {}
 
     template <std::ranges::forward_range R>
-    [[nodiscard]] constexpr layout_map(std::sorted_unique_t,
+    [[nodiscard]] constexpr layout_map(
+      std::sorted_unique_t,
       R&&              range,
       const Compare&   comp  = Compare(),
-      const Allocator& alloc = Allocator())
-        : keys_(key_allocator_type(alloc))
-        , values_(value_allocator_type(alloc))
-        , compare_(comp)
-    {
+      const Allocator& alloc = Allocator()
+    )
+      : keys_(key_allocator_type(alloc))
+      , values_(value_allocator_type(alloc))
+      , compare_(comp) {
       for (auto&& [k, v] : range) {
         keys_.push_back(k);
         values_.push_back(v);
@@ -168,115 +155,86 @@ namespace eytzinger {
     }
 
     template <std::ranges::forward_range R>
-    [[nodiscard]] constexpr layout_map(
-      std::sorted_unique_t tag, R&& range, const Allocator& alloc)
-        : layout_map(tag, std::forward<R>(range), Compare(), alloc)
-    {}
+    [[nodiscard]] constexpr layout_map(std::sorted_unique_t tag, R&& range, const Allocator& alloc)
+      : layout_map(tag, std::forward<R>(range), Compare(), alloc) {}
 
-    [[nodiscard]] constexpr layout_map(std::in_place_t,
+    [[nodiscard]] constexpr layout_map(
+      std::in_place_t,
       key_storage_type&&   k_cont,
       value_storage_type&& v_cont,
       const Compare&       comp  = Compare(),
-      const Allocator&     alloc = Allocator())
-        : keys_(std::move(k_cont), key_allocator_type(alloc))
-        , values_(std::move(v_cont), value_allocator_type(alloc))
-        , compare_(comp)
-    {
+      const Allocator&     alloc = Allocator()
+    )
+      : keys_(std::move(k_cont), key_allocator_type(alloc))
+      , values_(std::move(v_cont), value_allocator_type(alloc))
+      , compare_(comp) {
       if (keys_.size() != values_.size()) {
-        throw std::invalid_argument(
-          "layout_map: key and value containers must have same size");
+        throw std::invalid_argument("layout_map: key and value containers must have same size");
       }
       sort_and_unique_zipped();
       policy_type::permute(std::views::zip(keys_, values_));
       assert(keys_.size() == values_.size());
     }
 
-    [[nodiscard]] constexpr layout_map(std::in_place_t,
+    [[nodiscard]] constexpr layout_map(
+      std::in_place_t,
       key_storage_type&&   k_cont,
       value_storage_type&& v_cont,
-      const Allocator&     alloc)
-        : layout_map(std::in_place,
-            std::move(k_cont),
-            std::move(v_cont),
-            Compare(),
-            alloc)
-    {}
+      const Allocator&     alloc
+    )
+      : layout_map(std::in_place, std::move(k_cont), std::move(v_cont), Compare(), alloc) {}
 
     constexpr layout_map& operator=(const layout_map&)     = default;
     constexpr layout_map& operator=(layout_map&&) noexcept = default;
 
-    constexpr layout_map& operator=(std::initializer_list<value_type> ilist)
-    {
+    constexpr layout_map& operator=(std::initializer_list<value_type> ilist) {
       layout_map tmp(ilist, compare_, get_allocator());
       *this = std::move(tmp);
       return *this;
     }
 
     template <std::integral I>
-    [[nodiscard]] constexpr reference operator[](unordered_index<I> idx) const
-    {
-      assert(idx.index_ >= 0 && static_cast<size_t>(idx.index_) < keys_.size()
-        && "Index out of bounds");
+    [[nodiscard]] constexpr reference operator[](unordered_index<I> idx) const {
+      assert(idx.index_ >= 0 && static_cast<size_t>(idx.index_) < keys_.size() && "Index out of bounds");
       return {keys_[idx.index_], values_[idx.index_]};
     }
 
     template <std::integral I>
-    [[nodiscard]] constexpr reference operator[](ordered_index<I> idx) const
-    {
-      assert(idx.index_ >= 0 && static_cast<size_t>(idx.index_) < keys_.size()
-        && "Rank out of bounds");
-      std::size_t phys_idx = policy_type::sorted_rank_to_index(
-        static_cast<std::size_t>(idx.index_), keys_.size());
+    [[nodiscard]] constexpr reference operator[](ordered_index<I> idx) const {
+      assert(idx.index_ >= 0 && static_cast<size_t>(idx.index_) < keys_.size() && "Rank out of bounds");
+      std::size_t phys_idx = policy_type::sorted_rank_to_index(static_cast<std::size_t>(idx.index_), keys_.size());
       assert(phys_idx < keys_.size());
       return {keys_[phys_idx], values_[phys_idx]};
     }
 
-    [[nodiscard]] constexpr const key_storage_type&
-    unordered_keys() const noexcept
-    {
+    [[nodiscard]] constexpr const key_storage_type& unordered_keys() const noexcept {
       return keys_;
     }
 
-    [[nodiscard]] constexpr const value_storage_type&
-    unordered_values() const noexcept
-    {
+    [[nodiscard]] constexpr const value_storage_type& unordered_values() const noexcept {
       assert(keys_.size() == values_.size());
       return values_;
     }
 
-    [[nodiscard]] constexpr auto unordered_items() const noexcept
-      -> decltype(std::views::zip(keys_, values_))
-    {
+    [[nodiscard]] constexpr auto unordered_items() const noexcept -> decltype(std::views::zip(keys_, values_)) {
       assert(keys_.size() == values_.size());
       return std::views::zip(keys_, values_);
     }
 
-    [[nodiscard]] constexpr auto keys() const noexcept
-    {
+    [[nodiscard]] constexpr auto keys() const noexcept {
       using Iter            = layout_iterator<const key_storage_type>;
-      std::size_t start_idx = keys_.empty()
-        ? size()
-        : policy_type::sorted_rank_to_index(0, keys_.size());
-      return std::ranges::subrange(
-        Iter(keys_, static_cast<std::ptrdiff_t>(start_idx)),
-        Iter(keys_, size()));
+      std::size_t start_idx = keys_.empty() ? size() : policy_type::sorted_rank_to_index(0, keys_.size());
+      return std::ranges::subrange(Iter(keys_, static_cast<std::ptrdiff_t>(start_idx)), Iter(keys_, size()));
     }
 
-    [[nodiscard]] constexpr auto values() const noexcept
-    {
+    [[nodiscard]] constexpr auto values() const noexcept {
       using Iter            = layout_iterator<const value_storage_type>;
-      std::size_t start_idx = values_.empty()
-        ? size()
-        : policy_type::sorted_rank_to_index(0, values_.size());
-      return std::ranges::subrange(
-        Iter(values_, static_cast<std::ptrdiff_t>(start_idx)),
-        Iter(values_, size()));
+      std::size_t start_idx = values_.empty() ? size() : policy_type::sorted_rank_to_index(0, values_.size());
+      return std::ranges::subrange(Iter(values_, static_cast<std::ptrdiff_t>(start_idx)), Iter(values_, size()));
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr const_iterator lower_bound(
-      const K0& key) const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator lower_bound(const K0& key) const noexcept {
       if (keys_.empty()) {
         return end();
       }
@@ -289,9 +247,7 @@ namespace eytzinger {
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr const_iterator upper_bound(
-      const K0& key) const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator upper_bound(const K0& key) const noexcept {
       if (keys_.empty()) {
         return end();
       }
@@ -304,8 +260,7 @@ namespace eytzinger {
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr const_iterator find(const K0& key) const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator find(const K0& key) const noexcept {
       const auto lb = lower_bound(key);
       if (lb != end() && !compare_(key, lb->first)) {
         return lb;
@@ -314,21 +269,17 @@ namespace eytzinger {
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr bool contains(const K0& key) const noexcept
-    {
+    [[nodiscard]] constexpr bool contains(const K0& key) const noexcept {
       return find(key) != end();
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr size_type count(const K0& key) const noexcept
-    {
+    [[nodiscard]] constexpr size_type count(const K0& key) const noexcept {
       return contains(key) ? 1 : 0;
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr std::pair<const_iterator, const_iterator>
-    equal_range(const K0& key) const noexcept
-    {
+    [[nodiscard]] constexpr std::pair<const_iterator, const_iterator> equal_range(const K0& key) const noexcept {
       const auto lb = lower_bound(key);
       if (lb != end() && !compare_(key, lb->first)) {
         auto ub = lb;
@@ -338,8 +289,7 @@ namespace eytzinger {
     }
 
     template <typename K0 = key_type>
-    [[nodiscard]] constexpr const mapped_type& at(const K0& key) const
-    {
+    [[nodiscard]] constexpr const mapped_type& at(const K0& key) const {
       auto it = find(key);
       if (it == end()) {
         throw std::out_of_range("layout_map::at: key not found");
@@ -349,72 +299,48 @@ namespace eytzinger {
 
     // --- AMAC Batch Interface ---
 
-    template <typename Executor,
-      std::ranges::input_range Needles,
-      typename OutputIt>
-      requires std::output_iterator<OutputIt,
-        std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>,
-          const_iterator>>
-    void batch_lower_bound(
-      Executor&& executor, Needles&& needles, OutputIt output) const
-    {
-      auto job_factory = std::bind_front(policy_type::lower_bound_job,
-        std::ranges::subrange(unordered_keys()),
-        compare_);
+    template <typename Executor, std::ranges::input_range Needles, typename OutputIt>
+      requires std::
+        output_iterator<OutputIt, std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>, const_iterator>>
+      void batch_lower_bound(Executor&& executor, Needles&& needles, OutputIt output) const {
+      auto job_factory =
+        std::bind_front(policy_type::lower_bound_job, std::ranges::subrange(unordered_keys()), compare_);
 
       auto reporter = [&, this](auto const& job) mutable {
-        auto offset = std::ranges::distance(
-          std::ranges::begin(unordered_keys()), job.haystack_cursor());
+        auto offset = std::ranges::distance(std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        *output++ =
-          std::pair{job.needle_cursor(), const_iterator{*this, offset}};
+        *output++ = std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
 
-      auto needle_cursors = std::views::iota(
-        std::ranges::begin(needles), std::ranges::end(needles));
+      auto needle_cursors = std::views::iota(std::ranges::begin(needles), std::ranges::end(needles));
 
-      executor(std::views::transform(needle_cursors, job_factory), reporter);
+      executor(std::views::transform(needle_cursors, job_factory), policy_type::search_context, reporter);
     }
 
-    template <typename Executor,
-      std::ranges::input_range Needles,
-      typename OutputIt>
-      requires std::output_iterator<OutputIt,
-        std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>,
-          const_iterator>>
-    void batch_upper_bound(
-      Executor&& executor, Needles&& needles, OutputIt output) const
-    {
-      auto job_factory = std::bind_front(policy_type::upper_bound_job,
-        std::ranges::subrange(unordered_keys()),
-        compare_);
+    template <typename Executor, std::ranges::input_range Needles, typename OutputIt>
+      requires std::
+        output_iterator<OutputIt, std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>, const_iterator>>
+      void batch_upper_bound(Executor&& executor, Needles&& needles, OutputIt output) const {
+      auto job_factory =
+        std::bind_front(policy_type::upper_bound_job, std::ranges::subrange(unordered_keys()), compare_);
 
       auto reporter = [&, this](auto const& job) mutable {
-        auto offset = std::ranges::distance(
-          std::ranges::begin(unordered_keys()), job.haystack_cursor());
+        auto offset = std::ranges::distance(std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
-        *output++ =
-          std::pair{job.needle_cursor(), const_iterator{*this, offset}};
+        *output++ = std::pair{job.needle_cursor(), const_iterator{*this, offset}};
       };
 
-      auto needle_cursors = std::views::iota(
-        std::ranges::begin(needles), std::ranges::end(needles));
+      auto needle_cursors = std::views::iota(std::ranges::begin(needles), std::ranges::end(needles));
 
-      executor(std::views::transform(needle_cursors, job_factory), reporter);
+      executor(std::views::transform(needle_cursors, job_factory), policy_type::search_context, reporter);
     }
 
-    template <typename Executor,
-      std::ranges::input_range Needles,
-      typename OutputIt>
-      requires std::output_iterator<OutputIt,
-        std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>,
-          const_iterator>>
-    void batch_find(
-      Executor&& executor, Needles&& needles, OutputIt output) const
-    {
-      auto job_factory = std::bind_front(policy_type::lower_bound_job,
-        std::ranges::subrange(unordered_keys()),
-        compare_);
+    template <typename Executor, std::ranges::input_range Needles, typename OutputIt>
+      requires std::
+        output_iterator<OutputIt, std::pair<std::ranges::iterator_t<std::remove_reference_t<Needles>>, const_iterator>>
+      void batch_find(Executor&& executor, Needles&& needles, OutputIt output) const {
+      auto job_factory =
+        std::bind_front(policy_type::lower_bound_job, std::ranges::subrange(unordered_keys()), compare_);
 
       auto reporter = [&, this](auto const& job) mutable {
         auto result = std::pair{job.needle_cursor(), end()};
@@ -424,8 +350,7 @@ namespace eytzinger {
         } else if (compare_(*job.needle_cursor(), *job.haystack_cursor())) {
           // pass
         } else {
-          auto offset = std::ranges::distance(
-            std::ranges::begin(unordered_keys()), job.haystack_cursor());
+          auto offset = std::ranges::distance(std::ranges::begin(unordered_keys()), job.haystack_cursor());
 
           result.second = const_iterator{*this, offset};
         }
@@ -433,26 +358,22 @@ namespace eytzinger {
         *output++ = std::move(result);
       };
 
-      auto needle_cursors = std::views::iota(
-        std::ranges::begin(needles), std::ranges::end(needles));
+      auto needle_cursors = std::views::iota(std::ranges::begin(needles), std::ranges::end(needles));
 
-      executor(std::views::transform(needle_cursors, job_factory), reporter);
+      executor(std::views::transform(needle_cursors, job_factory), policy_type::search_context, reporter);
     }
 
-    [[nodiscard]] constexpr size_type size() const noexcept
-    {
+    [[nodiscard]] constexpr size_type size() const noexcept {
       assert(keys_.size() == values_.size());
       return keys_.size();
     }
 
-    [[nodiscard]] constexpr bool empty() const noexcept
-    {
+    [[nodiscard]] constexpr bool empty() const noexcept {
       assert(keys_.size() == values_.size());
       return keys_.empty();
     }
 
-    [[nodiscard]] constexpr const_iterator begin() const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator begin() const noexcept {
       if (keys_.empty()) {
         return end();
       }
@@ -461,18 +382,15 @@ namespace eytzinger {
       return const_iterator(*this, static_cast<std::ptrdiff_t>(idx));
     }
 
-    [[nodiscard]] constexpr const_iterator end() const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator end() const noexcept {
       return const_iterator(*this, size());
     }
 
-    [[nodiscard]] constexpr const_iterator cbegin() const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator cbegin() const noexcept {
       return begin();
     }
 
-    [[nodiscard]] constexpr const_iterator cend() const noexcept
-    {
+    [[nodiscard]] constexpr const_iterator cend() const noexcept {
       return end();
     }
 
@@ -501,21 +419,16 @@ namespace eytzinger {
     }
 
   private:
-    constexpr void sort_and_unique_zipped()
-    {
+    constexpr void sort_and_unique_zipped() {
       assert(keys_.size() == values_.size());
       auto z = std::views::zip(keys_, values_);
-      std::ranges::sort(z, [this](const auto& a, const auto& b) {
-        return compare_(std::get<0>(a), std::get<0>(b));
+      std::ranges::sort(z, [this](const auto& a, const auto& b) { return compare_(std::get<0>(a), std::get<0>(b)); });
+      auto [first_erase, _] = std::ranges::unique(z, [this](const auto& a, const auto& b) {
+        const auto& k1 = std::get<0>(a);
+        const auto& k2 = std::get<0>(b);
+        return !compare_(k1, k2) && !compare_(k2, k1);
       });
-      auto [first_erase, _] =
-        std::ranges::unique(z, [this](const auto& a, const auto& b) {
-          const auto& k1 = std::get<0>(a);
-          const auto& k2 = std::get<0>(b);
-          return !compare_(k1, k2) && !compare_(k2, k1);
-        });
-      auto new_size =
-        static_cast<size_type>(std::ranges::distance(z.begin(), first_erase));
+      auto new_size         = static_cast<size_type>(std::ranges::distance(z.begin(), first_erase));
       keys_.resize(new_size);
       values_.resize(new_size);
       assert(keys_.size() == values_.size());

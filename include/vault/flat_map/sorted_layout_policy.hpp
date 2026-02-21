@@ -157,10 +157,6 @@ namespace eytzinger {
 
     template <typename HaystackI, typename NeedleI, typename Compare>
     struct kary_search_job {
-      [[nodiscard]] static constexpr uint64_t fanout() {
-        return sorted_layout_policy::FANOUT;
-      }
-
       NeedleI needle_cursor_;
 
       HaystackI haystack_cursor_;
@@ -219,6 +215,16 @@ namespace eytzinger {
       }
     };
 
+    // TODO: Encapsulate shared context.
+    static constexpr inline struct search_context_t {
+      [[nodiscard]] static constexpr uint64_t fanout() {
+        return sorted_layout_policy::FANOUT;
+      }
+
+      auto init(auto &job) const -> decltype(job.init()) { return job.init(); }
+      auto step(auto &job) const -> decltype(job.step()) { return job.init(); }
+    } search_context { };      
+    
     struct lower_bound_job_fn {
       template <std::ranges::forward_range Haystack, typename Compare, std::forward_iterator needle_iterator>
       [[nodiscard]] static constexpr auto

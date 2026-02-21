@@ -9,16 +9,21 @@
 
 // --- Test Job Definition ---
 
+static constexpr inline struct JobContext {
+  [[nodiscard]] static constexpr uint64_t fanout() {
+    return 1;
+  }
+  
+  auto init(auto &job) const -> decltype(job.init()) { return job.init(); }
+  auto step(auto &job) const -> decltype(job.step()) { return job.init(); }
+} job_context{};
+
 // A synthetic job that counts down from a specific number.
 // Used to verify that AMAC runs every job to completion.
 class CountdownJob {
   int m_counter;
 
 public:
-  [[nodiscard]] static constexpr uint64_t fanout() {
-    return 1uz;
-  }
-
   // Needles are simple integers representing the starting count
   using Needle = int;
 
@@ -50,7 +55,7 @@ public:
 };
 
 // Verify Concept Compliance
-static_assert(vault::amac::concepts::job<CountdownJob>);
+static_assert(vault::amac::concepts::job_context<JobContext, CountdownJob>);
 
 // --- Test Suite ---
 
@@ -85,7 +90,7 @@ TEST_CASE("AMAC Executor: Countdown Integrity", "[amac][executor]") {
   auto jobs = start_counts | std::views::transform([](int count) { return CountdownJob(count); });
 
   // 4. Run Executor (Batch Size 16)
-  vault::amac::executor<16>(jobs, reporter);
+  vault::amac::executor<16>(jobs, job_context, reporter);
 
   // 5. Verification
   // Condition: Reported is invoked N times
@@ -108,12 +113,12 @@ TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]") {
   auto jobs = start_counts | std::views::transform([](int count) { return CountdownJob(count); });
 
   SECTION("Batch Size = 1 (Serial Execution)") {
-    vault::amac::executor<1>(jobs, reporter);
+    vault::amac::executor<1>(jobs, job_context, reporter);
     CHECK(reported_count == num_jobs);
   }
 
   SECTION("Batch Size = 2") {
-    vault::amac::executor<2>(jobs, reporter);
+    vault::amac::executor<2>(jobs, job_context, reporter);
     CHECK(reported_count == num_jobs);
   }
 }
@@ -133,7 +138,7 @@ TEST_CASE("AMAC Executor: Immediate Completion Edge Cases", "[amac][edge_cases]"
 
     auto jobs = zeros | std::views::transform([](int count) { return CountdownJob(count); });
 
-    vault::amac::executor<16>(jobs, reporter);
+    vault::amac::executor<16>(jobs, job_context, reporter);
     CHECK(reported_count == 50);
   }
 
@@ -146,7 +151,7 @@ TEST_CASE("AMAC Executor: Immediate Completion Edge Cases", "[amac][edge_cases]"
 
     auto jobs = mixed | std::views::transform([](int count) { return CountdownJob(count); });
 
-    vault::amac::executor<16>(jobs, reporter);
+    vault::amac::executor<16>(jobs, job_context, reporter);
     CHECK(reported_count == 100);
   }
 }
@@ -164,10 +169,6 @@ TEST_CASE("AMAC Executor: Double Free Regression Test", "[amac][resource][asan]"
     int                  m_steps_remaining;
 
   public:
-    [[nodiscard]] static constexpr uint64_t fanout() {
-      return 1uz;
-    }
-
     // Needles are pairs: {id, steps}
     using Needle = std::pair<int, int>;
 
@@ -229,7 +230,7 @@ TEST_CASE("AMAC Executor: Double Free Regression Test", "[amac][resource][asan]"
 
   // 3. Run with Batch Size 16
   // This ensures we have enough active slots to trigger the "holes" pattern.
-  vault::amac::executor<16>(jobs, reporter);
+  vault::amac::executor<16>(jobs, job_context, reporter);
 
   // 4. Verify
   CHECK(reported_count == num_jobs);
