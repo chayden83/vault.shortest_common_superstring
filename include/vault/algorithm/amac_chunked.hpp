@@ -29,16 +29,9 @@ namespace vault::amac {
    * @tparam MaxIntermediateBytes The maximum size in bytes of the intermediate buffer.
    * Defaults to 256 KB (a typical per-core L2 cache size).
    */
-  template <std::size_t MaxIntermediateBytes = 262144>
+  template <std::size_t FanoutBudget = 16, std::size_t MaxIntermediateBytes = 262144>
   class chunked_pipeline_executor_fn {
   public:
-    /**
-     * @brief Executes a composed pipeline by chunking the input range.
-     *
-     * @param ijobs The input range of jobs for Stage A.
-     * @param ctx The composed_context containing both contexts and the transition function.
-     * @param reporter A callable invoked with completed or dropped jobs.
-     */
     template <std::ranges::input_range Jobs, typename ComposedCtx, typename Reporter>
     static constexpr void operator()(Jobs&& ijobs, ComposedCtx&& ctx, Reporter&& reporter) {
       using pure_ctx_t = std::remove_cvref_t<ComposedCtx>;
@@ -50,13 +43,19 @@ namespace vault::amac {
            job_a_t&>;
       using job_b_t = typename opt_b_t::value_type;
 
-      // Calculate exactly how many Stage A jobs we can process before
-      // the intermediate Stage B jobs overflow the requested cache byte limit.
-      constexpr auto chunk_size = std::max<std::size_t>(1uz, MaxIntermediateBytes / sizeof(job_b_t));
+      // 1. Calculate the max capacity of the L2 cache for Stage B jobs
+      constexpr auto max_b_capacity = std::max<std::size_t>(1uz, MaxIntermediateBytes / sizeof(job_b_t));
 
-      // Allocate the intermediate buffer exactly once.
+      // 2. Scale the input chunk size by the inverse transition probability
+      constexpr double inverse_prob = static_cast<double>(pure_ctx_t::transition_probability::den) /
+                                      static_cast<double>(pure_ctx_t::transition_probability::num);
+
+      constexpr auto input_chunk_size =
+        std::max<std::size_t>(1uz, static_cast<std::size_t>(static_cast<double>(max_b_capacity) * inverse_prob));
+
       auto intermediate_buffer = std::vector<job_b_t>{};
-      intermediate_buffer.reserve(chunk_size);
+      // Reserve based on the expected output, preventing reallocations
+      intermediate_buffer.reserve(max_b_capacity + 100); // Small padding for statistical variance
 
       auto reporter_a = [&]<typename J>(J&& job) {
         if (auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job)) {
@@ -66,15 +65,12 @@ namespace vault::amac {
         }
       };
 
-      // Lazily slice the input range into L2-cache-friendly blocks
-      for (auto&& chunk : std::forward<Jobs>(ijobs) | std::views::chunk(chunk_size)) {
-        intermediate_buffer.clear(); // Resets size to 0, retains capacity
+      for (auto&& chunk : std::forward<Jobs>(ijobs) | std::views::chunk(input_chunk_size)) {
+        intermediate_buffer.clear();
 
-        // Execute Stage A on the chunk. Transitions are pushed into the hot L2 buffer.
-        vault::amac::executor<pure_ctx_t::fanout_a>(chunk, ctx.ctx_a, reporter_a);
-
-        // Execute Stage B natively out of the L2 buffer.
-        vault::amac::executor<pure_ctx_t::fanout_b>(intermediate_buffer, ctx.ctx_b, reporter);
+        // Execute sequentially using the FULL fanout budget for each stage
+        vault::amac::executor<FanoutBudget>(chunk, ctx.ctx_a, reporter_a);
+        vault::amac::executor<FanoutBudget>(intermediate_buffer, ctx.ctx_b, reporter);
       }
     }
   };
@@ -85,8 +81,9 @@ namespace vault::amac {
    *
    * Usage: `vault::amac::chunked_pipeline_executor<256 * 1024>(haystack, composed_ctx, reporter);`
    */
-  template <std::size_t MaxIntermediateBytes = 262144>
-  constexpr inline auto const chunked_pipeline_executor = chunked_pipeline_executor_fn<MaxIntermediateBytes>{};
+  template <std::size_t FanoutBudget = 16, std::size_t MaxIntermediateBytes = 262144>
+  constexpr inline auto const chunked_pipeline_executor =
+    chunked_pipeline_executor_fn<FanoutBudget, MaxIntermediateBytes>{};
 
 } // namespace vault::amac
 

@@ -170,7 +170,7 @@ TEST_CASE("Chunked AMAC Executor processes large inputs seamlessly", "[amac][chu
 
   // Execute with an artificially tiny L2 cache target (e.g., 1024 bytes)
   // to force the executor to aggressively slice the 50,000 jobs into many small chunks.
-  vault::amac::chunked_pipeline_executor<1024>(jobs, composed, reporter);
+  vault::amac::chunked_pipeline_executor<16, 1024>(jobs, composed, reporter);
 
   REQUIRE(pipeline_results.size() == static_cast<std::size_t>(num_elements));
 

@@ -1,3 +1,5 @@
+#include <benchmark/benchmark.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -5,13 +7,9 @@
 #include <ratio>
 #include <string>
 #include <vector>
-#include <benchmark/benchmark.h>
 
+#include <vault/algorithm/amac_chunked.hpp>
 #include <vault/algorithm/amac_pipeline.hpp>
-
-// Include your AMAC headers
-// #include "vault_amac.hpp"
-// #include "vault_amac_pipeline.hpp"
 
 // ----------------------------------------------------------------------------
 // 1. Contexts & Jobs (Reused from our Test Suite)
@@ -239,12 +237,52 @@ void bm_composite_pipeline(benchmark::State& state, std::size_t size_a, std::siz
 }
 
 // ----------------------------------------------------------------------------
-// 5. Explicit Benchmark Registration
+// 5. The Chunked Pipeline Benchmark
+// ----------------------------------------------------------------------------
+template <std::size_t Fanout, std::size_t MaxIntermediateBytes, typename TransProbPolicy, typename StepRatioPolicy>
+void bm_chunked_pipeline(benchmark::State& state, std::size_t size_a, std::size_t size_b) {
+  auto const num_queries = static_cast<std::size_t>(state.range(0));
+
+  constexpr double trans_prob = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
+  auto             data       = generate_data(num_queries, trans_prob, size_a, size_b);
+
+  auto ctx_a = lower_bound_context{&data.stage1_data};
+  auto ctx_b = upper_bound_context{&data.stage2_data};
+
+  using composed_t = vault::amac::composed_context<
+    lower_bound_context,
+    upper_bound_context,
+    lower_to_upper_transition,
+    1,
+    1,
+    StepRatioPolicy,
+    TransProbPolicy>;
+
+  auto composed = composed_t{.ctx_a = ctx_a, .ctx_b = ctx_b, .transition = lower_to_upper_transition{}};
+
+  for (auto _ : state) {
+    auto total_found = std::size_t{0};
+    auto reporter    = [&]<typename J>(J&&) {
+      if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
+        benchmark::DoNotOptimize(total_found += 1);
+      }
+    };
+
+    vault::amac::chunked_pipeline_executor<Fanout, MaxIntermediateBytes>(data.queries, composed, reporter);
+  }
+
+  state.SetItemsProcessed(state.iterations() * num_queries);
+}
+
+// ----------------------------------------------------------------------------
+// 6. Explicit Benchmark Registration
 // ----------------------------------------------------------------------------
 void register_benchmarks() {
-  // We vary the batch size from 10,000 to 10,000,000 queries.
   auto const min_batch = 10'000;
   auto const max_batch = 10'000'000;
+
+  // Targeting 256 KB L2 cache to prevent thrashing
+  constexpr std::size_t l2_cache_target = 262144;
 
   // Scenario 1: Balanced Steps (1:1 Ratio), 100% Transition Probability
   {
@@ -258,6 +296,12 @@ void register_benchmarks() {
 
     benchmark::RegisterBenchmark(
       "Composite_Fanout16_Prob100_Step1:1", bm_composite_pipeline<16, Prob100, Step1_1>, size, size
+    )
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
+
+    benchmark::RegisterBenchmark(
+      "Chunked_Fanout16_Prob100_Step1:1", bm_chunked_pipeline<16, l2_cache_target, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
@@ -281,6 +325,12 @@ void register_benchmarks() {
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
+    benchmark::RegisterBenchmark(
+      "Chunked_Fanout16_Prob1_64_Step1:2", bm_chunked_pipeline<16, l2_cache_target, Prob1_64, Step1_2>, size_a, size_b
+    )
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
   }
 
   // Scenario 3: Varying Fanout Limits (2, 64) for the 100% Transition workload
@@ -296,7 +346,19 @@ void register_benchmarks() {
       ->Range(min_batch, max_batch);
 
     benchmark::RegisterBenchmark(
+      "Chunked_Fanout2_Prob100_Step1:1", bm_chunked_pipeline<2, l2_cache_target, Prob100, Step1_1>, size, size
+    )
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
+
+    benchmark::RegisterBenchmark(
       "Composite_Fanout64_Prob100_Step1:1", bm_composite_pipeline<64, Prob100, Step1_1>, size, size
+    )
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
+
+    benchmark::RegisterBenchmark(
+      "Chunked_Fanout64_Prob100_Step1:1", bm_chunked_pipeline<64, l2_cache_target, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
