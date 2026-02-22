@@ -36,6 +36,20 @@ target_link_libraries(vault.amac.tests PRIVATE
 
 add_test(vault.amac.tests vault.amac.tests)
 
+add_executable(vault.amac_pipeline.tests)
+
+target_sources(vault.amac_pipeline.tests PRIVATE
+  amac_pipeline.test.cpp
+)
+
+target_link_libraries(vault.amac_pipeline.tests PRIVATE
+  Catch2::Catch2WithMain
+  vault::shortest_common_superstring
+  vault::shortest_common_superstring.internal
+)
+
+add_test(vault.amac_pipeline.tests vault.amac_pipeline.tests)
+
 add_executable(vault.fsst_dictionary.tests)
 
 target_sources(vault.fsst_dictionary.tests PRIVATE
