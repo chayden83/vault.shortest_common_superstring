@@ -279,7 +279,7 @@ void bm_chunked_pipeline(benchmark::State& state, std::size_t size_a, std::size_
 // ----------------------------------------------------------------------------
 void register_benchmarks() {
   auto const min_batch = 10'000;
-  auto const max_batch = 10'000'000;
+  auto const max_batch = 100'000'000;
 
   // Targeting 256 KB L2 cache to prevent thrashing
   constexpr std::size_t l2_cache_target = 262144;

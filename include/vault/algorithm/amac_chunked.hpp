@@ -52,10 +52,13 @@ namespace vault::amac {
 
       constexpr auto input_chunk_size =
         std::max<std::size_t>(1uz, static_cast<std::size_t>(static_cast<double>(max_b_capacity) * inverse_prob));
-
+      
+      // Small padding for statistical variance
+      auto extra_capacity = std::max(100uz, static_cast<std::size_t>(max_b_capacity * 1.25));
+      
       auto intermediate_buffer = std::vector<job_b_t>{};
       // Reserve based on the expected output, preventing reallocations
-      intermediate_buffer.reserve(max_b_capacity + 100); // Small padding for statistical variance
+      intermediate_buffer.reserve(std::min(input_chunk_size, max_b_capacity + extra_capacity));
 
       auto reporter_a = [&]<typename J>(J&& job) {
         if (auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job)) {
