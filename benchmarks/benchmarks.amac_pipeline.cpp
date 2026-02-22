@@ -273,16 +273,11 @@ void bm_composite_pipeline(benchmark::State& state, std::size_t size_a, std::siz
   auto ctx_a = lower_bound_context{&data.stage1_data};
   auto ctx_b = upper_bound_context{&data.stage2_data};
 
-  using composed_t = vault::amac::composed_context<
-    lower_bound_context,
-    upper_bound_context,
-    lower_to_upper_transition,
-    1,
-    1,
-    StepRatioPolicy,
-    TransProbPolicy>;
-
-  auto composed = composed_t{.ctx_a = ctx_a, .ctx_b = ctx_b, .transition = lower_to_upper_transition{}};
+  auto composed = vault::amac::make_pipeline(
+    ctx_a,
+    vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}),
+    ctx_b
+  );
 
   for (auto _ : state) {
     auto total_found = std::size_t{0};
@@ -305,16 +300,11 @@ void bm_chunked_pipeline(benchmark::State& state, std::size_t size_a, std::size_
   auto ctx_a = lower_bound_context{&data.stage1_data};
   auto ctx_b = upper_bound_context{&data.stage2_data};
 
-  using composed_t = vault::amac::composed_context<
-    lower_bound_context,
-    upper_bound_context,
-    lower_to_upper_transition,
-    1,
-    1,
-    StepRatioPolicy,
-    TransProbPolicy>;
-
-  auto composed = composed_t{.ctx_a = ctx_a, .ctx_b = ctx_b, .transition = lower_to_upper_transition{}};
+  auto composed = vault::amac::make_pipeline(
+    ctx_a,
+    vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}),
+    ctx_b
+  );
 
   for (auto _ : state) {
     auto total_found = std::size_t{0};
@@ -392,26 +382,13 @@ void bm_chunked_3_stage(benchmark::State& state, std::size_t size_a, std::size_t
   auto ctx_b = upper_bound_context{&data.stage2_data};
   auto ctx_c = point_lookup_context{&data.stage3_data};
 
-  using composed_bc_t = vault::amac::composed_context<
-    upper_bound_context,
-    point_lookup_context,
-    upper_to_point_transition,
-    1,
-    1,
-    StepRatioPolicy,
-    TransProbPolicy>;
-
-  using composed_abc_t = vault::amac::composed_context<
-    lower_bound_context,
-    composed_bc_t,
-    lower_to_upper_transition,
-    1,
-    1,
-    StepRatioPolicy,
-    TransProbPolicy>;
-
-  auto composed_bc  = composed_bc_t{.ctx_a = ctx_b, .ctx_b = ctx_c, .transition = upper_to_point_transition{}};
-  auto composed_abc = composed_abc_t{.ctx_a = ctx_a, .ctx_b = composed_bc, .transition = lower_to_upper_transition{}};
+  auto composed = vault::amac::make_pipeline(
+    ctx_a,
+    vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}),
+    ctx_b,
+    vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(upper_to_point_transition{}),
+    ctx_c
+  );
 
   for (auto _ : state) {
     auto total_found = std::size_t{0};
@@ -420,7 +397,7 @@ void bm_chunked_3_stage(benchmark::State& state, std::size_t size_a, std::size_t
         benchmark::DoNotOptimize(total_found += 1);
       }
     };
-    vault::amac::chunked_pipeline_executor<Fanout, MaxIntermediateBytes>(data.queries, composed_abc, reporter);
+    vault::amac::chunked_pipeline_executor<Fanout, MaxIntermediateBytes>(data.queries, composed, reporter);
   }
   state.SetItemsProcessed(state.iterations() * num_queries);
 }
@@ -444,11 +421,13 @@ void register_benchmarks() {
     benchmark::RegisterBenchmark("Sequential_Fanout16_Prob100_Step1:1", bm_sequential_amac<16>, 1.0, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Composite_Fanout16_Prob100_Step1:1", bm_composite_pipeline<16, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Chunked_Fanout16_Prob100_Step1:1", bm_chunked_pipeline<16, l2_cache_target, Prob100, Step1_1>, size, size
     )
@@ -468,11 +447,13 @@ void register_benchmarks() {
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Composite_Fanout16_Prob1_64_Step1:2", bm_composite_pipeline<16, Prob1_64, Step1_2>, size_a, size_b
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Chunked_Fanout16_Prob1_64_Step1:2", bm_chunked_pipeline<16, l2_cache_target, Prob1_64, Step1_2>, size_a, size_b
     )
@@ -491,16 +472,19 @@ void register_benchmarks() {
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Chunked_Fanout2_Prob100_Step1:1", bm_chunked_pipeline<2, l2_cache_target, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Composite_Fanout64_Prob100_Step1:1", bm_composite_pipeline<64, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Chunked_Fanout64_Prob100_Step1:1", bm_chunked_pipeline<64, l2_cache_target, Prob100, Step1_1>, size, size
     )
@@ -517,6 +501,7 @@ void register_benchmarks() {
     benchmark::RegisterBenchmark("Sequential_3Stage_Fanout16_Prob100", bm_sequential_3_stage<16>, 1.0, size, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch/10);
+
     benchmark::RegisterBenchmark(
       "Chunked_3Stage_Fanout16_Prob100", bm_chunked_3_stage<16, l2_cache_target, Prob100, Step1_1>, size, size, size
     )

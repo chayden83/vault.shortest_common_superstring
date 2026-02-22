@@ -4,10 +4,8 @@
 #define VAULT_AMAC_CHUNKED_PIPELINE_HPP
 
 #include <algorithm>
-#include <concepts>
 #include <cstddef>
 #include <functional>
-#include <iterator>
 #include <ranges>
 #include <type_traits>
 #include <utility>
@@ -28,6 +26,73 @@ namespace vault::amac {
       typename T::transition_fn_type;
     };
   } // namespace concepts
+
+  /**
+   * @brief A compile-time wrapper representing the transition edge between two pipeline stages.
+   * * @tparam TransitionFn The invocable type representing the transition logic.
+   * @tparam StepRatio The expected ratio of steps between the upstream and downstream stages.
+   * @tparam TransProb The probability of a successful transition.
+   */
+  template <typename TransitionFn, typename StepRatio, typename TransProb>
+  struct pipeline_edge {
+    TransitionFn transition;
+    using step_ratio             = StepRatio;
+    using transition_probability = TransProb;
+  };
+
+  /**
+   * @brief Creates a pipeline edge coupling a transition function with its performance policies.
+   * * @tparam StepRatio A std::ratio representing the step ratio (B / A).
+   * @tparam TransProb A std::ratio representing the probability of a successful transition.
+   * @param transition The invocable object defining the transition logic.
+   * @return A constructed pipeline_edge.
+   */
+  template <typename StepRatio, typename TransProb, typename TransitionFn>
+  [[nodiscard]] constexpr auto make_edge(TransitionFn&& transition) {
+    return pipeline_edge<std::remove_cvref_t<TransitionFn>, StepRatio, TransProb>{std::forward<TransitionFn>(transition
+    )};
+  }
+
+  /**
+   * @brief Base case for constructing a composed pipeline from two contexts and an edge.
+   * * Ensures the resulting tree is strictly right-leaning by prohibiting Stage A
+   * from being a composed pipeline itself.
+   */
+  template <typename CtxA, typename Edge, typename CtxB>
+    requires(!concepts::composed_pipeline<std::remove_cvref_t<CtxA>>)
+  [[nodiscard]] constexpr auto make_pipeline(CtxA&& ctx_a, Edge&& edge, CtxB&& ctx_b) {
+    using pure_a    = std::remove_cvref_t<CtxA>;
+    using pure_b    = std::remove_cvref_t<CtxB>;
+    using pure_edge = std::remove_cvref_t<Edge>;
+
+    return composed_context<
+      pure_a,
+      pure_b,
+      decltype(std::declval<pure_edge>().transition),
+      pure_a::fanout(),
+      pure_b::fanout(),
+      typename pure_edge::step_ratio,
+      typename pure_edge::transition_probability>{
+      .ctx_a      = std::forward<CtxA>(ctx_a),
+      .ctx_b      = std::forward<CtxB>(ctx_b),
+      .transition = std::forward<Edge>(edge).transition
+    };
+  }
+
+  /**
+   * @brief Recursive variadic factory for constructing N-stage right-leaning AMAC pipelines.
+   * * This function folds a sequence of (Context, Edge, Context...) arguments from right
+   * to left, generating a deeply nested composed_context that is perfectly optimized
+   * for the chunked pipeline executor.
+   */
+  template <typename CtxA, typename Edge, typename CtxB, typename Edge2, typename... Rest>
+  [[nodiscard]] constexpr auto make_pipeline(CtxA&& ctx_a, Edge&& edge, CtxB&& ctx_b, Edge2&& edge2, Rest&&... rest) {
+    // Recursively fold the right side of the tree first
+    auto right_tree = make_pipeline(std::forward<CtxB>(ctx_b), std::forward<Edge2>(edge2), std::forward<Rest>(rest)...);
+
+    // Bind the left-most node to the folded right tree
+    return make_pipeline(std::forward<CtxA>(ctx_a), std::forward<Edge>(edge), std::move(right_tree));
+  }
 
   /**
    * @brief Functional executor for running a composed AMAC pipeline in cache-sized chunks.

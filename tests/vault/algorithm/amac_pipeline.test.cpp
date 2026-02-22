@@ -1,12 +1,12 @@
+#include <catch2/catch_test_macros.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <optional>
-#include <tuple>
 #include <utility>
 #include <vector>
-#include <catch2/catch_test_macros.hpp>
 
-#include <vault/algorithm/amac_pipeline.hpp>
+#include <vault/algorithm/amac_chunked.hpp>
 
 // ----------------------------------------------------------------------------
 // Stage 1: Lower Bound State Machine
@@ -105,11 +105,9 @@ struct upper_bound_context {
 // Transition Edge
 // ----------------------------------------------------------------------------
 struct lower_to_upper_transition {
-  auto operator()(
-    lower_bound_context const& ctx_a,
-    upper_bound_context const& /* ctx_b */,
-    lower_bound_job const& job_a
-  ) const -> std::optional<upper_bound_job> {
+  template <typename CtxB>
+  auto operator()(lower_bound_context const& ctx_a, CtxB const& /* ctx_b */, lower_bound_job const& job_a) const
+    -> std::optional<upper_bound_job> {
 
     // Only transition if the lower_bound found an exact match
     if (job_a.low < ctx_a.data->size() && (*ctx_a.data)[job_a.low].first == job_a.target_key) {
@@ -142,19 +140,11 @@ TEST_CASE("AMAC Pipeline handles pathological backpressure without data loss", "
   auto ctx_a = lower_bound_context{&stage1_data};
   auto ctx_b = upper_bound_context{&stage2_data};
 
-  // 2. Define the composed context.
+  // 2. Define the composed context using the declarative factory.
   // We explicitly claim 100% transition probability (1/1) and an equal step ratio (1/1)
-  using composed_t = vault::amac::composed_context<
-    lower_bound_context,
-    upper_bound_context,
-    lower_to_upper_transition,
-    1,                // FanoutA
-    1,                // FanoutB
-    std::ratio<1, 1>, // StepRatio
-    std::ratio<1, 1>  // TransitionProb
-    >;
-
-  auto composed = composed_t{.ctx_a = ctx_a, .ctx_b = ctx_b, .transition = lower_to_upper_transition{}};
+  auto composed = vault::amac::make_pipeline(
+    ctx_a, vault::amac::make_edge<std::ratio<1, 1>, std::ratio<1, 1>>(lower_to_upper_transition{}), ctx_b
+  );
 
   // 3. Create a massive pathological input batch where every single job transitions
   auto jobs = std::vector<lower_bound_job>{};
