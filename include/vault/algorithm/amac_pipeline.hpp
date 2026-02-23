@@ -276,40 +276,64 @@ namespace vault::amac {
       };
 
       auto step_b_pred = [&](auto& slot) {
-        if (auto addr = ctx.ctx_b.step(*slot.get())) {
-          return prefetch(addr), false;
+        auto outcome = ctx.ctx_b.step(*slot.get());
+        if (outcome.has_value()) {
+          if (auto addr = outcome.value()) {
+            return prefetch(addr), false;
+          } else {
+            return std::invoke(reporter, completed, std::move(*slot.get())), true;
+          }
         } else {
-          std::invoke(reporter, std::move(*slot.get()));
-          return true;
+          return std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error())), true;
         }
       };
 
       auto step_a_pred = [&](auto& slot) {
-        if (auto addr = ctx.ctx_a.step(*slot.get())) {
-          return prefetch(addr), false;
-        } else {
-          if (buffer.full()) {
-            return false; // Safely stall this job while permitting others in A to step
-          }
-          auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, *slot.get());
-          if (opt_b) {
-            buffer.push_back(std::move(*opt_b));
+        auto outcome = ctx.ctx_a.step(*slot.get());
+        if (outcome.has_value()) {
+          if (auto addr = outcome.value()) {
+            return prefetch(addr), false;
           } else {
-            std::invoke(reporter, std::move(*slot.get()));
+            if (buffer.full()) {
+              return false; // Safely stall this job while permitting others in A to step
+            }
+            auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, *slot.get());
+            if (opt_b) {
+              buffer.push_back(std::move(*opt_b));
+            } else {
+              std::invoke(reporter, terminated, std::move(*slot.get()));
+            }
+            return true;
           }
+        } else {
+          std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
           return true;
         }
       };
 
       // Phase 1: Setup
       while (cur_a != end_a && in_cur != in_end) {
-        auto&& job = *in_cur++;
-        if (auto addr = ctx.ctx_a.init(job)) {
-          prefetch(addr);
-          std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
-          ++cur_a;
+        if (buffer.full()) {
+          break; // Ensure space before consuming
+        }
+        auto&& job     = *in_cur++;
+        auto   outcome = ctx.ctx_a.init(job);
+
+        if (outcome.has_value()) {
+          if (auto addr = outcome.value()) {
+            prefetch(addr);
+            std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
+            ++cur_a;
+          } else {
+            auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job);
+            if (opt_b) {
+              buffer.push_back(std::move(*opt_b));
+            } else {
+              std::invoke(reporter, terminated, std::forward<decltype(job)>(job));
+            }
+          }
         } else {
-          std::invoke(reporter, std::move(job));
+          std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
         }
       }
 
@@ -318,13 +342,19 @@ namespace vault::amac {
 
         // Reverse Step 1: Drain Buffer -> B
         while (cur_b != end_b && !buffer.empty()) {
-          auto job_b = buffer.pop_front();
-          if (auto addr = ctx.ctx_b.init(job_b)) {
-            prefetch(addr);
-            std::construct_at(cur_b->get(), std::move(job_b));
-            ++cur_b;
+          auto job_b   = buffer.pop_front();
+          auto outcome = ctx.ctx_b.init(job_b);
+
+          if (outcome.has_value()) {
+            if (auto addr = outcome.value()) {
+              prefetch(addr);
+              std::construct_at(cur_b->get(), std::move(job_b));
+              ++cur_b;
+            } else {
+              std::invoke(reporter, completed, std::move(job_b));
+            }
           } else {
-            std::invoke(reporter, std::move(job_b));
+            std::invoke(reporter, failed, std::move(job_b), std::move(outcome.error()));
           }
         }
 
@@ -336,13 +366,27 @@ namespace vault::amac {
 
         // Reverse Step 4: Refill A
         while (cur_a != end_a && in_cur != in_end) {
-          auto&& job = *in_cur++;
-          if (auto addr = ctx.ctx_a.init(job)) {
-            prefetch(addr);
-            std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
-            ++cur_a;
+          if (buffer.full()) {
+            break; // Ensure space before consuming
+          }
+          auto&& job     = *in_cur++;
+          auto   outcome = ctx.ctx_a.init(job);
+
+          if (outcome.has_value()) {
+            if (auto addr = outcome.value()) {
+              prefetch(addr);
+              std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
+              ++cur_a;
+            } else {
+              auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job);
+              if (opt_b) {
+                buffer.push_back(std::move(*opt_b));
+              } else {
+                std::invoke(reporter, terminated, std::forward<decltype(job)>(job));
+              }
+            }
           } else {
-            std::invoke(reporter, std::move(job));
+            std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
           }
         }
       }

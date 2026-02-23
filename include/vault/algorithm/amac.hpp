@@ -7,6 +7,7 @@
 #include <any>
 #include <cassert>
 #include <concepts>
+#include <expected>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -66,6 +67,17 @@
  * memory is already available.
  */
 
+namespace vault::amac {
+  constexpr inline struct completed_tag {
+  } const completed;
+
+  constexpr inline struct terminated_tag {
+  } const terminated;
+
+  constexpr inline struct failed_tag {
+  } const failed;
+} // namespace vault::amac
+
 namespace vault::amac::concepts {
   /**
    * @brief Validates the return type of job state transitions.
@@ -79,6 +91,24 @@ namespace vault::amac::concepts {
   concept step_result = std::constructible_from<bool, T> && []<std::size_t... Is>(std::index_sequence<Is...>) {
     return (std::same_as<void const*, std::tuple_element_t<Is, T>> && ...);
   }(std::make_index_sequence<std::tuple_size_v<T>>{});
+} // namespace vault::amac::concepts
+
+namespace vault::amac::type_traits {
+  template <typename T>
+  struct is_step_outcome : std::false_type {};
+
+  template <typename S, typename E>
+    requires concepts::step_result<S>
+  struct is_step_outcome<std::expected<S, E>> : std::true_type {};
+
+  template <typename T>
+  constexpr inline auto const is_step_outcome_v = is_step_outcome<T>::value;
+
+} // namespace vault::amac::type_traits
+
+namespace vault::amac::concepts {
+  template <typename T>
+  concept step_outcome = type_traits::is_step_outcome_v<T>;
 
   /**
    * @brief Defines the interface for an AMAC-compatible job.
@@ -87,24 +117,31 @@ namespace vault::amac::concepts {
    * A Job is a state machine that transitions via init() and step().
    *
    * @note **State Monotonicity Requirement**: The predicate result of
-   *   job_step_result MUST be monotonic within a single coordination
-   *   loop.  Once a job's init() or step() returns a "falsy" result
-   *   (indicating completion), it must never return a "truthy" result
-   *   in subsequent calls. Failure to adhere to this leads to
-   *   undefined behavior during range compaction.
+   * job_step_result MUST be monotonic within a single coordination
+   * loop.  Once a job's init() or step() returns a "falsy" result
+   * (indicating completion), it must never return a "truthy" result
+   * in subsequent calls. Failure to adhere to this leads to
+   * undefined behavior during range compaction.
    */
   template <typename C, typename J>
   concept job_context = std::move_constructible<J> && C::fanout() > 0uz && requires(C& context, J& job) {
-    { context.init(job) } -> step_result;
-    { context.step(job) } -> step_result;
+    { context.init(job) } noexcept -> step_outcome;
+    { context.step(job) } noexcept -> step_outcome;
   };
 
   /**
    * @brief Concept for a reporter that handles completed AMAC jobs.
+   *
+   * @tparam R The type of the job reporter.
+   * @tparam J The type of the job to report.
+   * @tparam E The type of the error returned by the context when a
+   * job fails.
+   *
    * @ingroup vault_amac
    */
-  template <typename R, typename J>
-  concept job_reporter = std::invocable<R, J&&>;
+  template <typename R, typename J, typename E>
+  concept job_reporter = std::invocable<R, completed_tag, J&&> && std::invocable<R, terminated_tag, J&&> &&
+                         std::invocable<R, failed_tag, J&&, E&&>;
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
@@ -113,7 +150,7 @@ namespace vault::amac {
    * @ingroup vault_amac
    *
    * @tparam N The number of simultaneous probes (e.g., 1 for Binary
-   *   Search, 3 for Binary Fuse Filter).
+   * Search, 3 for Binary Fuse Filter).
    */
   template <std::size_t N>
   struct step_result : public std::array<void const*, N> {
@@ -134,7 +171,7 @@ namespace vault::amac {
    * @ingroup vault_amac
    *
    * @tparam TotalFanout The interleaving degree. Typical values are
-   *   8-16.
+   * 8-16.
    */
   template <uint8_t TotalFanout = 16>
   class executor_fn {
@@ -186,25 +223,29 @@ namespace vault::amac {
      * Coordination happens in three logical phases:
 
      * 1. **Setup**: Populate the initial batch of N jobs from the
-     *   input range and issue first-round prefetches.
+     * input range and issue first-round prefetches.
      * 2. **Execution/Refill**: Interleave job steps. When a job
-     *   completes, it is reported and replaced by a new job from the
-     *   input range.
+     * completes, it is reported and replaced by a new job from the
+     * input range.
      * 3. **Drain**: Once the input range is exhausted, continue
-     *   stepping remaining active jobs until all are complete.
+     * stepping remaining active jobs until all are complete.
      *
      * @param ijobs The input range of job objects (state machines) to
-     *   execute.
+     * execute.
      * @param reporter A callable invoked with the Job once it
-     *   completes.
+     * completes.
      *
      * @pre The ijobs range must be at least an input_range.
      * @pre The value type of the ijobs range must satisfy
-     *   vault::amac::concepts::job.
+     * vault::amac::concepts::job.
      */
     template <std::ranges::input_range Jobs, typename Context, typename Reporter>
-      requires concepts::job_context<std::remove_cvref_t<Context>, std::ranges::range_reference_t<Jobs>> &&
-               concepts::job_reporter<std::remove_cvref_t<Reporter>, std::ranges::range_value_t<Jobs>>
+      requires concepts::job_context<std::remove_cvref_t<Context>, std::ranges::range_value_t<Jobs>> &&
+               concepts::job_reporter<
+                 std::remove_cvref_t<Reporter>,
+                 std::ranges::range_value_t<Jobs>,
+                 typename decltype(std::declval<std::remove_cvref_t<Context>&>()
+                                     .init(std::declval<std::ranges::range_value_t<Jobs>&>()))::error_type>
     static constexpr void operator()(Jobs&& ijobs, Context&& context, Reporter&& reporter) {
       using job_t = std::ranges::range_value_t<Jobs>;
 
@@ -220,12 +261,17 @@ namespace vault::amac {
         while (jobs_first != jobs_last and ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
-          if (auto addresses = context.init(job)) {
-            prefetch(addresses);
-            std::construct_at(jobs_first->get(), std::forward<decltype(job)>(job));
-            ++jobs_first;
+          auto outcome = context.init(job);
+          if (outcome.has_value()) {
+            if (auto addresses = outcome.value()) {
+              prefetch(addresses);
+              std::construct_at(jobs_first->get(), std::forward<decltype(job)>(job));
+              ++jobs_first;
+            } else {
+              std::invoke(reporter, completed, std::forward<decltype(job)>(job));
+            }
           } else {
-            std::invoke(reporter, std::move(job));
+            std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
           }
         }
 
@@ -235,11 +281,16 @@ namespace vault::amac {
       // A predicate that determines not only if a job is complete,
       // but also takes the appropriate action depending on the jobs
       // state.
-      auto is_inactive = [&](auto& job) {
-        if (auto addresses = context.step(*job.get())) {
-          return prefetch(addresses), false;
+      auto is_inactive = [&](auto& job_slot) {
+        auto outcome = context.step(*job_slot.get());
+        if (outcome.has_value()) {
+          if (auto addresses = outcome.value()) {
+            return prefetch(addresses), false;
+          } else {
+            return std::invoke(reporter, completed, std::move(*job_slot.get())), true;
+          }
         } else {
-          return std::invoke(reporter, std::move(*job.get())), true;
+          return std::invoke(reporter, failed, std::move(*job_slot.get()), std::move(outcome.error())), true;
         }
       };
 
@@ -252,12 +303,17 @@ namespace vault::amac {
         while (jobs_cursor != jobs_last && ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
-          if (auto addresses = context.init(job)) {
-            prefetch(addresses);
-            *jobs_cursor->get() = std::forward<decltype(job)>(job);
-            ++jobs_cursor;
+          auto outcome = context.init(job);
+          if (outcome.has_value()) {
+            if (auto addresses = outcome.value()) {
+              prefetch(addresses);
+              *jobs_cursor->get() = std::forward<decltype(job)>(job);
+              ++jobs_cursor;
+            } else {
+              std::invoke(reporter, completed, std::forward<decltype(job)>(job));
+            }
           } else {
-            std::invoke(reporter, std::forward<decltype(job)>(job));
+            std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
           }
         }
 
@@ -286,10 +342,10 @@ namespace vault::amac {
    * reporter);`
    *
    * @tparam TotalFanout The interleaving degree. Typical values are
-   *   8-16.
+   * 8-16.
    */
   template <uint8_t TotalFanout = 16>
-  constexpr inline auto const executor = executor_fn{};
+  constexpr inline auto const executor = executor_fn<TotalFanout>{};
 
 } // namespace vault::amac
 

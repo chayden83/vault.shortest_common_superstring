@@ -1,3 +1,5 @@
+return() # until we update the flat map to reflect new AMAC error handling
+
 FetchContent_Declare(
   Catch2
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git

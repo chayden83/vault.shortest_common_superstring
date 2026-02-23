@@ -145,11 +145,19 @@ namespace vault::amac {
       // Reserve based on the expected output, preventing reallocations
       intermediate_buffer.reserve(std::min(input_chunk_size, max_b_capacity + extra_capacity));
 
-      auto reporter_a = [&]<typename J>(J&& job) {
-        if (auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job)) {
-          intermediate_buffer.push_back(std::move(*opt_b));
+      // The intermediate reporter bridging Stage A and Stage B
+      auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
+        if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
+          // If the job explicitly failed, bypass transition and forward the error directly
+          std::invoke(reporter, tag, std::forward<J>(job), std::forward<Args>(args)...);
         } else {
-          std::invoke(reporter, std::move(job));
+          // Job completed or terminated naturally; attempt the edge transition
+          if (auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job)) {
+            intermediate_buffer.push_back(std::move(*opt_b));
+          } else {
+            // Transition failed/rejected the job; report as terminated
+            std::invoke(reporter, vault::amac::terminated, std::forward<J>(job));
+          }
         }
       };
 

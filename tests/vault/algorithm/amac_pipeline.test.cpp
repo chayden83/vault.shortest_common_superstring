@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <utility>
 #include <vector>
 
 #include <vault/algorithm/amac_chunked.hpp>
+#include <vault/algorithm/amac_pipeline.hpp>
 
 // ----------------------------------------------------------------------------
 // Stage 1: Lower Bound State Machine
@@ -25,19 +27,19 @@ struct lower_bound_context {
     return 1;
   }
 
-  [[nodiscard]] auto init(lower_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(lower_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(lower_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(lower_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first < job.target_key) {
@@ -48,9 +50,9 @@ struct lower_bound_context {
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -72,19 +74,19 @@ struct upper_bound_context {
     return 1;
   }
 
-  [[nodiscard]] auto init(upper_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(upper_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(upper_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(upper_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first <= job.target_key) {
@@ -95,9 +97,9 @@ struct upper_bound_context {
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -158,9 +160,13 @@ TEST_CASE("AMAC Pipeline handles pathological backpressure without data loss", "
   auto pipeline_results = std::vector<std::pair<int, std::size_t>>{};
   pipeline_results.reserve(num_elements);
 
-  auto reporter = [&]<typename J>(J&& job) {
-    if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
-      pipeline_results.emplace_back(job.original_key, job.low);
+  auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
+    if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+      if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
+        pipeline_results.emplace_back(job.original_key, job.low);
+      }
+    } else if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
+      FAIL("Jobs should not fail in this backpressure test.");
     }
   };
 

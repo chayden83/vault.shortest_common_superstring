@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <expected>
 #include <random>
 #include <ratio>
 #include <string>
@@ -28,19 +29,19 @@ struct lower_bound_context {
     return 1;
   }
 
-  [[nodiscard]] auto init(lower_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(lower_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(lower_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(lower_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first < job.target_key) {
@@ -51,9 +52,9 @@ struct lower_bound_context {
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -72,19 +73,19 @@ struct upper_bound_context {
     return 1;
   }
 
-  [[nodiscard]] auto init(upper_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(upper_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(upper_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(upper_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first <= job.target_key) {
@@ -95,9 +96,9 @@ struct upper_bound_context {
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -116,19 +117,19 @@ struct point_lookup_context {
     return 1;
   }
 
-  [[nodiscard]] auto init(point_lookup_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(point_lookup_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(point_lookup_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(point_lookup_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first < job.target_key) {
@@ -138,14 +139,14 @@ struct point_lookup_context {
     } else {
       job.low  = job.mid;
       job.high = job.mid;
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -230,7 +231,129 @@ struct benchmark_data {
 }
 
 // ----------------------------------------------------------------------------
-// 3. The 2-Stage Benchmarks
+// 3. Pure STD Serial Baselines
+// ----------------------------------------------------------------------------
+template <typename TransProbPolicy>
+void bm_std_serial_2_stage(benchmark::State& state, std::size_t size_a, std::size_t size_b) {
+  auto const       num_queries = static_cast<std::size_t>(state.range(0));
+  constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
+  auto             data        = generate_data(num_queries, trans_prob, size_a, size_b);
+
+  for (auto _ : state) {
+    auto total_found = std::size_t{0};
+    for (auto const& q : data.queries) {
+      auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
+      if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
+        auto target2 = it1->second;
+        auto it2     = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
+        benchmark::DoNotOptimize(total_found += 1);
+        benchmark::DoNotOptimize(it2);
+      }
+    }
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * num_queries);
+}
+
+template <typename TransProbPolicy>
+void bm_std_queued_2_stage(benchmark::State& state, std::size_t size_a, std::size_t size_b) {
+  auto const       num_queries = static_cast<std::size_t>(state.range(0));
+  constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
+  auto             data        = generate_data(num_queries, trans_prob, size_a, size_b);
+
+  for (auto _ : state) {
+    auto intermediate = std::vector<int>{};
+    intermediate.reserve(num_queries);
+
+    for (auto const& q : data.queries) {
+      auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
+      if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
+        intermediate.push_back(it1->second);
+      }
+    }
+    benchmark::DoNotOptimize(intermediate.data());
+
+    auto total_found = std::size_t{0};
+    for (auto const target2 : intermediate) {
+      auto it2 = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
+      benchmark::DoNotOptimize(total_found += 1);
+      benchmark::DoNotOptimize(it2);
+    }
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * num_queries);
+}
+
+template <typename TransProbPolicy>
+void bm_std_serial_3_stage(benchmark::State& state, std::size_t size_a, std::size_t size_b, std::size_t size_c) {
+  auto const       num_queries = static_cast<std::size_t>(state.range(0));
+  constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
+  auto             data        = generate_data(num_queries, trans_prob, size_a, size_b, size_c);
+
+  for (auto _ : state) {
+    auto total_found = std::size_t{0};
+    for (auto const& q : data.queries) {
+      auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
+      if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
+        auto target2 = it1->second;
+        auto it2     = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
+        if (it2 != data.stage2_data.begin()) {
+          auto target3 = std::prev(it2)->second;
+          auto it3     = std::ranges::lower_bound(data.stage3_data, target3, {}, &std::pair<int, int>::first);
+          if (it3 != data.stage3_data.end() && it3->first == target3) {
+            benchmark::DoNotOptimize(total_found += 1);
+          }
+        }
+      }
+    }
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * num_queries);
+}
+
+template <typename TransProbPolicy>
+void bm_std_queued_3_stage(benchmark::State& state, std::size_t size_a, std::size_t size_b, std::size_t size_c) {
+  auto const       num_queries = static_cast<std::size_t>(state.range(0));
+  constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
+  auto             data        = generate_data(num_queries, trans_prob, size_a, size_b, size_c);
+
+  for (auto _ : state) {
+    auto buffer_b = std::vector<int>{};
+    buffer_b.reserve(num_queries);
+
+    for (auto const& q : data.queries) {
+      auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
+      if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
+        buffer_b.push_back(it1->second);
+      }
+    }
+    benchmark::DoNotOptimize(buffer_b.data());
+
+    auto buffer_c = std::vector<int>{};
+    buffer_c.reserve(buffer_b.size());
+
+    for (auto const target2 : buffer_b) {
+      auto it2 = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
+      if (it2 != data.stage2_data.begin()) {
+        buffer_c.push_back(std::prev(it2)->second);
+      }
+    }
+    benchmark::DoNotOptimize(buffer_c.data());
+
+    auto total_found = std::size_t{0};
+    for (auto const target3 : buffer_c) {
+      auto it3 = std::ranges::lower_bound(data.stage3_data, target3, {}, &std::pair<int, int>::first);
+      if (it3 != data.stage3_data.end() && it3->first == target3) {
+        benchmark::DoNotOptimize(total_found += 1);
+      }
+    }
+    benchmark::ClobberMemory();
+  }
+  state.SetItemsProcessed(state.iterations() * num_queries);
+}
+
+// ----------------------------------------------------------------------------
+// 4. The AMAC Benchmarks
 // ----------------------------------------------------------------------------
 template <std::size_t Fanout>
 void bm_sequential_amac(benchmark::State& state, double trans_prob, std::size_t size_a, std::size_t size_b) {
@@ -245,9 +368,11 @@ void bm_sequential_amac(benchmark::State& state, double trans_prob, std::size_t 
     auto intermediate_buffer = std::vector<upper_bound_job>{};
     intermediate_buffer.reserve(num_queries);
 
-    auto reporter_a = [&]<typename J>(J&& job) {
-      if (auto opt_b = transition(ctx_a, ctx_b, job)) {
-        intermediate_buffer.push_back(std::move(*opt_b));
+    auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if (auto opt_b = transition(ctx_a, ctx_b, job)) {
+          intermediate_buffer.push_back(std::move(*opt_b));
+        }
       }
     };
 
@@ -255,7 +380,11 @@ void bm_sequential_amac(benchmark::State& state, double trans_prob, std::size_t 
     benchmark::DoNotOptimize(intermediate_buffer.data());
 
     auto total_found = std::size_t{0};
-    auto reporter_b  = [&]<typename J>(J&&) { total_found += 1; };
+    auto reporter_b  = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        total_found += 1;
+      }
+    };
 
     vault::amac::executor<Fanout>(intermediate_buffer, ctx_b, reporter_b);
     benchmark::DoNotOptimize(total_found);
@@ -274,16 +403,16 @@ void bm_composite_pipeline(benchmark::State& state, std::size_t size_a, std::siz
   auto ctx_b = upper_bound_context{&data.stage2_data};
 
   auto composed = vault::amac::make_pipeline(
-    ctx_a,
-    vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}),
-    ctx_b
+    ctx_a, vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}), ctx_b
   );
 
   for (auto _ : state) {
     auto total_found = std::size_t{0};
-    auto reporter    = [&]<typename J>(J&&) {
-      if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
-        benchmark::DoNotOptimize(total_found += 1);
+    auto reporter    = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
+          benchmark::DoNotOptimize(total_found += 1);
+        }
       }
     };
     vault::amac::pipeline_executor<Fanout, 4>(data.queries, composed, reporter);
@@ -301,16 +430,16 @@ void bm_chunked_pipeline(benchmark::State& state, std::size_t size_a, std::size_
   auto ctx_b = upper_bound_context{&data.stage2_data};
 
   auto composed = vault::amac::make_pipeline(
-    ctx_a,
-    vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}),
-    ctx_b
+    ctx_a, vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}), ctx_b
   );
 
   for (auto _ : state) {
     auto total_found = std::size_t{0};
-    auto reporter    = [&]<typename J>(J&&) {
-      if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
-        benchmark::DoNotOptimize(total_found += 1);
+    auto reporter    = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
+          benchmark::DoNotOptimize(total_found += 1);
+        }
       }
     };
     vault::amac::chunked_pipeline_executor<Fanout, MaxIntermediateBytes>(data.queries, composed, reporter);
@@ -318,9 +447,6 @@ void bm_chunked_pipeline(benchmark::State& state, std::size_t size_a, std::size_
   state.SetItemsProcessed(state.iterations() * num_queries);
 }
 
-// ----------------------------------------------------------------------------
-// 4. The 3-Stage Benchmarks
-// ----------------------------------------------------------------------------
 template <std::size_t Fanout>
 void bm_sequential_3_stage(
   benchmark::State& state,
@@ -343,9 +469,11 @@ void bm_sequential_3_stage(
     auto buffer_b = std::vector<upper_bound_job>{};
     buffer_b.reserve(num_queries);
 
-    auto reporter_a = [&]<typename J>(J&& job) {
-      if (auto opt_b = trans_ab(ctx_a, ctx_b, job)) {
-        buffer_b.push_back(std::move(*opt_b));
+    auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if (auto opt_b = trans_ab(ctx_a, ctx_b, job)) {
+          buffer_b.push_back(std::move(*opt_b));
+        }
       }
     };
     vault::amac::executor<Fanout>(data.queries, ctx_a, reporter_a);
@@ -354,16 +482,22 @@ void bm_sequential_3_stage(
     auto buffer_c = std::vector<point_lookup_job>{};
     buffer_c.reserve(buffer_b.size());
 
-    auto reporter_b = [&]<typename J>(J&& job) {
-      if (auto opt_c = trans_bc(ctx_b, ctx_c, job)) {
-        buffer_c.push_back(std::move(*opt_c));
+    auto reporter_b = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if (auto opt_c = trans_bc(ctx_b, ctx_c, job)) {
+          buffer_c.push_back(std::move(*opt_c));
+        }
       }
     };
     vault::amac::executor<Fanout>(buffer_b, ctx_b, reporter_b);
     benchmark::DoNotOptimize(buffer_c.data());
 
     auto total_found = std::size_t{0};
-    auto reporter_c  = [&]<typename J>(J&&) { total_found += 1; };
+    auto reporter_c  = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        total_found += 1;
+      }
+    };
 
     vault::amac::executor<Fanout>(buffer_c, ctx_c, reporter_c);
     benchmark::DoNotOptimize(total_found);
@@ -392,9 +526,11 @@ void bm_chunked_3_stage(benchmark::State& state, std::size_t size_a, std::size_t
 
   for (auto _ : state) {
     auto total_found = std::size_t{0};
-    auto reporter    = [&]<typename J>(J&&) {
-      if constexpr (std::is_same_v<std::remove_cvref_t<J>, point_lookup_job>) {
-        benchmark::DoNotOptimize(total_found += 1);
+    auto reporter    = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
+      if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<J>, point_lookup_job>) {
+          benchmark::DoNotOptimize(total_found += 1);
+        }
       }
     };
     vault::amac::chunked_pipeline_executor<Fanout, MaxIntermediateBytes>(data.queries, composed, reporter);
@@ -407,7 +543,7 @@ void bm_chunked_3_stage(benchmark::State& state, std::size_t size_a, std::size_t
 // ----------------------------------------------------------------------------
 void register_benchmarks() {
   auto const min_batch = 10'000;
-  auto const max_batch = 100'000'000;
+  auto const max_batch = 10'000'000;
 
   // Targeting 256 KB L2 cache to prevent thrashing
   constexpr std::size_t l2_cache_target = 262144;
@@ -418,16 +554,21 @@ void register_benchmarks() {
     using Step1_1    = std::ratio<1, 1>;
     std::size_t size = 65536;
 
-    benchmark::RegisterBenchmark("Sequential_Fanout16_Prob100_Step1:1", bm_sequential_amac<16>, 1.0, size, size)
+    benchmark::RegisterBenchmark("Std_Serial_Prob100", bm_std_serial_2_stage<Prob100>, size, size)
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
+    benchmark::RegisterBenchmark("Std_Queued_Prob100", bm_std_queued_2_stage<Prob100>, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
 
+    benchmark::RegisterBenchmark("Sequential_Fanout16_Prob100_Step1:1", bm_sequential_amac<16>, 1.0, size, size)
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
     benchmark::RegisterBenchmark(
       "Composite_Fanout16_Prob100_Step1:1", bm_composite_pipeline<16, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Chunked_Fanout16_Prob100_Step1:1", bm_chunked_pipeline<16, l2_cache_target, Prob100, Step1_1>, size, size
     )
@@ -442,18 +583,23 @@ void register_benchmarks() {
     std::size_t size_a = 4096;
     std::size_t size_b = 16'777'216;
 
+    benchmark::RegisterBenchmark("Std_Serial_Prob1_64", bm_std_serial_2_stage<Prob1_64>, size_a, size_b)
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
+    benchmark::RegisterBenchmark("Std_Queued_Prob1_64", bm_std_queued_2_stage<Prob1_64>, size_a, size_b)
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch);
+
     benchmark::RegisterBenchmark(
       "Sequential_Fanout16_Prob1_64_Step1:2", bm_sequential_amac<16>, 1.0 / 64.0, size_a, size_b
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Composite_Fanout16_Prob1_64_Step1:2", bm_composite_pipeline<16, Prob1_64, Step1_2>, size_a, size_b
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Chunked_Fanout16_Prob1_64_Step1:2", bm_chunked_pipeline<16, l2_cache_target, Prob1_64, Step1_2>, size_a, size_b
     )
@@ -472,19 +618,16 @@ void register_benchmarks() {
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Chunked_Fanout2_Prob100_Step1:1", bm_chunked_pipeline<2, l2_cache_target, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Composite_Fanout64_Prob100_Step1:1", bm_composite_pipeline<64, Prob100, Step1_1>, size, size
     )
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Chunked_Fanout64_Prob100_Step1:1", bm_chunked_pipeline<64, l2_cache_target, Prob100, Step1_1>, size, size
     )
@@ -498,15 +641,31 @@ void register_benchmarks() {
     using Step1_1    = std::ratio<1, 1>;
     std::size_t size = 65536;
 
+    benchmark::RegisterBenchmark("Std_Serial_3Stage_Prob100", bm_std_serial_3_stage<Prob100>, size, size, size)
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch / 10)
+      ->Iterations(1)
+      ->Unit(benchmark::kMillisecond);
+
+    benchmark::RegisterBenchmark("Std_Queued_3Stage_Prob100", bm_std_queued_3_stage<Prob100>, size, size, size)
+      ->RangeMultiplier(10)
+      ->Range(min_batch, max_batch / 10)
+      ->Iterations(1)
+      ->Unit(benchmark::kMillisecond);
+
     benchmark::RegisterBenchmark("Sequential_3Stage_Fanout16_Prob100", bm_sequential_3_stage<16>, 1.0, size, size, size)
       ->RangeMultiplier(10)
-      ->Range(min_batch, max_batch/10);
+      ->Range(min_batch, max_batch / 10)
+      ->Iterations(1)
+      ->Unit(benchmark::kMillisecond);
 
     benchmark::RegisterBenchmark(
       "Chunked_3Stage_Fanout16_Prob100", bm_chunked_3_stage<16, l2_cache_target, Prob100, Step1_1>, size, size, size
     )
       ->RangeMultiplier(10)
-      ->Range(min_batch, max_batch/10);
+      ->Range(min_batch, max_batch / 10)
+      ->Iterations(1)
+      ->Unit(benchmark::kMillisecond);
   }
 }
 

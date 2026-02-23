@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include <vault/algorithm/amac_chunked.hpp>
+#include <vault/algorithm/amac_pipeline.hpp>
 
 // ----------------------------------------------------------------------------
 // Stage 1: Lower Bound State Machine
@@ -26,19 +28,19 @@ struct lower_bound_context {
     return 4;
   }
 
-  [[nodiscard]] auto init(lower_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(lower_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(lower_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(lower_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first < job.target_key) {
@@ -49,9 +51,9 @@ struct lower_bound_context {
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -73,19 +75,19 @@ struct upper_bound_context {
     return 4;
   }
 
-  [[nodiscard]] auto init(upper_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(upper_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(upper_bound_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(upper_bound_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first <= job.target_key) {
@@ -96,9 +98,9 @@ struct upper_bound_context {
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -120,19 +122,19 @@ struct point_lookup_context {
     return 4;
   }
 
-  [[nodiscard]] auto init(point_lookup_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto init(point_lookup_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     job.low  = 0;
     job.high = data->size();
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 
-  [[nodiscard]] auto step(point_lookup_job& job) const -> vault::amac::step_result<1> {
+  [[nodiscard]] auto step(point_lookup_job& job) const noexcept -> std::expected<vault::amac::step_result<1>, int> {
     if (job.low >= job.high) {
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if ((*data)[job.mid].first < job.target_key) {
@@ -143,14 +145,14 @@ struct point_lookup_context {
       // Exact match found, clamp iterators to terminate
       job.low  = job.mid;
       job.high = job.mid;
-      return {nullptr};
+      return vault::amac::step_result<1>{nullptr};
     }
 
     if (job.low < job.high) {
       job.mid = job.low + (job.high - job.low) / 2;
-      return {&(*data)[job.mid]};
+      return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
-    return {nullptr};
+    return vault::amac::step_result<1>{nullptr};
   }
 };
 
@@ -209,16 +211,9 @@ TEST_CASE("Chunked AMAC Executor processes large inputs seamlessly (2 Stages)", 
   auto ctx_a = lower_bound_context{&stage1_data};
   auto ctx_b = upper_bound_context{&stage2_data};
 
-  using composed_t = vault::amac::composed_context<
-    lower_bound_context,
-    upper_bound_context,
-    lower_to_upper_transition,
-    lower_bound_context::fanout(),
-    upper_bound_context::fanout(),
-    std::ratio<1, 1>,
-    std::ratio<1, 1>>;
-
-  auto composed = composed_t{.ctx_a = ctx_a, .ctx_b = ctx_b, .transition = lower_to_upper_transition{}};
+  auto composed = vault::amac::make_pipeline(
+    ctx_a, vault::amac::make_edge<std::ratio<1, 1>, std::ratio<1, 1>>(lower_to_upper_transition{}), ctx_b
+  );
 
   auto jobs = std::vector<lower_bound_job>{};
   jobs.reserve(num_elements);
@@ -229,9 +224,13 @@ TEST_CASE("Chunked AMAC Executor processes large inputs seamlessly (2 Stages)", 
   auto pipeline_results = std::vector<std::pair<int, std::size_t>>{};
   pipeline_results.reserve(num_elements);
 
-  auto reporter = [&]<typename J>(J&& job) {
-    if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
-      pipeline_results.emplace_back(job.original_key, job.low);
+  auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
+    if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+      if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
+        pipeline_results.emplace_back(job.original_key, job.low);
+      }
+    } else if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
+      FAIL("Jobs should not fail in this test.");
     }
   };
 
@@ -275,30 +274,14 @@ TEST_CASE("Chunked AMAC Executor flawlessly recurses right-leaning 3-stage trees
   auto ctx_2 = upper_bound_context{&stage2_data};
   auto ctx_3 = point_lookup_context{&stage3_data};
 
-  // 1. Compose Stage 2 and Stage 3 (The inner right node)
-  using composed_2_3_t = vault::amac::composed_context<
-    upper_bound_context,
-    point_lookup_context,
-    upper_to_point_transition,
-    upper_bound_context::fanout(),
-    point_lookup_context::fanout(),
-    std::ratio<1, 1>,
-    std::ratio<1, 1>>;
-
-  auto composed_2_3 = composed_2_3_t{.ctx_a = ctx_2, .ctx_b = ctx_3, .transition = upper_to_point_transition{}};
-
-  // 2. Compose Stage 1 with the composed (2+3) node
-  using composed_1_2_3_t = vault::amac::composed_context<
-    lower_bound_context,
-    composed_2_3_t,
-    lower_to_upper_transition,
-    lower_bound_context::fanout(),
-    composed_2_3_t::fanout(), // Pass the aggregated fanout up the tree
-    std::ratio<1, 1>,
-    std::ratio<1, 1>>;
-
-  auto composed_1_2_3 =
-    composed_1_2_3_t{.ctx_a = ctx_1, .ctx_b = composed_2_3, .transition = lower_to_upper_transition{}};
+  // Build the entire 3-stage pipeline efficiently using the new variadic factory
+  auto composed_1_2_3 = vault::amac::make_pipeline(
+    ctx_1,
+    vault::amac::make_edge<std::ratio<1, 1>, std::ratio<1, 1>>(lower_to_upper_transition{}),
+    ctx_2,
+    vault::amac::make_edge<std::ratio<1, 1>, std::ratio<1, 1>>(upper_to_point_transition{}),
+    ctx_3
+  );
 
   auto jobs = std::vector<lower_bound_job>{};
   jobs.reserve(num_elements);
@@ -309,12 +292,15 @@ TEST_CASE("Chunked AMAC Executor flawlessly recurses right-leaning 3-stage trees
   auto final_results = std::vector<std::pair<int, int>>{};
   final_results.reserve(num_elements);
 
-  // The reporter now cleanly only receives the final Stage 3 job type
-  auto reporter = [&]<typename J>(J&& job) {
-    if constexpr (std::is_same_v<std::remove_cvref_t<J>, point_lookup_job>) {
-      if (job.low == job.high && job.low < ctx_3.data->size()) {
-        final_results.emplace_back(job.original_key, (*ctx_3.data)[job.low].second);
+  auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
+    if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+      if constexpr (std::is_same_v<std::remove_cvref_t<J>, point_lookup_job>) {
+        if (job.low == job.high && job.low < ctx_3.data->size()) {
+          final_results.emplace_back(job.original_key, (*ctx_3.data)[job.low].second);
+        }
       }
+    } else if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
+      FAIL("Jobs should not fail in this test.");
     }
   };
 

@@ -13,7 +13,7 @@ FetchContent_MakeAvailable(googlebench)
 
 set(ALL_BENCHMARKS
   map_view
-  flat_map
+#  flat_map
 #  static_index
   amac_pipeline
   frozen_vector
