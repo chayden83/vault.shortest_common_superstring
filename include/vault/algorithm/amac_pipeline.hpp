@@ -22,11 +22,19 @@
 
 namespace vault::amac {
 
+  /// Configuration structure defining the number of concurrent jobs allowed
+  /// in Stage A and Stage B of the pipeline.
   struct pipeline_config {
     std::size_t window_a;
     std::size_t window_b;
   };
 
+  /// **Pipeline Concurrency Balancer**
+  ///
+  /// Calculates the optimal distribution of the `FanoutBudget` between Stage A and Stage B.
+  /// It uses the expected `TransitionProbability` (how many Stage A jobs actually make it to Stage B)
+  /// and the `StepRatio` (the relative cost/number of steps in B vs A) to allocate concurrent
+  /// execution slots, ensuring neither stage starves or bottlenecks the pipeline.
   template <
     std::size_t FanoutBudget = 16,
     typename TransitionProbability,
@@ -36,24 +44,32 @@ namespace vault::amac {
   [[nodiscard]] consteval auto make_pipeline() -> pipeline_config {
     static_assert(FanoutA > 0 && FanoutB > 0, "Fanouts must be > 0");
     static_assert(FanoutBudget >= FanoutA + FanoutB, "Budget too small for baseline");
+
     constexpr double transition_prob_val = static_cast<double>(TransitionProbability::num) / TransitionProbability::den;
     constexpr double step_ratio_val      = static_cast<double>(StepRatio::num) / StepRatio::den;
-    constexpr double work_a              = static_cast<double>(FanoutA);
-    constexpr double work_b              = static_cast<double>(FanoutB) * transition_prob_val * step_ratio_val;
+
+    constexpr double work_a = static_cast<double>(FanoutA);
+    constexpr double work_b = static_cast<double>(FanoutB) * transition_prob_val * step_ratio_val;
+
     constexpr std::size_t initial_budget_remaining = FanoutBudget - (FanoutA + FanoutB);
     constexpr double      budget_a                 = initial_budget_remaining * work_a / (work_a + work_b);
     constexpr double      budget_b                 = initial_budget_remaining * work_b / (work_a + work_b);
-    auto                  extra_jobs_a             = static_cast<std::size_t>(budget_a / FanoutA);
-    auto                  extra_jobs_b             = static_cast<std::size_t>(budget_b / FanoutB);
-    auto                  window_a                 = 1 + extra_jobs_a;
-    auto                  window_b                 = 1 + extra_jobs_b;
-    double                rem_a = (budget_a / static_cast<double>(FanoutA)) - static_cast<double>(extra_jobs_a);
-    double                rem_b = (budget_b / static_cast<double>(FanoutB)) - static_cast<double>(extra_jobs_b);
-    auto                  whole_budget_a = window_a * FanoutA;
-    auto                  whole_budget_b = window_b * FanoutB;
+
+    auto extra_jobs_a = static_cast<std::size_t>(budget_a / FanoutA);
+    auto extra_jobs_b = static_cast<std::size_t>(budget_b / FanoutB);
+    auto window_a     = 1 + extra_jobs_a;
+    auto window_b     = 1 + extra_jobs_b;
+
+    double rem_a          = (budget_a / static_cast<double>(FanoutA)) - static_cast<double>(extra_jobs_a);
+    double rem_b          = (budget_b / static_cast<double>(FanoutB)) - static_cast<double>(extra_jobs_b);
+    auto   whole_budget_a = window_a * FanoutA;
+    auto   whole_budget_b = window_b * FanoutB;
+
     if (whole_budget_a + whole_budget_b >= FanoutBudget) {
       return pipeline_config{window_a, window_b};
     }
+
+    // Distribute any remaining budget round-robin based on fractional remainders
     auto loop_budget_remaining = FanoutBudget - whole_budget_a - whole_budget_b;
     while (loop_budget_remaining != 0) {
       if (loop_budget_remaining < FanoutA && loop_budget_remaining < FanoutB) {
@@ -83,6 +99,11 @@ namespace vault::amac {
     return pipeline_config{window_a, window_b};
   }
 
+  /// **Inter-stage Ring Buffer**
+  ///
+  /// A fixed-capacity queue used to transition jobs from Stage A to Stage B.
+  /// Uses an uninitialized byte array (`storage_`) to manually manage the lifecycles
+  /// of the buffered objects via `std::construct_at` and `std::destroy_at`.
   template <typename T, std::size_t Capacity>
   class static_circular_buffer {
     static_assert(Capacity > 0, "Circular buffer capacity must be non-zero.");
@@ -98,6 +119,7 @@ namespace vault::amac {
   public:
     [[nodiscard]] constexpr static_circular_buffer() = default;
 
+    /// Safely destroys any jobs remaining in the buffer when the pipeline terminates.
     constexpr ~static_circular_buffer() {
       while (!empty()) {
         std::destroy_at(ptr(head_));
@@ -139,6 +161,10 @@ namespace vault::amac {
     }
   };
 
+  /// **Context Composition Wrapper**
+  ///
+  /// Glues together `ContextA` and `ContextB` along with the transition logic
+  /// required to convert a completed Stage A job into an initial Stage B job.
   template <
     typename ContextA,
     typename ContextB,
@@ -155,17 +181,26 @@ namespace vault::amac {
     using transition_probability          = TransitionProbPolicy;
     static constexpr std::size_t fanout_a = FanoutA;
     static constexpr std::size_t fanout_b = FanoutB;
-    ContextA                     ctx_a;
-    ContextB                     ctx_b;
-    TransitionFn                 transition;
+
+    ContextA     ctx_a;
+    ContextB     ctx_b;
+    TransitionFn transition;
 
     [[nodiscard]] static constexpr std::size_t fanout() noexcept {
       return FanoutA + FanoutB;
     }
   };
 
+  /// **Multi-Stage AMAC Pipeline Executor**
+  ///
+  /// Orchestrates two independent asynchronous state machines. It maintains two separate
+  /// active job windows (`window_a` and `window_b`) and a circular buffer between them.
   template <std::size_t FanoutBudget = 16, std::size_t BufferMultiplier = 4>
   class pipeline_executor_fn {
+
+    /// **Storage Slot for In-Flight Jobs**
+    ///
+    /// Maintains raw byte storage to allow strict, branchless lifecycle management.
     template <typename J>
     class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
@@ -180,6 +215,13 @@ namespace vault::amac {
         return *this;
       }
 
+      /// **Compaction Logic (CRITICAL PERFORMANCE BOUNDARY)**
+      ///
+      /// Moves `other` into this slot, and destroys `other`.
+      /// By encapsulating this inside a member function, we hide the bounds-checking and
+      /// explicit placement new/delete from the `operator()` loop. This prevents the compiler's
+      /// Control Flow Graph (CFG) from fracturing, ensuring aggressive loop unrolling and
+      /// vectorization while maintaining 100% C++ standard compliance (no UB, no double-free).
       constexpr void compact_from(job_slot& other) {
         if (this != std::addressof(other)) {
           std::construct_at(this->get(), std::move(*other.get()));
@@ -203,24 +245,29 @@ namespace vault::amac {
       using job_b_t =
         typename std::invoke_result_t<typename pure_ctx_t::transition_fn_type&, job_a_t&, payload_a_t&>::value_type;
 
+      // 1. Calculate ideal window sizing based on step ratio and transition probabilities
       constexpr auto config = make_pipeline<
         FanoutBudget,
         typename pure_ctx_t::transition_probability,
         typename pure_ctx_t::step_ratio,
         pure_ctx_t::fanout_a,
         pure_ctx_t::fanout_b>();
+
       auto window_a = std::array<job_slot<job_a_t>, config.window_a>{};
       auto window_b = std::array<job_slot<job_b_t>, config.window_b>{};
       auto buffer =
         static_circular_buffer<job_b_t, std::max<std::size_t>(config.window_a, config.window_b * BufferMultiplier)>{};
-      auto in_cur   = std::ranges::begin(ijobs);
-      auto in_end   = std::ranges::end(ijobs);
+
+      auto in_cur = std::ranges::begin(ijobs);
+      auto in_end = std::ranges::end(ijobs);
+
       auto prefetch = []<typename JR>(JR const& res) {
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
           (__builtin_prefetch(std::get<Is>(res), 0, 3), ...);
         }(std::make_index_sequence<std::tuple_size_v<JR>>{});
       };
 
+      // Helper: Finalizes a Stage B job and reports completion/failure
       auto finalize_b = [&](auto&& jb) {
         auto out = ctx.ctx_b.finalize(jb);
         if (out.has_value()) {
@@ -234,10 +281,12 @@ namespace vault::amac {
         }
       };
 
+      // Helper: Finalizes a Stage A job. If successful, transitions it to Stage B and pushes to buffer.
+      // Returns true if processed, false if buffer is full (backpressure).
       auto finalize_a_to_b = [&](auto&& ja) -> bool {
         if (buffer.full()) {
           return false;
-        }
+        } // Backpressure
         auto out = ctx.ctx_a.finalize(ja);
         if (out.has_value()) {
           if (auto& opt = out.value(); opt.has_value()) {
@@ -255,6 +304,7 @@ namespace vault::amac {
         return true;
       };
 
+      // Helper: Initializes a new Stage A job from the input stream.
       auto refill_a = [&](this auto& self, auto& slot) -> bool {
         if (in_cur == in_end || buffer.full()) {
           return false;
@@ -276,6 +326,7 @@ namespace vault::amac {
         return self(slot);
       };
 
+      // Helper: Initializes a new Stage B job from the inter-stage buffer.
       auto refill_b = [&](this auto& self, auto& slot) -> bool {
         if (buffer.empty()) {
           return false;
@@ -297,6 +348,8 @@ namespace vault::amac {
 
       auto act_a_end = window_a.begin();
       auto act_b_end = window_b.begin();
+
+      // **Phase 1: Bootstrap**
       for (auto& s : window_a) {
         if (refill_a(s)) {
           ++act_a_end;
@@ -305,12 +358,17 @@ namespace vault::amac {
         }
       }
 
+      // **Phase 2: Hot Pipeline Coordination**
       while (act_a_end != window_a.begin() || act_b_end != window_b.begin() || !buffer.empty() || in_cur != in_end) {
+
+        // 2a. Drain the inter-stage buffer into Stage B to make room for Stage A
         while (act_b_end != window_b.end() && !buffer.empty()) {
           if (refill_b(*act_b_end)) {
             ++act_b_end;
           }
         }
+
+        // 2b. Execute one step for all active Stage B jobs
         auto it_b = window_b.begin();
         while (it_b != act_b_end) {
           auto out = ctx.ctx_b.step(*it_b->get());
@@ -320,11 +378,11 @@ namespace vault::amac {
               ++it_b;
             } else {
               finalize_b(std::move(*it_b->get()));
-              std::destroy_at(it_b->get());
+              std::destroy_at(it_b->get()); // Destroy immediately before refill
               if (refill_b(*it_b)) {
                 ++it_b;
               } else {
-                it_b->compact_from(*std::prev(act_b_end));
+                it_b->compact_from(*std::prev(act_b_end)); // Safe compaction
                 --act_b_end;
               }
             }
@@ -339,6 +397,8 @@ namespace vault::amac {
             }
           }
         }
+
+        // 2c. Execute one step for all active Stage A jobs
         auto it_a = window_a.begin();
         while (it_a != act_a_end) {
           auto out = ctx.ctx_a.step(*it_a->get());
@@ -356,7 +416,7 @@ namespace vault::amac {
                   --act_a_end;
                 }
               } else {
-                ++it_a;
+                ++it_a; // Buffer full; retry next round
               }
             }
           } else {
@@ -370,12 +430,16 @@ namespace vault::amac {
             }
           }
         }
+
+        // 2d. Refill Stage A from the main input queue if space opened up
         while (act_a_end != window_a.end() && !buffer.full() && in_cur != in_end) {
           if (refill_a(*act_a_end)) {
             ++act_a_end;
           }
         }
       }
+
+      // **Phase 3: Final Cleanup**
       for (auto it = window_a.begin(); it != act_a_end; ++it) {
         std::destroy_at(it->get());
       }
