@@ -117,6 +117,13 @@ namespace vault::amac {
         return *this;
       }
 
+      constexpr void compact_from(job_slot& other) {
+        if (this != std::addressof(other)) {
+          std::construct_at(this->get(), std::move(*other.get()));
+          std::destroy_at(other.get());
+        }
+      }
+
       [[nodiscard]] J* get() noexcept {
         return reinterpret_cast<J*>(&storage[0]);
       }
@@ -177,7 +184,7 @@ namespace vault::amac {
         }
       }
 
-      while (jobs_active_end != std::ranges::begin(jobs)) {
+      while (jobs_active_end != std::ranges::begin(jobs) || ijobs_cursor != ijobs_last) {
         auto it = std::ranges::begin(jobs);
         while (it != jobs_active_end) {
           auto& slot    = *it;
@@ -187,7 +194,6 @@ namespace vault::amac {
               prefetch(addresses);
               ++it;
             } else {
-              // Finalize current job
               auto fin = context.finalize(*slot.get());
               if (fin.has_value()) {
                 if (auto& opt = fin.value(); opt.has_value()) {
@@ -199,36 +205,30 @@ namespace vault::amac {
                 std::invoke(reporter, failed, std::move(*slot.get()), std::move(fin.error()));
               }
 
-              // CRITICAL: Destroy the job before potentially overwriting it via refill or move
               std::destroy_at(slot.get());
 
               if (refill_one(slot)) {
                 ++it;
               } else {
-                // No more needles; compact the range
-                if (std::next(it) != jobs_active_end) {
-                  // Move the last active job into this slot
-                  std::construct_at(slot.get(), std::move(*(std::prev(jobs_active_end)->get())));
-                  std::destroy_at(std::prev(jobs_active_end)->get());
-                }
+                it->compact_from(*std::prev(jobs_active_end));
                 --jobs_active_end;
               }
             }
           } else {
             std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
-            std::destroy_at(slot.get()); // Destroy failed job
+            std::destroy_at(slot.get());
 
             if (refill_one(slot)) {
               ++it;
             } else {
-              if (std::next(it) != jobs_active_end) {
-                std::construct_at(slot.get(), std::move(*(std::prev(jobs_active_end)->get())));
-                std::destroy_at(std::prev(jobs_active_end)->get());
-              }
+              it->compact_from(*std::prev(jobs_active_end));
               --jobs_active_end;
             }
           }
         }
+      }
+      for (auto it = std::ranges::begin(jobs); it != jobs_active_end; ++it) {
+        std::destroy_at(it->get());
       }
     }
   };

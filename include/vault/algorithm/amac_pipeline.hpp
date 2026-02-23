@@ -180,6 +180,13 @@ namespace vault::amac {
         return *this;
       }
 
+      constexpr void compact_from(job_slot& other) {
+        if (this != std::addressof(other)) {
+          std::construct_at(this->get(), std::move(*other.get()));
+          std::destroy_at(other.get());
+        }
+      }
+
       [[nodiscard]] J* get() noexcept {
         return reinterpret_cast<J*>(&storage[0]);
       }
@@ -313,19 +320,21 @@ namespace vault::amac {
               ++it_b;
             } else {
               finalize_b(std::move(*it_b->get()));
+              std::destroy_at(it_b->get());
               if (refill_b(*it_b)) {
                 ++it_b;
               } else {
-                *it_b = std::move(*std::prev(act_b_end));
+                it_b->compact_from(*std::prev(act_b_end));
                 --act_b_end;
               }
             }
           } else {
             std::invoke(reporter, failed, std::move(*it_b->get()), std::move(out.error()));
+            std::destroy_at(it_b->get());
             if (refill_b(*it_b)) {
               ++it_b;
             } else {
-              *it_b = std::move(*std::prev(act_b_end));
+              it_b->compact_from(*std::prev(act_b_end));
               --act_b_end;
             }
           }
@@ -339,10 +348,11 @@ namespace vault::amac {
               ++it_a;
             } else {
               if (finalize_a_to_b(std::move(*it_a->get()))) {
+                std::destroy_at(it_a->get());
                 if (refill_a(*it_a)) {
                   ++it_a;
                 } else {
-                  *it_a = std::move(*std::prev(act_a_end));
+                  it_a->compact_from(*std::prev(act_a_end));
                   --act_a_end;
                 }
               } else {
@@ -351,10 +361,11 @@ namespace vault::amac {
             }
           } else {
             std::invoke(reporter, failed, std::move(*it_a->get()), std::move(out.error()));
+            std::destroy_at(it_a->get());
             if (refill_a(*it_a)) {
               ++it_a;
             } else {
-              *it_a = std::move(*std::prev(act_a_end));
+              it_a->compact_from(*std::prev(act_a_end));
               --act_a_end;
             }
           }
