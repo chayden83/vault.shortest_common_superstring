@@ -177,7 +177,7 @@ namespace vault::amac {
         }
       }
 
-      while (jobs_active_end != std::ranges::begin(jobs) || ijobs_cursor != ijobs_last) {
+      while (jobs_active_end != std::ranges::begin(jobs)) {
         auto it = std::ranges::begin(jobs);
         while (it != jobs_active_end) {
           auto& slot    = *it;
@@ -187,6 +187,7 @@ namespace vault::amac {
               prefetch(addresses);
               ++it;
             } else {
+              // Finalize current job
               auto fin = context.finalize(*slot.get());
               if (fin.has_value()) {
                 if (auto& opt = fin.value(); opt.has_value()) {
@@ -198,26 +199,36 @@ namespace vault::amac {
                 std::invoke(reporter, failed, std::move(*slot.get()), std::move(fin.error()));
               }
 
+              // CRITICAL: Destroy the job before potentially overwriting it via refill or move
+              std::destroy_at(slot.get());
+
               if (refill_one(slot)) {
                 ++it;
               } else {
-                *it = std::move(*(jobs_active_end - 1));
+                // No more needles; compact the range
+                if (std::next(it) != jobs_active_end) {
+                  // Move the last active job into this slot
+                  std::construct_at(slot.get(), std::move(*(std::prev(jobs_active_end)->get())));
+                  std::destroy_at(std::prev(jobs_active_end)->get());
+                }
                 --jobs_active_end;
               }
             }
           } else {
             std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
+            std::destroy_at(slot.get()); // Destroy failed job
+
             if (refill_one(slot)) {
               ++it;
             } else {
-              *it = std::move(*(jobs_active_end - 1));
+              if (std::next(it) != jobs_active_end) {
+                std::construct_at(slot.get(), std::move(*(std::prev(jobs_active_end)->get())));
+                std::destroy_at(std::prev(jobs_active_end)->get());
+              }
               --jobs_active_end;
             }
           }
         }
-      }
-      for (auto it = std::ranges::begin(jobs); it != jobs_active_end; ++it) {
-        std::destroy_at(it->get());
       }
     }
   };
