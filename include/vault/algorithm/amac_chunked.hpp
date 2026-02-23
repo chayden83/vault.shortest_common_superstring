@@ -29,7 +29,8 @@ namespace vault::amac {
 
   /**
    * @brief A compile-time wrapper representing the transition edge between two pipeline stages.
-   * * @tparam TransitionFn The invocable type representing the transition logic.
+   *
+   * @tparam TransitionFn The invocable type representing the transition logic.
    * @tparam StepRatio The expected ratio of steps between the upstream and downstream stages.
    * @tparam TransProb The probability of a successful transition.
    */
@@ -42,7 +43,8 @@ namespace vault::amac {
 
   /**
    * @brief Creates a pipeline edge coupling a transition function with its performance policies.
-   * * @tparam StepRatio A std::ratio representing the step ratio (B / A).
+   *
+   * @tparam StepRatio A std::ratio representing the step ratio (B / A).
    * @tparam TransProb A std::ratio representing the probability of a successful transition.
    * @param transition The invocable object defining the transition logic.
    * @return A constructed pipeline_edge.
@@ -55,7 +57,8 @@ namespace vault::amac {
 
   /**
    * @brief Base case for constructing a composed pipeline from two contexts and an edge.
-   * * Ensures the resulting tree is strictly right-leaning by prohibiting Stage A
+   *
+   * Ensures the resulting tree is strictly right-leaning by prohibiting Stage A
    * from being a composed pipeline itself.
    */
   template <typename CtxA, typename Edge, typename CtxB>
@@ -81,7 +84,8 @@ namespace vault::amac {
 
   /**
    * @brief Recursive variadic factory for constructing N-stage right-leaning AMAC pipelines.
-   * * This function folds a sequence of (Context, Edge, Context...) arguments from right
+   *
+   * This function folds a sequence of (Context, Edge, Context...) arguments from right
    * to left, generating a deeply nested composed_context that is perfectly optimized
    * for the chunked pipeline executor.
    */
@@ -121,11 +125,14 @@ namespace vault::amac {
       );
 
       using job_a_t = std::ranges::range_value_t<Jobs>;
-      using opt_b_t = std::invoke_result_t<
-        typename pure_ctx_t::transition_fn_type&,
-        typename pure_ctx_t::context_a_type&,
-        typename pure_ctx_t::context_b_type&,
-        job_a_t&>;
+
+      // Resolve Payload A type via traits
+      using finalize_a_res =
+        decltype(std::declval<typename pure_ctx_t::context_a_type&>().finalize(std::declval<job_a_t&>()));
+      using payload_a_t = typename type_traits::finalize_traits<finalize_a_res>::payload_type;
+
+      // Resolve Job B type via transition result
+      using opt_b_t = std::invoke_result_t<typename pure_ctx_t::transition_fn_type&, job_a_t&, payload_a_t&>;
       using job_b_t = typename opt_b_t::value_type;
 
       // 1. Calculate the max capacity of the L2 cache for Stage B jobs
@@ -147,17 +154,17 @@ namespace vault::amac {
 
       // The intermediate reporter bridging Stage A and Stage B
       auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
-        if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
-          // If the job explicitly failed, bypass transition and forward the error directly
-          std::invoke(reporter, tag, std::forward<J>(job), std::forward<Args>(args)...);
-        } else {
-          // Job completed or terminated naturally; attempt the edge transition
-          if (auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job)) {
+        if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+          // Unpack payload from variadic args (guaranteed by concepts)
+          auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+          if (auto opt_b = std::invoke(ctx.transition, std::forward<J>(job), std::move(payload))) {
             intermediate_buffer.push_back(std::move(*opt_b));
           } else {
-            // Transition failed/rejected the job; report as terminated
             std::invoke(reporter, vault::amac::terminated, std::forward<J>(job));
           }
+        } else {
+          // Forward failed or terminated tags directly to the final reporter
+          std::invoke(reporter, tag, std::forward<J>(job), std::forward<Args>(args)...);
         }
       };
 

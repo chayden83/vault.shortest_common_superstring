@@ -54,6 +54,13 @@ struct lower_bound_context {
     }
     return vault::amac::step_result<1>{nullptr};
   }
+
+  [[nodiscard]] auto finalize(lower_bound_job const& job) const noexcept -> std::expected<std::optional<int>, int> {
+    if (job.low < data->size() && (*data)[job.low].first == job.target_key) {
+      return std::optional<int>{(*data)[job.low].second};
+    }
+    return std::nullopt;
+  }
 };
 
 // ----------------------------------------------------------------------------
@@ -101,24 +108,20 @@ struct upper_bound_context {
     }
     return vault::amac::step_result<1>{nullptr};
   }
+
+  [[nodiscard]] auto finalize(upper_bound_job const& job) const noexcept
+    -> std::expected<std::optional<std::size_t>, int> {
+    // Return the index found as the payload
+    return std::optional<std::size_t>{job.low};
+  }
 };
 
 // ----------------------------------------------------------------------------
-// Transition Edge
+// Transition Edge: Pure Mapping Function
 // ----------------------------------------------------------------------------
 struct lower_to_upper_transition {
-  template <typename CtxB>
-  auto operator()(lower_bound_context const& ctx_a, CtxB const& /* ctx_b */, lower_bound_job const& job_a) const
-    -> std::optional<upper_bound_job> {
-
-    // Only transition if the lower_bound found an exact match
-    if (job_a.low < ctx_a.data->size() && (*ctx_a.data)[job_a.low].first == job_a.target_key) {
-      auto mapped_value = (*ctx_a.data)[job_a.low].second;
-      return upper_bound_job{
-        .original_key = job_a.target_key, .target_key = mapped_value, .low = 0, .high = 0, .mid = 0
-      };
-    }
-    return std::nullopt;
+  auto operator()(lower_bound_job const& job_a, int const payload_a) const -> std::optional<upper_bound_job> {
+    return upper_bound_job{.original_key = job_a.target_key, .target_key = payload_a, .low = 0, .high = 0, .mid = 0};
   }
 };
 
@@ -126,7 +129,6 @@ struct lower_to_upper_transition {
 // Test Cases
 // ----------------------------------------------------------------------------
 TEST_CASE("AMAC Pipeline handles pathological backpressure without data loss", "[amac][pipeline]") {
-  // 1. Generate massive, tightly packed test data
   auto stage1_data = std::vector<std::pair<int, int>>{};
   auto stage2_data = std::vector<std::pair<int, int>>{};
 
@@ -142,28 +144,24 @@ TEST_CASE("AMAC Pipeline handles pathological backpressure without data loss", "
   auto ctx_a = lower_bound_context{&stage1_data};
   auto ctx_b = upper_bound_context{&stage2_data};
 
-  // 2. Define the composed context using the declarative factory.
-  // We explicitly claim 100% transition probability (1/1) and an equal step ratio (1/1)
   auto composed = vault::amac::make_pipeline(
     ctx_a, vault::amac::make_edge<std::ratio<1, 1>, std::ratio<1, 1>>(lower_to_upper_transition{}), ctx_b
   );
 
-  // 3. Create a massive pathological input batch where every single job transitions
   auto jobs = std::vector<lower_bound_job>{};
   jobs.reserve(num_elements);
   for (auto i = 0; i < num_elements; ++i) {
     jobs.push_back(lower_bound_job{.target_key = i, .low = 0, .high = 0, .mid = 0});
   }
 
-  // 4. Execute the pipeline with an artificially tiny buffer (BufferMultiplier = 1)
-  // This absolutely guarantees massive buffer overflow events and constant backpressure stalling.
   auto pipeline_results = std::vector<std::pair<int, std::size_t>>{};
   pipeline_results.reserve(num_elements);
 
   auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
     if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
       if constexpr (std::is_same_v<std::remove_cvref_t<J>, upper_bound_job>) {
-        pipeline_results.emplace_back(job.original_key, job.low);
+        auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+        pipeline_results.emplace_back(job.original_key, payload);
       }
     } else if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
       FAIL("Jobs should not fail in this backpressure test.");
@@ -172,16 +170,13 @@ TEST_CASE("AMAC Pipeline handles pathological backpressure without data loss", "
 
   vault::amac::pipeline_executor<16, 1>(jobs, composed, reporter);
 
-  // 5. Verify correctness against standard library execution
   REQUIRE(pipeline_results.size() == static_cast<std::size_t>(num_elements));
 
-  // Sort results since AMAC execution order is fundamentally non-deterministic due to MLP
   std::ranges::sort(pipeline_results, [](auto const& a, auto const& b) { return a.first < b.first; });
 
   for (auto i = 0; i < num_elements; ++i) {
     auto target1 = i;
 
-    // Standard library baseline
     auto it1 = std::ranges::lower_bound(stage1_data, target1, {}, &std::pair<int, int>::first);
     REQUIRE(it1 != stage1_data.end());
 

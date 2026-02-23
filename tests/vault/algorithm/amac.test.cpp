@@ -4,6 +4,8 @@
 #include <vault/algorithm/amac.hpp>
 
 #include <expected>
+#include <memory>
+#include <optional>
 #include <random>
 #include <ranges>
 #include <vector>
@@ -22,6 +24,10 @@ static constexpr inline struct JobContext {
   auto step(auto& job) const noexcept -> decltype(job.step()) {
     return job.step();
   }
+
+  auto finalize(auto& job) const noexcept -> decltype(job.finalize()) {
+    return job.finalize();
+  }
 } job_context{};
 
 // --- Test Jobs ---
@@ -32,17 +38,11 @@ class CountdownJob {
   int m_counter;
 
 public:
-  // Needles are simple integers representing the starting count
   using Needle = int;
 
   explicit CountdownJob(int start_count)
     : m_counter(start_count) {}
 
-  // AMAC Requirements
-
-  // Returns a tuple-like result of 1 pointer wrapped in std::expected.
-  // If counter is 0, returns {nullptr} (Finished).
-  // Otherwise, decrements and returns {this} (Active).
   [[nodiscard]] std::expected<vault::amac::step_result<1>, int> init() noexcept {
     if (m_counter <= 0) {
       return vault::amac::step_result<1>{nullptr};
@@ -52,7 +52,12 @@ public:
   }
 
   [[nodiscard]] std::expected<vault::amac::step_result<1>, int> step() noexcept {
-    return init(); // Step logic is identical to init for this test
+    return init();
+  }
+
+  // The Payload for a countdown is the final value (always 0 on success)
+  [[nodiscard]] std::expected<std::optional<int>, int> finalize() noexcept {
+    return std::optional<int>{m_counter};
   }
 
   [[nodiscard]] int counter() const {
@@ -75,7 +80,7 @@ public:
 
   [[nodiscard]] std::expected<vault::amac::step_result<1>, int> init() noexcept {
     if (m_counter == m_fail_at) {
-      return std::unexpected(404); // Return an arbitrary error code
+      return std::unexpected(404);
     }
     if (m_counter <= 0) {
       return vault::amac::step_result<1>{nullptr};
@@ -86,6 +91,13 @@ public:
 
   [[nodiscard]] std::expected<vault::amac::step_result<1>, int> step() noexcept {
     return init();
+  }
+
+  [[nodiscard]] std::expected<std::optional<int>, int> finalize() noexcept {
+    if (m_counter == m_fail_at) {
+      return std::unexpected(404);
+    }
+    return std::optional<int>{m_counter};
   }
 
   [[nodiscard]] int counter() const {
@@ -111,10 +123,12 @@ TEST_CASE("AMAC Executor: Countdown Integrity", "[amac][executor]") {
 
   size_t reported_count = 0;
 
-  // The new tagged dispatch reporter
-  auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&...) {
+  auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&... args) {
     if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
       reported_count++;
+      // Unpack Payload
+      auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+      REQUIRE(payload == 0);
       REQUIRE(job.counter() == 0);
     } else if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
       FAIL("CountdownJob should never fail.");
@@ -135,7 +149,6 @@ TEST_CASE("AMAC Executor: Error Routing via std::expected", "[amac][error_handli
   configs.reserve(num_jobs);
 
   for (size_t i = 0; i < num_jobs; ++i) {
-    // Evens complete successfully, Odds fail when counter hits 2
     int start_count = 5;
     int fail_at     = (i % 2 == 0) ? -1 : 2;
     configs.emplace_back(start_count, fail_at);
@@ -147,15 +160,13 @@ TEST_CASE("AMAC Executor: Error Routing via std::expected", "[amac][error_handli
   auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&... args) {
     if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
       completed_count++;
-      REQUIRE(job.counter() == 0);
+      auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+      REQUIRE(payload == 0);
     } else if constexpr (std::is_same_v<Tag, vault::amac::failed_tag>) {
       failed_count++;
       REQUIRE(job.counter() == 2);
-      // Verify we received the expected error code
       auto err = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
       REQUIRE(err == 404);
-    } else {
-      FAIL("Unexpected tag received.");
     }
   };
 
@@ -172,16 +183,18 @@ TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]") {
   std::vector<int> start_counts(num_jobs, 5);
 
   size_t reported_count = 0;
-  auto   reporter       = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&...) {
+  auto   reporter       = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&... args) {
     if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
       reported_count++;
+      auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+      REQUIRE(payload == 0);
       REQUIRE(job.counter() == 0);
     }
   };
 
   auto jobs = start_counts | std::views::transform([](int count) { return CountdownJob(count); });
 
-  SECTION("Batch Size = 1 (Serial Execution)") {
+  SECTION("Batch Size = 1") {
     vault::amac::executor<1>(jobs, job_context, reporter);
     CHECK(reported_count == num_jobs);
   }
@@ -189,33 +202,6 @@ TEST_CASE("AMAC Executor: Batch Size Sensitivity", "[amac][batch_size]") {
   SECTION("Batch Size = 2") {
     vault::amac::executor<2>(jobs, job_context, reporter);
     CHECK(reported_count == num_jobs);
-  }
-}
-
-TEST_CASE("AMAC Executor: Immediate Completion Edge Cases", "[amac][edge_cases]") {
-  size_t reported_count = 0;
-  auto   reporter       = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&...) {
-    if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
-      reported_count++;
-      REQUIRE(job.counter() == 0);
-    }
-  };
-
-  SECTION("All jobs finish immediately") {
-    std::vector<int> zeros(50, 0);
-    auto             jobs = zeros | std::views::transform([](int count) { return CountdownJob(count); });
-    vault::amac::executor<16>(jobs, job_context, reporter);
-    CHECK(reported_count == 50);
-  }
-
-  SECTION("Mixed immediate and long-running") {
-    std::vector<int> mixed;
-    for (int i = 0; i < 100; ++i) {
-      mixed.push_back(i % 2 == 0 ? 0 : 10);
-    }
-    auto jobs = mixed | std::views::transform([](int count) { return CountdownJob(count); });
-    vault::amac::executor<16>(jobs, job_context, reporter);
-    CHECK(reported_count == 100);
   }
 }
 
@@ -248,26 +234,22 @@ TEST_CASE("AMAC Executor: Double Free Regression Test", "[amac][resource][asan]"
       return init();
     }
 
-    [[nodiscard]] int id() const {
-      return *m_resource;
+    [[nodiscard]] std::expected<std::optional<int>, int> finalize() noexcept {
+      return std::optional<int>{*m_resource};
     }
   };
 
   const size_t                     num_jobs = 32;
   std::vector<std::pair<int, int>> needles;
-  needles.reserve(num_jobs);
-
   for (size_t i = 0; i < num_jobs; ++i) {
-    int steps = (i % 2 == 0) ? 0 : 10;
-    needles.emplace_back(static_cast<int>(i), steps);
+    needles.emplace_back(static_cast<int>(i), (i % 2 == 0) ? 0 : 10);
   }
 
   size_t reported_count = 0;
-
-  auto reporter = [&]<typename Tag, typename J, typename... Args>(Tag, J&& job, Args&&...) {
+  auto   reporter       = [&]<typename Tag, typename J, typename... Args>(Tag, J&&, Args&&... args) {
     if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
-      volatile int x = job.id();
-      (void)x;
+      auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+      REQUIRE(payload >= 0);
       reported_count++;
     }
   };

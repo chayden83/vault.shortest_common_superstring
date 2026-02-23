@@ -11,6 +11,7 @@
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <ratio>
 #include <tuple>
@@ -104,17 +105,39 @@ namespace vault::amac::type_traits {
   template <typename T>
   constexpr inline auto const is_step_outcome_v = is_step_outcome<T>::value;
 
+  template <typename T>
+  struct is_finalize_outcome : std::false_type {};
+
+  template <typename P, typename E>
+  struct is_finalize_outcome<std::expected<std::optional<P>, E>> : std::true_type {};
+
+  template <typename T>
+  constexpr inline auto const is_finalize_outcome_v = is_finalize_outcome<std::remove_cvref_t<T>>::value;
+
+  template <typename T>
+  struct finalize_traits;
+
+  template <typename P, typename E>
+  struct finalize_traits<std::expected<std::optional<P>, E>> {
+    using payload_type = P;
+    using error_type   = E;
+  };
+
 } // namespace vault::amac::type_traits
 
 namespace vault::amac::concepts {
   template <typename T>
   concept step_outcome = type_traits::is_step_outcome_v<T>;
 
+  template <typename T>
+  concept finalize_outcome = type_traits::is_finalize_outcome_v<T>;
+
   /**
    * @brief Defines the interface for an AMAC-compatible job.
    * @ingroup vault_amac
    *
-   * A Job is a state machine that transitions via init() and step().
+   * A Job is a state machine that transitions via init() and step(),
+   * and completes via finalize().
    *
    * @note **State Monotonicity Requirement**: The predicate result of
    * job_step_result MUST be monotonic within a single coordination
@@ -127,20 +150,23 @@ namespace vault::amac::concepts {
   concept job_context = std::move_constructible<J> && C::fanout() > 0uz && requires(C& context, J& job) {
     { context.init(job) } noexcept -> step_outcome;
     { context.step(job) } noexcept -> step_outcome;
+    { context.finalize(job) } noexcept -> finalize_outcome;
   };
 
   /**
-   * @brief Concept for a reporter that handles completed AMAC jobs.
+   * @brief Concept for a reporter that handles AMAC job lifecycle events.
    *
    * @tparam R The type of the job reporter.
    * @tparam J The type of the job to report.
+   * @tparam P The type of the payload returned upon success.
    * @tparam E The type of the error returned by the context when a
    * job fails.
    *
    * @ingroup vault_amac
    */
-  template <typename R, typename J, typename E>
-  concept job_reporter = std::invocable<R, completed_tag, J&&> && std::invocable<R, terminated_tag, J&&> &&
+  template <typename R, typename J, typename P, typename E>
+  concept job_reporter = std::invocable<R, completed_tag, J&&, P&&> &&
+                         std::invocable<R, terminated_tag, J&&> &&
                          std::invocable<R, failed_tag, J&&, E&&>;
 } // namespace vault::amac::concepts
 
@@ -244,8 +270,12 @@ namespace vault::amac {
                concepts::job_reporter<
                  std::remove_cvref_t<Reporter>,
                  std::ranges::range_value_t<Jobs>,
-                 typename decltype(std::declval<std::remove_cvref_t<Context>&>()
-                                     .init(std::declval<std::ranges::range_value_t<Jobs>&>()))::error_type>
+                 typename type_traits::finalize_traits<decltype(
+                   std::declval<std::remove_cvref_t<Context>&>().finalize(
+                     std::declval<std::ranges::range_value_t<Jobs>&>()))>::payload_type,
+                 typename type_traits::finalize_traits<decltype(
+                   std::declval<std::remove_cvref_t<Context>&>().finalize(
+                     std::declval<std::ranges::range_value_t<Jobs>&>()))>::error_type>
     static constexpr void operator()(Jobs&& ijobs, Context&& context, Reporter&& reporter) {
       using job_t = std::ranges::range_value_t<Jobs>;
 
@@ -255,27 +285,40 @@ namespace vault::amac {
 
       auto jobs = std::array<job_slot<job_t>, JOB_COUNT>{};
 
-      auto [jobs_first, jobs_last] = std::invoke([&] {
-        auto [jobs_first, jobs_last] = std::ranges::subrange(jobs);
+      auto finalize_job = [&](auto&& job_to_finalize) {
+        auto fin_outcome = context.finalize(job_to_finalize);
+        if (fin_outcome.has_value()) {
+          if (auto& opt_payload = fin_outcome.value(); opt_payload.has_value()) {
+            std::invoke(reporter, completed, std::forward<decltype(job_to_finalize)>(job_to_finalize), std::move(*opt_payload));
+          } else {
+            std::invoke(reporter, terminated, std::forward<decltype(job_to_finalize)>(job_to_finalize));
+          }
+        } else {
+          std::invoke(reporter, failed, std::forward<decltype(job_to_finalize)>(job_to_finalize), std::move(fin_outcome.error()));
+        }
+      };
 
-        while (jobs_first != jobs_last and ijobs_cursor != ijobs_last) {
+      auto [jobs_first, jobs_last] = std::invoke([&] {
+        auto [jobs_first_inner, jobs_last_inner] = std::ranges::subrange(jobs);
+
+        while (jobs_first_inner != jobs_last_inner and ijobs_cursor != ijobs_last) {
           auto&& job = *ijobs_cursor++;
 
           auto outcome = context.init(job);
           if (outcome.has_value()) {
             if (auto addresses = outcome.value()) {
               prefetch(addresses);
-              std::construct_at(jobs_first->get(), std::forward<decltype(job)>(job));
-              ++jobs_first;
+              std::construct_at(jobs_first_inner->get(), std::forward<decltype(job)>(job));
+              ++jobs_first_inner;
             } else {
-              std::invoke(reporter, completed, std::forward<decltype(job)>(job));
+              finalize_job(std::forward<decltype(job)>(job));
             }
           } else {
             std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
           }
         }
 
-        return std::ranges::subrange(std::ranges::begin(jobs), jobs_first);
+        return std::ranges::subrange(std::ranges::begin(jobs), jobs_first_inner);
       });
 
       // A predicate that determines not only if a job is complete,
@@ -287,10 +330,12 @@ namespace vault::amac {
           if (auto addresses = outcome.value()) {
             return prefetch(addresses), false;
           } else {
-            return std::invoke(reporter, completed, std::move(*job_slot.get())), true;
+            finalize_job(std::move(*job_slot.get()));
+            return true;
           }
         } else {
-          return std::invoke(reporter, failed, std::move(*job_slot.get()), std::move(outcome.error())), true;
+          std::invoke(reporter, failed, std::move(*job_slot.get()), std::move(outcome.error()));
+          return true;
         }
       };
 
@@ -310,7 +355,7 @@ namespace vault::amac {
               *jobs_cursor->get() = std::forward<decltype(job)>(job);
               ++jobs_cursor;
             } else {
-              std::invoke(reporter, completed, std::forward<decltype(job)>(job));
+              finalize_job(std::forward<decltype(job)>(job));
             }
           } else {
             std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
@@ -326,7 +371,7 @@ namespace vault::amac {
         jobs_cursor = std::remove_if(jobs_first, jobs_cursor, is_inactive);
       }
 
-      // We manutally constructed the jobs, so we must manually
+      // We manually constructed the jobs, so we must manually
       // destroy them.
       for (; jobs_first != jobs_last; ++jobs_first) {
         std::destroy_at(jobs_first->get());

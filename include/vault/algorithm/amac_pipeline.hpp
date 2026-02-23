@@ -32,12 +32,6 @@ namespace vault::amac {
 
   /**
    * @brief Computes optimal active window sizes for a composed pipeline.
-   *
-   * @tparam FanoutBudget The maximum number of concurrent prefetches allowed.
-   * @tparam TransitionProbability A std::ratio representing the probability of a job transitioning.
-   * @tparam StepRatio A std::ratio representing the expected steps in B vs A (s_b / s_a).
-   * @tparam FanoutA The fanout of Stage A jobs.
-   * @tparam FanoutB The fanout of Stage B jobs.
    */
   template <
     std::size_t FanoutBudget = 16,
@@ -50,8 +44,7 @@ namespace vault::amac {
     static_assert(FanoutBudget >= FanoutA + FanoutB, "Budget too small for baseline");
 
     constexpr double transition_prob_val = static_cast<double>(TransitionProbability::num) / TransitionProbability::den;
-
-    constexpr double step_ratio_val = static_cast<double>(StepRatio::num) / StepRatio::den;
+    constexpr double step_ratio_val      = static_cast<double>(StepRatio::num) / StepRatio::den;
 
     constexpr double work_a = static_cast<double>(FanoutA);
     constexpr double work_b = static_cast<double>(FanoutB) * transition_prob_val * step_ratio_val;
@@ -110,14 +103,10 @@ namespace vault::amac {
 
   /**
    * @brief A strictly stack-allocated, zero-dependency ring buffer.
-   *
-   * @tparam T The type of elements stored. Must be move-constructible.
-   * @tparam Capacity The maximum number of elements the buffer can hold.
    */
   template <typename T, std::size_t Capacity>
   class static_circular_buffer {
     static_assert(Capacity > 0, "Circular buffer capacity must be non-zero.");
-
     alignas(T) std::array<std::byte, sizeof(T) * Capacity> storage_;
     std::size_t head_{0};
     std::size_t tail_{0};
@@ -153,10 +142,6 @@ namespace vault::amac {
       return size_;
     }
 
-    [[nodiscard]] static constexpr std::size_t capacity() noexcept {
-      return Capacity;
-    }
-
     constexpr void push_back(T&& value) {
       assert(!full());
       std::construct_at(ptr(tail_), std::move(value));
@@ -176,7 +161,7 @@ namespace vault::amac {
   };
 
   /**
-   * @brief An aggregate connecting two sub-executors and their transition edge.
+   * @brief Aggregate connecting two sub-executors and their transition edge.
    */
   template <
     typename ContextA,
@@ -207,9 +192,6 @@ namespace vault::amac {
 
   /**
    * @brief Functional executor for managing a composed AMAC pipeline.
-   *
-   * @tparam FanoutBudget The maximum hardware prefetch concurrency.
-   * @tparam BufferMultiplier The scale factor for the intermediate circular buffer.
    */
   template <std::size_t FanoutBudget = 16, std::size_t BufferMultiplier = 4>
   class pipeline_executor_fn {
@@ -239,11 +221,14 @@ namespace vault::amac {
     static constexpr void operator()(Jobs&& ijobs, ComposedCtx&& ctx, Reporter&& reporter) {
       using pure_ctx_t = std::remove_cvref_t<ComposedCtx>;
       using job_a_t    = std::ranges::range_value_t<Jobs>;
-      using opt_b_t    = std::invoke_result_t<
-           typename pure_ctx_t::transition_fn_type&,
-           typename pure_ctx_t::context_a_type&,
-           typename pure_ctx_t::context_b_type&,
-           job_a_t&>;
+
+      // Resolve Payload A type via traits
+      using finalize_a_res =
+        decltype(std::declval<typename pure_ctx_t::context_a_type&>().finalize(std::declval<job_a_t&>()));
+      using payload_a_t = typename type_traits::finalize_traits<finalize_a_res>::payload_type;
+
+      // Resolve Job B type via transition result
+      using opt_b_t = std::invoke_result_t<typename pure_ctx_t::transition_fn_type&, job_a_t&, payload_a_t&>;
       using job_b_t = typename opt_b_t::value_type;
 
       constexpr auto config = make_pipeline<
@@ -275,17 +260,55 @@ namespace vault::amac {
         }(std::make_index_sequence<std::tuple_size_v<JResult>>{});
       };
 
+      // Internal routing helper for Stage B completion
+      auto finalize_b = [&](auto&& job_b) {
+        auto outcome = ctx.ctx_b.finalize(job_b);
+        if (outcome.has_value()) {
+          if (auto& opt_p = outcome.value(); opt_p.has_value()) {
+            std::invoke(reporter, completed, std::forward<decltype(job_b)>(job_b), std::move(*opt_p));
+          } else {
+            std::invoke(reporter, terminated, std::forward<decltype(job_b)>(job_b));
+          }
+        } else {
+          std::invoke(reporter, failed, std::forward<decltype(job_b)>(job_b), std::move(outcome.error()));
+        }
+      };
+
+      // Internal routing helper for Stage A completion -> Transition -> Buffer
+      auto finalize_a_to_b = [&](auto&& job_a) -> bool {
+        if (buffer.full()) {
+          return false;
+        }
+
+        auto outcome = ctx.ctx_a.finalize(job_a);
+        if (outcome.has_value()) {
+          if (auto& opt_p = outcome.value(); opt_p.has_value()) {
+            auto opt_b = std::invoke(ctx.transition, job_a, *opt_p);
+            if (opt_b) {
+              buffer.push_back(std::move(*opt_b));
+            } else {
+              std::invoke(reporter, terminated, std::forward<decltype(job_a)>(job_a));
+            }
+          } else {
+            std::invoke(reporter, terminated, std::forward<decltype(job_a)>(job_a));
+          }
+        } else {
+          std::invoke(reporter, failed, std::forward<decltype(job_a)>(job_a), std::move(outcome.error()));
+        }
+        return true;
+      };
+
       auto step_b_pred = [&](auto& slot) {
         auto outcome = ctx.ctx_b.step(*slot.get());
         if (outcome.has_value()) {
           if (auto addr = outcome.value()) {
             return prefetch(addr), false;
-          } else {
-            return std::invoke(reporter, completed, std::move(*slot.get())), true;
           }
-        } else {
-          return std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error())), true;
+          finalize_b(std::move(*slot.get()));
+          return true;
         }
+        std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
+        return true;
       };
 
       auto step_a_pred = [&](auto& slot) {
@@ -293,28 +316,17 @@ namespace vault::amac {
         if (outcome.has_value()) {
           if (auto addr = outcome.value()) {
             return prefetch(addr), false;
-          } else {
-            if (buffer.full()) {
-              return false; // Safely stall this job while permitting others in A to step
-            }
-            auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, *slot.get());
-            if (opt_b) {
-              buffer.push_back(std::move(*opt_b));
-            } else {
-              std::invoke(reporter, terminated, std::move(*slot.get()));
-            }
-            return true;
           }
-        } else {
-          std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
-          return true;
+          return finalize_a_to_b(std::move(*slot.get()));
         }
+        std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
+        return true;
       };
 
       // Phase 1: Setup
       while (cur_a != end_a && in_cur != in_end) {
         if (buffer.full()) {
-          break; // Ensure space before consuming
+          break;
         }
         auto&& job     = *in_cur++;
         auto   outcome = ctx.ctx_a.init(job);
@@ -325,12 +337,7 @@ namespace vault::amac {
             std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
             ++cur_a;
           } else {
-            auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job);
-            if (opt_b) {
-              buffer.push_back(std::move(*opt_b));
-            } else {
-              std::invoke(reporter, terminated, std::forward<decltype(job)>(job));
-            }
+            finalize_a_to_b(std::forward<decltype(job)>(job));
           }
         } else {
           std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
@@ -351,7 +358,7 @@ namespace vault::amac {
               std::construct_at(cur_b->get(), std::move(job_b));
               ++cur_b;
             } else {
-              std::invoke(reporter, completed, std::move(job_b));
+              finalize_b(std::move(job_b));
             }
           } else {
             std::invoke(reporter, failed, std::move(job_b), std::move(outcome.error()));
@@ -367,7 +374,7 @@ namespace vault::amac {
         // Reverse Step 4: Refill A
         while (cur_a != end_a && in_cur != in_end) {
           if (buffer.full()) {
-            break; // Ensure space before consuming
+            break;
           }
           auto&& job     = *in_cur++;
           auto   outcome = ctx.ctx_a.init(job);
@@ -378,17 +385,19 @@ namespace vault::amac {
               std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
               ++cur_a;
             } else {
-              auto opt_b = std::invoke(ctx.transition, ctx.ctx_a, ctx.ctx_b, job);
-              if (opt_b) {
-                buffer.push_back(std::move(*opt_b));
-              } else {
-                std::invoke(reporter, terminated, std::forward<decltype(job)>(job));
-              }
+              finalize_a_to_b(std::forward<decltype(job)>(job));
             }
           } else {
             std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
           }
         }
+      }
+
+      for (; cur_a != window_a.begin(); --cur_a) {
+        std::destroy_at(std::prev(cur_a)->get());
+      }
+      for (; cur_b != window_b.begin(); --cur_b) {
+        std::destroy_at(std::prev(cur_b)->get());
       }
     }
   };

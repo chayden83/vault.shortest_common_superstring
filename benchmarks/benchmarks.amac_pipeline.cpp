@@ -56,6 +56,13 @@ struct lower_bound_context {
     }
     return vault::amac::step_result<1>{nullptr};
   }
+
+  [[nodiscard]] auto finalize(lower_bound_job const& job) const noexcept -> std::expected<std::optional<int>, int> {
+    if (job.low < data->size() && (*data)[job.low].first == job.target_key) {
+      return std::optional<int>{(*data)[job.low].second};
+    }
+    return std::nullopt;
+  }
 };
 
 struct upper_bound_job {
@@ -99,6 +106,13 @@ struct upper_bound_context {
       return vault::amac::step_result<1>{&(*data)[job.mid]};
     }
     return vault::amac::step_result<1>{nullptr};
+  }
+
+  [[nodiscard]] auto finalize(upper_bound_job const& job) const noexcept -> std::expected<std::optional<int>, int> {
+    if (job.low > 0 && job.low <= data->size()) {
+      return std::optional<int>{(*data)[job.low - 1].second};
+    }
+    return std::nullopt;
   }
 };
 
@@ -148,33 +162,27 @@ struct point_lookup_context {
     }
     return vault::amac::step_result<1>{nullptr};
   }
-};
 
-struct lower_to_upper_transition {
-  template <typename CtxB>
-  auto operator()(lower_bound_context const& ctx_a, CtxB const& /* ctx_b */, lower_bound_job const& job_a) const
-    -> std::optional<upper_bound_job> {
-    if (job_a.low < ctx_a.data->size() && (*ctx_a.data)[job_a.low].first == job_a.target_key) {
-      auto mapped_value = (*ctx_a.data)[job_a.low].second;
-      return upper_bound_job{
-        .original_key = job_a.target_key, .target_key = mapped_value, .low = 0, .high = 0, .mid = 0
-      };
+  [[nodiscard]] auto finalize(point_lookup_job const& job) const noexcept -> std::expected<std::optional<int>, int> {
+    if (job.low < data->size() && (*data)[job.low].first == job.target_key) {
+      return std::optional<int>{(*data)[job.low].second};
     }
     return std::nullopt;
   }
 };
 
+// ----------------------------------------------------------------------------
+// Transition Edges: Pure Mappings
+// ----------------------------------------------------------------------------
+struct lower_to_upper_transition {
+  auto operator()(lower_bound_job const& job_a, int payload_a) const -> std::optional<upper_bound_job> {
+    return upper_bound_job{.original_key = job_a.target_key, .target_key = payload_a, .low = 0, .high = 0, .mid = 0};
+  }
+};
+
 struct upper_to_point_transition {
-  template <typename CtxB>
-  auto operator()(upper_bound_context const& ctx_a, CtxB const& /* ctx_b */, upper_bound_job const& job_a) const
-    -> std::optional<point_lookup_job> {
-    if (job_a.low > 0 && job_a.low <= ctx_a.data->size()) {
-      auto mapped_value = (*ctx_a.data)[job_a.low - 1].second;
-      return point_lookup_job{
-        .original_key = job_a.original_key, .target_key = mapped_value, .low = 0, .high = 0, .mid = 0
-      };
-    }
-    return std::nullopt;
+  auto operator()(upper_bound_job const& job_a, int payload_a) const -> std::optional<point_lookup_job> {
+    return point_lookup_job{.original_key = job_a.original_key, .target_key = payload_a, .low = 0, .high = 0, .mid = 0};
   }
 };
 
@@ -195,38 +203,29 @@ struct benchmark_data {
   std::size_t size_b,
   std::size_t size_c = 65536
 ) -> benchmark_data {
-
   auto rng  = std::mt19937{42};
   auto data = benchmark_data{};
-
   data.stage1_data.reserve(size_a);
   for (std::size_t i = 0; i < size_a; ++i) {
     data.stage1_data.emplace_back(static_cast<int>(i * 2), static_cast<int>(i * 20));
   }
-
   data.stage2_data.reserve(size_b);
   for (std::size_t i = 0; i < size_b; ++i) {
     data.stage2_data.emplace_back(static_cast<int>(i * 20), static_cast<int>(i * 200));
   }
-
   data.stage3_data.reserve(size_c);
   for (std::size_t i = 0; i < size_c; ++i) {
     data.stage3_data.emplace_back(static_cast<int>(i * 200), static_cast<int>(i * 2000));
   }
-
   data.queries.reserve(target_queries);
   auto dist = std::uniform_real_distribution<double>{0.0, 1.0};
-
   for (std::size_t i = 0; i < target_queries; ++i) {
     if (dist(rng) <= transition_probability) {
-      auto const valid_key = data.stage1_data[i % size_a].first;
-      data.queries.push_back(lower_bound_job{valid_key, 0, 0, 0});
+      data.queries.push_back(lower_bound_job{data.stage1_data[i % size_a].first, 0, 0, 0});
     } else {
-      auto const invalid_key = data.stage1_data[i % size_a].first + 1;
-      data.queries.push_back(lower_bound_job{invalid_key, 0, 0, 0});
+      data.queries.push_back(lower_bound_job{data.stage1_data[i % size_a].first + 1, 0, 0, 0});
     }
   }
-
   return data;
 }
 
@@ -238,14 +237,12 @@ void bm_std_serial_2_stage(benchmark::State& state, std::size_t size_a, std::siz
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b);
-
   for (auto _ : state) {
     auto total_found = std::size_t{0};
     for (auto const& q : data.queries) {
       auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
       if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
-        auto target2 = it1->second;
-        auto it2     = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
+        auto it2 = std::ranges::upper_bound(data.stage2_data, it1->second, {}, &std::pair<int, int>::first);
         benchmark::DoNotOptimize(total_found += 1);
         benchmark::DoNotOptimize(it2);
       }
@@ -260,11 +257,9 @@ void bm_std_queued_2_stage(benchmark::State& state, std::size_t size_a, std::siz
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b);
-
   for (auto _ : state) {
     auto intermediate = std::vector<int>{};
     intermediate.reserve(num_queries);
-
     for (auto const& q : data.queries) {
       auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
       if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
@@ -272,7 +267,6 @@ void bm_std_queued_2_stage(benchmark::State& state, std::size_t size_a, std::siz
       }
     }
     benchmark::DoNotOptimize(intermediate.data());
-
     auto total_found = std::size_t{0};
     for (auto const target2 : intermediate) {
       auto it2 = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
@@ -289,14 +283,12 @@ void bm_std_serial_3_stage(benchmark::State& state, std::size_t size_a, std::siz
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b, size_c);
-
   for (auto _ : state) {
     auto total_found = std::size_t{0};
     for (auto const& q : data.queries) {
       auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
       if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
-        auto target2 = it1->second;
-        auto it2     = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
+        auto it2 = std::ranges::upper_bound(data.stage2_data, it1->second, {}, &std::pair<int, int>::first);
         if (it2 != data.stage2_data.begin()) {
           auto target3 = std::prev(it2)->second;
           auto it3     = std::ranges::lower_bound(data.stage3_data, target3, {}, &std::pair<int, int>::first);
@@ -316,11 +308,9 @@ void bm_std_queued_3_stage(benchmark::State& state, std::size_t size_a, std::siz
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b, size_c);
-
   for (auto _ : state) {
     auto buffer_b = std::vector<int>{};
     buffer_b.reserve(num_queries);
-
     for (auto const& q : data.queries) {
       auto it1 = std::ranges::lower_bound(data.stage1_data, q.target_key, {}, &std::pair<int, int>::first);
       if (it1 != data.stage1_data.end() && it1->first == q.target_key) {
@@ -328,10 +318,8 @@ void bm_std_queued_3_stage(benchmark::State& state, std::size_t size_a, std::siz
       }
     }
     benchmark::DoNotOptimize(buffer_b.data());
-
     auto buffer_c = std::vector<int>{};
     buffer_c.reserve(buffer_b.size());
-
     for (auto const target2 : buffer_b) {
       auto it2 = std::ranges::upper_bound(data.stage2_data, target2, {}, &std::pair<int, int>::first);
       if (it2 != data.stage2_data.begin()) {
@@ -339,7 +327,6 @@ void bm_std_queued_3_stage(benchmark::State& state, std::size_t size_a, std::siz
       }
     }
     benchmark::DoNotOptimize(buffer_c.data());
-
     auto total_found = std::size_t{0};
     for (auto const target3 : buffer_c) {
       auto it3 = std::ranges::lower_bound(data.stage3_data, target3, {}, &std::pair<int, int>::first);
@@ -359,33 +346,29 @@ template <std::size_t Fanout>
 void bm_sequential_amac(benchmark::State& state, double trans_prob, std::size_t size_a, std::size_t size_b) {
   auto const num_queries = static_cast<std::size_t>(state.range(0));
   auto       data        = generate_data(num_queries, trans_prob, size_a, size_b);
-
-  auto ctx_a      = lower_bound_context{&data.stage1_data};
-  auto ctx_b      = upper_bound_context{&data.stage2_data};
-  auto transition = lower_to_upper_transition{};
+  auto       ctx_a       = lower_bound_context{&data.stage1_data};
+  auto       ctx_b       = upper_bound_context{&data.stage2_data};
+  auto       transition  = lower_to_upper_transition{};
 
   for (auto _ : state) {
     auto intermediate_buffer = std::vector<upper_bound_job>{};
     intermediate_buffer.reserve(num_queries);
-
-    auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&...) {
+    auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
       if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
-        if (auto opt_b = transition(ctx_a, ctx_b, job)) {
+        auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+        if (auto opt_b = transition(job, payload)) {
           intermediate_buffer.push_back(std::move(*opt_b));
         }
       }
     };
-
     vault::amac::executor<Fanout>(data.queries, ctx_a, reporter_a);
     benchmark::DoNotOptimize(intermediate_buffer.data());
-
     auto total_found = std::size_t{0};
     auto reporter_b  = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
       if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
         total_found += 1;
       }
     };
-
     vault::amac::executor<Fanout>(intermediate_buffer, ctx_b, reporter_b);
     benchmark::DoNotOptimize(total_found);
     benchmark::ClobberMemory();
@@ -398,11 +381,9 @@ void bm_composite_pipeline(benchmark::State& state, std::size_t size_a, std::siz
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b);
-
-  auto ctx_a = lower_bound_context{&data.stage1_data};
-  auto ctx_b = upper_bound_context{&data.stage2_data};
-
-  auto composed = vault::amac::make_pipeline(
+  auto             ctx_a       = lower_bound_context{&data.stage1_data};
+  auto             ctx_b       = upper_bound_context{&data.stage2_data};
+  auto             composed    = vault::amac::make_pipeline(
     ctx_a, vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}), ctx_b
   );
 
@@ -425,11 +406,9 @@ void bm_chunked_pipeline(benchmark::State& state, std::size_t size_a, std::size_
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b);
-
-  auto ctx_a = lower_bound_context{&data.stage1_data};
-  auto ctx_b = upper_bound_context{&data.stage2_data};
-
-  auto composed = vault::amac::make_pipeline(
+  auto             ctx_a       = lower_bound_context{&data.stage1_data};
+  auto             ctx_b       = upper_bound_context{&data.stage2_data};
+  auto             composed    = vault::amac::make_pipeline(
     ctx_a, vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}), ctx_b
   );
 
@@ -457,48 +436,43 @@ void bm_sequential_3_stage(
 ) {
   auto const num_queries = static_cast<std::size_t>(state.range(0));
   auto       data        = generate_data(num_queries, trans_prob, size_a, size_b, size_c);
-
-  auto ctx_a = lower_bound_context{&data.stage1_data};
-  auto ctx_b = upper_bound_context{&data.stage2_data};
-  auto ctx_c = point_lookup_context{&data.stage3_data};
-
-  auto trans_ab = lower_to_upper_transition{};
-  auto trans_bc = upper_to_point_transition{};
+  auto       ctx_a       = lower_bound_context{&data.stage1_data};
+  auto       ctx_b       = upper_bound_context{&data.stage2_data};
+  auto       ctx_c       = point_lookup_context{&data.stage3_data};
+  auto       trans_ab    = lower_to_upper_transition{};
+  auto       trans_bc    = upper_to_point_transition{};
 
   for (auto _ : state) {
     auto buffer_b = std::vector<upper_bound_job>{};
     buffer_b.reserve(num_queries);
-
-    auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&...) {
+    auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
       if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
-        if (auto opt_b = trans_ab(ctx_a, ctx_b, job)) {
+        auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+        if (auto opt_b = trans_ab(job, payload)) {
           buffer_b.push_back(std::move(*opt_b));
         }
       }
     };
     vault::amac::executor<Fanout>(data.queries, ctx_a, reporter_a);
     benchmark::DoNotOptimize(buffer_b.data());
-
     auto buffer_c = std::vector<point_lookup_job>{};
     buffer_c.reserve(buffer_b.size());
-
-    auto reporter_b = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&...) {
+    auto reporter_b = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
       if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
-        if (auto opt_c = trans_bc(ctx_b, ctx_c, job)) {
+        auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
+        if (auto opt_c = trans_bc(job, payload)) {
           buffer_c.push_back(std::move(*opt_c));
         }
       }
     };
     vault::amac::executor<Fanout>(buffer_b, ctx_b, reporter_b);
     benchmark::DoNotOptimize(buffer_c.data());
-
     auto total_found = std::size_t{0};
     auto reporter_c  = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&&, Args&&...) {
       if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
         total_found += 1;
       }
     };
-
     vault::amac::executor<Fanout>(buffer_c, ctx_c, reporter_c);
     benchmark::DoNotOptimize(total_found);
     benchmark::ClobberMemory();
@@ -511,12 +485,10 @@ void bm_chunked_3_stage(benchmark::State& state, std::size_t size_a, std::size_t
   auto const       num_queries = static_cast<std::size_t>(state.range(0));
   constexpr double trans_prob  = static_cast<double>(TransProbPolicy::num) / TransProbPolicy::den;
   auto             data        = generate_data(num_queries, trans_prob, size_a, size_b, size_c);
-
-  auto ctx_a = lower_bound_context{&data.stage1_data};
-  auto ctx_b = upper_bound_context{&data.stage2_data};
-  auto ctx_c = point_lookup_context{&data.stage3_data};
-
-  auto composed = vault::amac::make_pipeline(
+  auto             ctx_a       = lower_bound_context{&data.stage1_data};
+  auto             ctx_b       = upper_bound_context{&data.stage2_data};
+  auto             ctx_c       = point_lookup_context{&data.stage3_data};
+  auto             composed    = vault::amac::make_pipeline(
     ctx_a,
     vault::amac::make_edge<StepRatioPolicy, TransProbPolicy>(lower_to_upper_transition{}),
     ctx_b,
@@ -542,25 +514,20 @@ void bm_chunked_3_stage(benchmark::State& state, std::size_t size_a, std::size_t
 // 5. Explicit Benchmark Registration
 // ----------------------------------------------------------------------------
 void register_benchmarks() {
-  auto const min_batch = 10'000;
-  auto const max_batch = 10'000'000;
-
-  // Targeting 256 KB L2 cache to prevent thrashing
+  auto const            min_batch       = 10'000;
+  auto const            max_batch       = 10'000'000;
   constexpr std::size_t l2_cache_target = 262144;
 
-  // Scenario 1: Balanced Steps (1:1 Ratio), 100% Transition Probability
   {
     using Prob100    = std::ratio<1, 1>;
     using Step1_1    = std::ratio<1, 1>;
     std::size_t size = 65536;
-
     benchmark::RegisterBenchmark("Std_Serial_Prob100", bm_std_serial_2_stage<Prob100>, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
     benchmark::RegisterBenchmark("Std_Queued_Prob100", bm_std_queued_2_stage<Prob100>, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark("Sequential_Fanout16_Prob100_Step1:1", bm_sequential_amac<16>, 1.0, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
@@ -576,20 +543,17 @@ void register_benchmarks() {
       ->Range(min_batch, max_batch);
   }
 
-  // Scenario 2: Heavy Filter (1/64 Transition Probability), Step Ratio 1:2
   {
     using Prob1_64     = std::ratio<1, 64>;
     using Step1_2      = std::ratio<1, 2>;
     std::size_t size_a = 4096;
     std::size_t size_b = 16'777'216;
-
     benchmark::RegisterBenchmark("Std_Serial_Prob1_64", bm_std_serial_2_stage<Prob1_64>, size_a, size_b)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
     benchmark::RegisterBenchmark("Std_Queued_Prob1_64", bm_std_queued_2_stage<Prob1_64>, size_a, size_b)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch);
-
     benchmark::RegisterBenchmark(
       "Sequential_Fanout16_Prob1_64_Step1:2", bm_sequential_amac<16>, 1.0 / 64.0, size_a, size_b
     )
@@ -607,12 +571,10 @@ void register_benchmarks() {
       ->Range(min_batch, max_batch);
   }
 
-  // Scenario 3: Varying Fanout Limits (2, 64) for the 100% Transition workload
   {
     using Prob100    = std::ratio<1, 1>;
     using Step1_1    = std::ratio<1, 1>;
     std::size_t size = 65536;
-
     benchmark::RegisterBenchmark(
       "Composite_Fanout2_Prob100_Step1:1", bm_composite_pipeline<2, Prob100, Step1_1>, size, size
     )
@@ -635,30 +597,25 @@ void register_benchmarks() {
       ->Range(min_batch, max_batch);
   }
 
-  // Scenario 4: The 3-Stage Pipelines
   {
     using Prob100    = std::ratio<1, 1>;
     using Step1_1    = std::ratio<1, 1>;
     std::size_t size = 65536;
-
     benchmark::RegisterBenchmark("Std_Serial_3Stage_Prob100", bm_std_serial_3_stage<Prob100>, size, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch / 10)
       ->Iterations(1)
       ->Unit(benchmark::kMillisecond);
-
     benchmark::RegisterBenchmark("Std_Queued_3Stage_Prob100", bm_std_queued_3_stage<Prob100>, size, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch / 10)
       ->Iterations(1)
       ->Unit(benchmark::kMillisecond);
-
     benchmark::RegisterBenchmark("Sequential_3Stage_Fanout16_Prob100", bm_sequential_3_stage<16>, 1.0, size, size, size)
       ->RangeMultiplier(10)
       ->Range(min_batch, max_batch / 10)
       ->Iterations(1)
       ->Unit(benchmark::kMillisecond);
-
     benchmark::RegisterBenchmark(
       "Chunked_3Stage_Fanout16_Prob100", bm_chunked_3_stage<16, l2_cache_target, Prob100, Step1_1>, size, size, size
     )
