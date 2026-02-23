@@ -22,17 +22,11 @@
 
 namespace vault::amac {
 
-  /**
-   * @brief Configuration bounds for an AMAC pipeline.
-   */
   struct pipeline_config {
     std::size_t window_a;
     std::size_t window_b;
   };
 
-  /**
-   * @brief Computes optimal active window sizes for a composed pipeline.
-   */
   template <
     std::size_t FanoutBudget = 16,
     typename TransitionProbability,
@@ -42,36 +36,25 @@ namespace vault::amac {
   [[nodiscard]] consteval auto make_pipeline() -> pipeline_config {
     static_assert(FanoutA > 0 && FanoutB > 0, "Fanouts must be > 0");
     static_assert(FanoutBudget >= FanoutA + FanoutB, "Budget too small for baseline");
-
     constexpr double transition_prob_val = static_cast<double>(TransitionProbability::num) / TransitionProbability::den;
     constexpr double step_ratio_val      = static_cast<double>(StepRatio::num) / StepRatio::den;
-
-    constexpr double work_a = static_cast<double>(FanoutA);
-    constexpr double work_b = static_cast<double>(FanoutB) * transition_prob_val * step_ratio_val;
-
+    constexpr double work_a              = static_cast<double>(FanoutA);
+    constexpr double work_b              = static_cast<double>(FanoutB) * transition_prob_val * step_ratio_val;
     constexpr std::size_t initial_budget_remaining = FanoutBudget - (FanoutA + FanoutB);
-
-    constexpr double budget_a = initial_budget_remaining * work_a / (work_a + work_b);
-    constexpr double budget_b = initial_budget_remaining * work_b / (work_a + work_b);
-
-    auto extra_jobs_a = static_cast<std::size_t>(budget_a / FanoutA);
-    auto extra_jobs_b = static_cast<std::size_t>(budget_b / FanoutB);
-
-    auto window_a = 1 + extra_jobs_a;
-    auto window_b = 1 + extra_jobs_b;
-
-    double rem_a = (budget_a / static_cast<double>(FanoutA)) - static_cast<double>(extra_jobs_a);
-    double rem_b = (budget_b / static_cast<double>(FanoutB)) - static_cast<double>(extra_jobs_b);
-
-    auto whole_budget_a = window_a * FanoutA;
-    auto whole_budget_b = window_b * FanoutB;
-
+    constexpr double      budget_a                 = initial_budget_remaining * work_a / (work_a + work_b);
+    constexpr double      budget_b                 = initial_budget_remaining * work_b / (work_a + work_b);
+    auto                  extra_jobs_a             = static_cast<std::size_t>(budget_a / FanoutA);
+    auto                  extra_jobs_b             = static_cast<std::size_t>(budget_b / FanoutB);
+    auto                  window_a                 = 1 + extra_jobs_a;
+    auto                  window_b                 = 1 + extra_jobs_b;
+    double                rem_a = (budget_a / static_cast<double>(FanoutA)) - static_cast<double>(extra_jobs_a);
+    double                rem_b = (budget_b / static_cast<double>(FanoutB)) - static_cast<double>(extra_jobs_b);
+    auto                  whole_budget_a = window_a * FanoutA;
+    auto                  whole_budget_b = window_b * FanoutB;
     if (whole_budget_a + whole_budget_b >= FanoutBudget) {
       return pipeline_config{window_a, window_b};
     }
-
     auto loop_budget_remaining = FanoutBudget - whole_budget_a - whole_budget_b;
-
     while (loop_budget_remaining != 0) {
       if (loop_budget_remaining < FanoutA && loop_budget_remaining < FanoutB) {
         break;
@@ -97,13 +80,9 @@ namespace vault::amac {
         }
       }
     }
-
     return pipeline_config{window_a, window_b};
   }
 
-  /**
-   * @brief A strictly stack-allocated, zero-dependency ring buffer.
-   */
   template <typename T, std::size_t Capacity>
   class static_circular_buffer {
     static_assert(Capacity > 0, "Circular buffer capacity must be non-zero.");
@@ -160,9 +139,6 @@ namespace vault::amac {
     }
   };
 
-  /**
-   * @brief Aggregate connecting two sub-executors and their transition edge.
-   */
   template <
     typename ContextA,
     typename ContextB,
@@ -172,27 +148,22 @@ namespace vault::amac {
     typename StepRatioPolicy,
     typename TransitionProbPolicy>
   struct composed_context {
-    using context_a_type         = ContextA;
-    using context_b_type         = ContextB;
-    using transition_fn_type     = TransitionFn;
-    using step_ratio             = StepRatioPolicy;
-    using transition_probability = TransitionProbPolicy;
-
+    using context_a_type                  = ContextA;
+    using context_b_type                  = ContextB;
+    using transition_fn_type              = TransitionFn;
+    using step_ratio                      = StepRatioPolicy;
+    using transition_probability          = TransitionProbPolicy;
     static constexpr std::size_t fanout_a = FanoutA;
     static constexpr std::size_t fanout_b = FanoutB;
-
-    ContextA     ctx_a;
-    ContextB     ctx_b;
-    TransitionFn transition;
+    ContextA                     ctx_a;
+    ContextB                     ctx_b;
+    TransitionFn                 transition;
 
     [[nodiscard]] static constexpr std::size_t fanout() noexcept {
       return FanoutA + FanoutB;
     }
   };
 
-  /**
-   * @brief Functional executor for managing a composed AMAC pipeline.
-   */
   template <std::size_t FanoutBudget = 16, std::size_t BufferMultiplier = 4>
   class pipeline_executor_fn {
     template <typename J>
@@ -200,9 +171,7 @@ namespace vault::amac {
       std::byte storage[sizeof(J)];
 
     public:
-      [[nodiscard]] job_slot()             = default;
-      job_slot(job_slot const&)            = delete;
-      job_slot& operator=(job_slot const&) = delete;
+      [[nodiscard]] job_slot() = default;
 
       job_slot& operator=(job_slot&& other) {
         if (this != std::addressof(other)) {
@@ -221,15 +190,11 @@ namespace vault::amac {
     static constexpr void operator()(Jobs&& ijobs, ComposedCtx&& ctx, Reporter&& reporter) {
       using pure_ctx_t = std::remove_cvref_t<ComposedCtx>;
       using job_a_t    = std::ranges::range_value_t<Jobs>;
-
-      // Resolve Payload A type via traits
-      using finalize_a_res =
-        decltype(std::declval<typename pure_ctx_t::context_a_type&>().finalize(std::declval<job_a_t&>()));
-      using payload_a_t = typename type_traits::finalize_traits<finalize_a_res>::payload_type;
-
-      // Resolve Job B type via transition result
-      using opt_b_t = std::invoke_result_t<typename pure_ctx_t::transition_fn_type&, job_a_t&, payload_a_t&>;
-      using job_b_t = typename opt_b_t::value_type;
+      using payload_a_t =
+        typename type_traits::finalize_traits<decltype(std::declval<typename pure_ctx_t::context_a_type&>()
+                                                         .finalize(std::declval<job_a_t&>()))>::payload_type;
+      using job_b_t =
+        typename std::invoke_result_t<typename pure_ctx_t::transition_fn_type&, job_a_t&, payload_a_t&>::value_type;
 
       constexpr auto config = make_pipeline<
         FanoutBudget,
@@ -237,167 +202,174 @@ namespace vault::amac {
         typename pure_ctx_t::step_ratio,
         pure_ctx_t::fanout_a,
         pure_ctx_t::fanout_b>();
-
-      constexpr std::size_t n_a   = config.window_a;
-      constexpr std::size_t n_b   = config.window_b;
-      constexpr std::size_t n_buf = std::max<std::size_t>(n_a, n_b * BufferMultiplier);
-
-      auto window_a = std::array<job_slot<job_a_t>, n_a>{};
-      auto window_b = std::array<job_slot<job_b_t>, n_b>{};
-      auto buffer   = static_circular_buffer<job_b_t, n_buf>{};
-
-      auto cur_a = window_a.begin();
-      auto cur_b = window_b.begin();
-      auto end_a = window_a.end();
-      auto end_b = window_b.end();
-
-      auto in_cur = std::ranges::begin(ijobs);
-      auto in_end = std::ranges::end(ijobs);
-
-      auto prefetch = []<typename JResult>(JResult const& res) {
+      auto window_a = std::array<job_slot<job_a_t>, config.window_a>{};
+      auto window_b = std::array<job_slot<job_b_t>, config.window_b>{};
+      auto buffer =
+        static_circular_buffer<job_b_t, std::max<std::size_t>(config.window_a, config.window_b * BufferMultiplier)>{};
+      auto in_cur   = std::ranges::begin(ijobs);
+      auto in_end   = std::ranges::end(ijobs);
+      auto prefetch = []<typename JR>(JR const& res) {
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
           (__builtin_prefetch(std::get<Is>(res), 0, 3), ...);
-        }(std::make_index_sequence<std::tuple_size_v<JResult>>{});
+        }(std::make_index_sequence<std::tuple_size_v<JR>>{});
       };
 
-      // Internal routing helper for Stage B completion
-      auto finalize_b = [&](auto&& job_b) {
-        auto outcome = ctx.ctx_b.finalize(job_b);
-        if (outcome.has_value()) {
-          if (auto& opt_p = outcome.value(); opt_p.has_value()) {
-            std::invoke(reporter, completed, std::forward<decltype(job_b)>(job_b), std::move(*opt_p));
+      auto finalize_b = [&](auto&& jb) {
+        auto out = ctx.ctx_b.finalize(jb);
+        if (out.has_value()) {
+          if (auto& opt = out.value(); opt.has_value()) {
+            std::invoke(reporter, completed, std::forward<decltype(jb)>(jb), std::move(*opt));
           } else {
-            std::invoke(reporter, terminated, std::forward<decltype(job_b)>(job_b));
+            std::invoke(reporter, terminated, std::forward<decltype(jb)>(jb));
           }
         } else {
-          std::invoke(reporter, failed, std::forward<decltype(job_b)>(job_b), std::move(outcome.error()));
+          std::invoke(reporter, failed, std::forward<decltype(jb)>(jb), std::move(out.error()));
         }
       };
 
-      // Internal routing helper for Stage A completion -> Transition -> Buffer
-      auto finalize_a_to_b = [&](auto&& job_a) -> bool {
+      auto finalize_a_to_b = [&](auto&& ja) -> bool {
         if (buffer.full()) {
           return false;
         }
-
-        auto outcome = ctx.ctx_a.finalize(job_a);
-        if (outcome.has_value()) {
-          if (auto& opt_p = outcome.value(); opt_p.has_value()) {
-            auto opt_b = std::invoke(ctx.transition, job_a, *opt_p);
-            if (opt_b) {
-              buffer.push_back(std::move(*opt_b));
+        auto out = ctx.ctx_a.finalize(ja);
+        if (out.has_value()) {
+          if (auto& opt = out.value(); opt.has_value()) {
+            if (auto ob = std::invoke(ctx.transition, ja, *opt)) {
+              buffer.push_back(std::move(*ob));
             } else {
-              std::invoke(reporter, terminated, std::forward<decltype(job_a)>(job_a));
+              std::invoke(reporter, terminated, std::forward<decltype(ja)>(ja));
             }
           } else {
-            std::invoke(reporter, terminated, std::forward<decltype(job_a)>(job_a));
+            std::invoke(reporter, terminated, std::forward<decltype(ja)>(ja));
           }
         } else {
-          std::invoke(reporter, failed, std::forward<decltype(job_a)>(job_a), std::move(outcome.error()));
+          std::invoke(reporter, failed, std::forward<decltype(ja)>(ja), std::move(out.error()));
         }
         return true;
       };
 
-      auto step_b_pred = [&](auto& slot) {
-        auto outcome = ctx.ctx_b.step(*slot.get());
-        if (outcome.has_value()) {
-          if (auto addr = outcome.value()) {
-            return prefetch(addr), false;
+      auto refill_a = [&](this auto& self, auto& slot) -> bool {
+        if (in_cur == in_end || buffer.full()) {
+          return false;
+        }
+        auto&& j   = *in_cur++;
+        auto   out = ctx.ctx_a.init(j);
+        if (out.has_value()) {
+          if (auto ad = out.value()) {
+            prefetch(ad);
+            std::construct_at(slot.get(), std::forward<decltype(j)>(j));
+            return true;
           }
-          finalize_b(std::move(*slot.get()));
-          return true;
-        }
-        std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
-        return true;
-      };
-
-      auto step_a_pred = [&](auto& slot) {
-        auto outcome = ctx.ctx_a.step(*slot.get());
-        if (outcome.has_value()) {
-          if (auto addr = outcome.value()) {
-            return prefetch(addr), false;
+          if (finalize_a_to_b(std::forward<decltype(j)>(j))) {
+            return self(slot);
           }
-          return finalize_a_to_b(std::move(*slot.get()));
+          return false;
         }
-        std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
-        return true;
+        std::invoke(reporter, failed, std::forward<decltype(j)>(j), std::move(out.error()));
+        return self(slot);
       };
 
-      // Phase 1: Setup
-      while (cur_a != end_a && in_cur != in_end) {
-        if (buffer.full()) {
+      auto refill_b = [&](this auto& self, auto& slot) -> bool {
+        if (buffer.empty()) {
+          return false;
+        }
+        auto jb  = buffer.pop_front();
+        auto out = ctx.ctx_b.init(jb);
+        if (out.has_value()) {
+          if (auto ad = out.value()) {
+            prefetch(ad);
+            std::construct_at(slot.get(), std::move(jb));
+            return true;
+          }
+          finalize_b(std::move(jb));
+          return self(slot);
+        }
+        std::invoke(reporter, failed, std::move(jb), std::move(out.error()));
+        return self(slot);
+      };
+
+      auto act_a_end = window_a.begin();
+      auto act_b_end = window_b.begin();
+      for (auto& s : window_a) {
+        if (refill_a(s)) {
+          ++act_a_end;
+        } else {
           break;
         }
-        auto&& job     = *in_cur++;
-        auto   outcome = ctx.ctx_a.init(job);
-
-        if (outcome.has_value()) {
-          if (auto addr = outcome.value()) {
-            prefetch(addr);
-            std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
-            ++cur_a;
-          } else {
-            finalize_a_to_b(std::forward<decltype(job)>(job));
-          }
-        } else {
-          std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
-        }
       }
 
-      // Phase 2: Steady State & Wave Drain
-      while (cur_a != window_a.begin() || cur_b != window_b.begin() || !buffer.empty() || in_cur != in_end) {
-
-        // Reverse Step 1: Drain Buffer -> B
-        while (cur_b != end_b && !buffer.empty()) {
-          auto job_b   = buffer.pop_front();
-          auto outcome = ctx.ctx_b.init(job_b);
-
-          if (outcome.has_value()) {
-            if (auto addr = outcome.value()) {
-              prefetch(addr);
-              std::construct_at(cur_b->get(), std::move(job_b));
-              ++cur_b;
+      while (act_a_end != window_a.begin() || act_b_end != window_b.begin() || !buffer.empty() || in_cur != in_end) {
+        while (act_b_end != window_b.end() && !buffer.empty()) {
+          if (refill_b(*act_b_end)) {
+            ++act_b_end;
+          }
+        }
+        auto it_b = window_b.begin();
+        while (it_b != act_b_end) {
+          auto out = ctx.ctx_b.step(*it_b->get());
+          if (out.has_value()) {
+            if (auto ad = out.value()) {
+              prefetch(ad);
+              ++it_b;
             } else {
-              finalize_b(std::move(job_b));
+              finalize_b(std::move(*it_b->get()));
+              if (refill_b(*it_b)) {
+                ++it_b;
+              } else {
+                *it_b = std::move(*std::prev(act_b_end));
+                --act_b_end;
+              }
             }
           } else {
-            std::invoke(reporter, failed, std::move(job_b), std::move(outcome.error()));
+            std::invoke(reporter, failed, std::move(*it_b->get()), std::move(out.error()));
+            if (refill_b(*it_b)) {
+              ++it_b;
+            } else {
+              *it_b = std::move(*std::prev(act_b_end));
+              --act_b_end;
+            }
           }
         }
-
-        // Reverse Step 2: Step B
-        cur_b = std::remove_if(window_b.begin(), cur_b, step_b_pred);
-
-        // Reverse Step 3: Step A (respecting backpressure)
-        cur_a = std::remove_if(window_a.begin(), cur_a, step_a_pred);
-
-        // Reverse Step 4: Refill A
-        while (cur_a != end_a && in_cur != in_end) {
-          if (buffer.full()) {
-            break;
-          }
-          auto&& job     = *in_cur++;
-          auto   outcome = ctx.ctx_a.init(job);
-
-          if (outcome.has_value()) {
-            if (auto addr = outcome.value()) {
-              prefetch(addr);
-              std::construct_at(cur_a->get(), std::forward<decltype(job)>(job));
-              ++cur_a;
+        auto it_a = window_a.begin();
+        while (it_a != act_a_end) {
+          auto out = ctx.ctx_a.step(*it_a->get());
+          if (out.has_value()) {
+            if (auto ad = out.value()) {
+              prefetch(ad);
+              ++it_a;
             } else {
-              finalize_a_to_b(std::forward<decltype(job)>(job));
+              if (finalize_a_to_b(std::move(*it_a->get()))) {
+                if (refill_a(*it_a)) {
+                  ++it_a;
+                } else {
+                  *it_a = std::move(*std::prev(act_a_end));
+                  --act_a_end;
+                }
+              } else {
+                ++it_a;
+              }
             }
           } else {
-            std::invoke(reporter, failed, std::forward<decltype(job)>(job), std::move(outcome.error()));
+            std::invoke(reporter, failed, std::move(*it_a->get()), std::move(out.error()));
+            if (refill_a(*it_a)) {
+              ++it_a;
+            } else {
+              *it_a = std::move(*std::prev(act_a_end));
+              --act_a_end;
+            }
+          }
+        }
+        while (act_a_end != window_a.end() && !buffer.full() && in_cur != in_end) {
+          if (refill_a(*act_a_end)) {
+            ++act_a_end;
           }
         }
       }
-
-      for (; cur_a != window_a.begin(); --cur_a) {
-        std::destroy_at(std::prev(cur_a)->get());
+      for (auto it = window_a.begin(); it != act_a_end; ++it) {
+        std::destroy_at(it->get());
       }
-      for (; cur_b != window_b.begin(); --cur_b) {
-        std::destroy_at(std::prev(cur_b)->get());
+      for (auto it = window_b.begin(); it != act_b_end; ++it) {
+        std::destroy_at(it->get());
       }
     }
   };
@@ -407,4 +379,4 @@ namespace vault::amac {
 
 } // namespace vault::amac
 
-#endif // VAULT_AMAC_PIPELINE_HPP
+#endif
