@@ -154,7 +154,7 @@ namespace vault::amac {
 
       // The intermediate reporter bridging Stage A and Stage B
       auto reporter_a = [&]<typename Tag, typename J, typename... Args>(Tag tag, J&& job, Args&&... args) {
-        if constexpr (std::is_same_v<Tag, vault::amac::completed_tag>) {
+        if constexpr (std::is_same_v<std::remove_cvref_t<Tag>, vault::amac::completed_tag>) {
           // Unpack payload from variadic args (guaranteed by concepts)
           auto&& payload = std::get<0>(std::forward_as_tuple(std::forward<Args>(args)...));
           if (auto opt_b = std::invoke(ctx.transition, std::forward<J>(job), std::move(payload))) {
@@ -175,12 +175,13 @@ namespace vault::amac {
         vault::amac::executor<fanoutBudget>(chunk, ctx.ctx_a, reporter_a);
 
         // Recursively evaluate Stage B if it's a nested pipeline, otherwise run it natively.
+        // C++23 views::as_rvalue ensures elements are moved out of the vector, preventing copy-constructor failures.
         if constexpr (concepts::composed_pipeline<typename pure_ctx_t::context_b_type>) {
           vault::amac::chunked_pipeline_executor_fn<fanoutBudget, maxIntermediateBytes>{}(
-            intermediate_buffer, ctx.ctx_b, reporter
+            intermediate_buffer | std::views::as_rvalue, ctx.ctx_b, reporter
           );
         } else {
-          vault::amac::executor<fanoutBudget>(intermediate_buffer, ctx.ctx_b, reporter);
+          vault::amac::executor<fanoutBudget>(intermediate_buffer | std::views::as_rvalue, ctx.ctx_b, reporter);
         }
       }
     }

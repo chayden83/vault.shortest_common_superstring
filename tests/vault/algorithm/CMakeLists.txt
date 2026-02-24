@@ -64,6 +64,20 @@ target_link_libraries(vault.amac_chunked.tests PRIVATE
 
 add_test(vault.amac_chunked.tests vault.amac_chunked.tests)
 
+add_executable(vault.amac_dynamic.tests)
+
+target_sources(vault.amac_dynamic.tests PRIVATE
+  amac_dynamic.test.cpp
+)
+
+target_link_libraries(vault.amac_dynamic.tests PRIVATE
+  Catch2::Catch2WithMain
+  vault::shortest_common_superstring
+  vault::shortest_common_superstring.internal
+)
+
+add_test(vault.amac_dynamic.tests vault.amac_dynamic.tests)
+
 add_executable(vault.fsst_dictionary.tests)
 
 target_sources(vault.fsst_dictionary.tests PRIVATE

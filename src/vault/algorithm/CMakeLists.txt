@@ -43,6 +43,7 @@ target_sources(
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/knuth_morris_pratt_failure_function.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/shortest_common_superstring.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/amac.hpp
+        ${PROJECT_SOURCE_DIR}/include/vault/algorithm/amac_dynamic.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/amac_chunked.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/amac_pipeline.hpp
         ${PROJECT_SOURCE_DIR}/include/vault/algorithm/fsst_dictionary.hpp
