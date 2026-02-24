@@ -15,6 +15,7 @@ set(ALL_BENCHMARKS
   map_view
 #  flat_map
 #  static_index
+  amac_dynamic
   amac_pipeline
   frozen_vector
   fsst_dictionary
