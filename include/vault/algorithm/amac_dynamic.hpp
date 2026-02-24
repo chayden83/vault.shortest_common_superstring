@@ -4,9 +4,13 @@
 #define VAULT_AMAC_DYNAMIC_HPP
 
 #include <algorithm>
+#include <bit>
 #include <concepts>
+#include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -14,12 +18,6 @@
 #include <vault/algorithm/amac.hpp>
 
 namespace vault::amac::concepts {
-
-  /// @brief Defines a context capable of dynamic job generation.
-  ///
-  /// The dynamic context requires that `init`, `step`, and `finalize` accept an opaque `Sink`
-  /// callable. This allows the state machine to emit new jobs (e.g., discovered child pointers
-  /// in a DAG) without the executor needing to know the underlying storage mechanism.
   template <typename C, typename J, typename S>
   concept dynamic_job_context =
     std::move_constructible<J> && C::fanout() > 0uz && requires(C& context, J& job, S& sink) {
@@ -27,27 +25,12 @@ namespace vault::amac::concepts {
       { context.step(job, sink) } noexcept -> step_outcome;
       { context.finalize(job, sink) } noexcept -> finalize_outcome;
     };
-
 } // namespace vault::amac::concepts
 
 namespace vault::amac {
 
-  /**
-   * @brief Single-Stage AMAC Executor with Dynamic Job Queuing.
-   * @ingroup vault_amac
-   * * Orchestrates the execution of asynchronous state machines that can dynamically spawn
-   * new jobs during their execution (e.g., pointer chasing through a Directed Acyclic Graph).
-   * * **Architecture:**
-   * This executor is decoupled from the job storage. It relies on an opaque `Source` (to pull
-   * jobs) and an opaque `Sink` (to push jobs). For optimal performance and to strictly bound
-   * memory consumption during DAG traversals, the caller should back the Source and Sink
-   * with a LIFO container (like `std::vector` or `std::deque`), which organically enforces a
-   * cache-friendly Depth-First Search (DFS).
-   * * @tparam TotalFanout The total number of parallel hardware prefetch slots.
-   */
   template <uint8_t TotalFanout = 16>
   class dynamic_executor_fn {
-
     template <concepts::step_result J>
     static constexpr void prefetch(J const& step_result) {
       [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -55,29 +38,12 @@ namespace vault::amac {
       }(std::make_index_sequence<std::tuple_size_v<J>>{});
     }
 
-    /// Storage slot for in-flight jobs, using explicit lifecycles to protect the CFG.
+    // Barebones storage: no compaction logic, no moves.
     template <typename J>
     class alignas(J) job_slot {
       std::byte storage[sizeof(J)];
 
     public:
-      [[nodiscard]] job_slot() = default;
-
-      job_slot& operator=(job_slot&& other) {
-        if (this != std::addressof(other)) {
-          *this->get() = std::move(*other.get());
-        }
-        return *this;
-      }
-
-      /// Encapsulated compaction to maintain straight-line loops for the optimizer.
-      constexpr void compact_from(job_slot& other) {
-        if (this != std::addressof(other)) {
-          std::construct_at(this->get(), std::move(*other.get()));
-          std::destroy_at(other.get());
-        }
-      }
-
       [[nodiscard]] J* get() noexcept {
         return reinterpret_cast<J*>(&storage[0]);
       }
@@ -86,77 +52,90 @@ namespace vault::amac {
   public:
     template <typename Context, typename Reporter, typename Source, typename Sink>
     static constexpr void operator()(Context&& ctx, Reporter&& reporter, Source&& source, Sink&& sink) {
-
-      // Deduce the job type dynamically from the Source's return signature.
-      using opt_job_t = std::remove_cvref_t<std::invoke_result_t<Source&>>;
-      using job_t     = typename opt_job_t::value_type;
+      using pure_ctx_t = std::remove_cvref_t<Context>;
+      using opt_job_t  = std::remove_cvref_t<std::invoke_result_t<Source&>>;
+      using job_t      = typename opt_job_t::value_type;
 
       static_assert(
-        concepts::dynamic_job_context<std::remove_cvref_t<Context>, job_t, std::remove_cvref_t<Sink>>,
-        "Context must satisfy dynamic_job_context (accepting the Sink in init/step/finalize)."
+        concepts::dynamic_job_context<pure_ctx_t, job_t, std::remove_cvref_t<Sink>>,
+        "Context must satisfy dynamic_job_context."
       );
 
-      static constexpr auto const JOB_COUNT = (TotalFanout + ctx.fanout() - 1) / ctx.fanout();
-      auto                        jobs      = std::array<job_slot<job_t>, JOB_COUNT>{};
+      static constexpr auto const JOB_COUNT = (TotalFanout + pure_ctx_t::fanout() - 1) / pure_ctx_t::fanout();
+      static_assert(JOB_COUNT <= 64, "Dynamic executor bitmask currently limits JOB_COUNT to 64.");
 
-      /// **Refill Helper**
-      /// Pulls from the opaque `source`. Passes the `sink` to the context so it can emit children.
-      auto refill_one = [&](this auto& self, auto& slot) -> bool {
-        auto opt_job = std::invoke(source);
-        if (!opt_job.has_value()) {
-          return false;
-        }
+      // Calculate the fully saturated bitmask (e.g., 0xFFFF for JOB_COUNT = 16)
+      static constexpr uint64_t FULL_MASK = (JOB_COUNT == 64) ? ~0ULL : (1ULL << JOB_COUNT) - 1;
 
-        auto&& job     = std::move(*opt_job);
-        auto   outcome = ctx.init(job, sink);
+      auto     jobs        = std::array<job_slot<job_t>, JOB_COUNT>{};
+      uint64_t active_mask = 0;
 
-        if (outcome.has_value()) {
-          if (auto addresses = outcome.value()) {
-            prefetch(addresses);
-            std::construct_at(slot.get(), std::move(job));
-            return true;
+      // **Optimized Refill logic**
+      // Flattened into a while(true) loop to eliminate recursive stack frames.
+      auto refill = [&](std::size_t idx) -> bool {
+        while (true) {
+          auto opt_job = std::invoke(source);
+          if (!opt_job.has_value()) {
+            return false;
           }
-          auto fin = ctx.finalize(job, sink);
-          if (fin.has_value()) {
-            if (auto& opt = fin.value(); opt.has_value()) {
-              std::invoke(reporter, completed, std::move(job), std::move(*opt));
-            } else {
-              std::invoke(reporter, terminated, std::move(job));
+
+          std::construct_at(jobs[idx].get(), std::move(*opt_job));
+          auto outcome = ctx.init(*jobs[idx].get(), sink);
+
+          if (outcome.has_value()) {
+            if (auto addresses = outcome.value()) {
+              prefetch(addresses);
+              active_mask |= (1ULL << idx);
+              return true;
             }
-          } else {
-            std::invoke(reporter, failed, std::move(job), std::move(fin.error()));
+            // Synchronous completion (bypasses step)
+            auto fin = ctx.finalize(*jobs[idx].get(), sink);
+            if (fin.has_value()) {
+              if (auto& opt = fin.value(); opt.has_value()) {
+                std::invoke(reporter, completed, std::move(*jobs[idx].get()), std::move(*opt));
+              } else {
+                std::invoke(reporter, terminated, std::move(*jobs[idx].get()));
+              }
+            } else {
+              std::invoke(reporter, failed, std::move(*jobs[idx].get()), std::move(fin.error()));
+            }
+            std::destroy_at(jobs[idx].get());
+            continue; // Loop around and attempt to fill this same slot again
           }
-          return self(slot); // Recurse if job completed synchronously
+
+          // Init Failed
+          std::invoke(reporter, failed, std::move(*jobs[idx].get()), std::move(outcome.error()));
+          std::destroy_at(jobs[idx].get());
+          continue;
         }
-        std::invoke(reporter, failed, std::move(job), std::move(outcome.error()));
-        return self(slot);
       };
 
       // **Phase 1: Bootstrap**
-      auto jobs_active_end = std::ranges::begin(jobs);
-      for (auto& slot : jobs) {
-        if (refill_one(slot)) {
-          ++jobs_active_end;
-        } else {
+      for (std::size_t i = 0; i < JOB_COUNT; ++i) {
+        if (!refill(i)) {
           break;
         }
       }
 
       // **Phase 2: Hot Loop Coordination**
-      // Executes as long as there is at least one active job being processed.
-      while (jobs_active_end != std::ranges::begin(jobs)) {
-        auto it = std::ranges::begin(jobs);
+      while (active_mask != 0) {
 
-        // Step all active jobs currently resident in the AMAC slots
-        while (it != jobs_active_end) {
-          auto& slot    = *it;
+        // 2a. Step all active jobs using bit-clearing iteration
+        uint64_t current_mask = active_mask;
+        while (current_mask != 0) {
+          // Hardware-accelerated trailing zero count finds the next job instantly
+          std::size_t idx = std::countr_zero(current_mask);
+          // Hardware bit-reset clears the bit we just processed
+          current_mask &= current_mask - 1;
+
+          auto& slot    = jobs[idx];
           auto  outcome = ctx.step(*slot.get(), sink);
 
           if (outcome.has_value()) {
             if (auto addresses = outcome.value()) {
               prefetch(addresses);
-              ++it;
             } else {
+              // Job finished
               auto fin = ctx.finalize(*slot.get(), sink);
               if (fin.has_value()) {
                 if (auto& opt = fin.value(); opt.has_value()) {
@@ -169,42 +148,28 @@ namespace vault::amac {
               }
 
               std::destroy_at(slot.get());
-
-              if (refill_one(slot)) {
-                ++it;
-              } else {
-                it->compact_from(*std::prev(jobs_active_end));
-                --jobs_active_end;
-              }
+              active_mask &= ~(1ULL << idx); // Mark slot as dead
+              refill(idx);                   // Attempt immediate replacement
             }
           } else {
+            // Job failed
             std::invoke(reporter, failed, std::move(*slot.get()), std::move(outcome.error()));
             std::destroy_at(slot.get());
-
-            if (refill_one(slot)) {
-              ++it;
-            } else {
-              it->compact_from(*std::prev(jobs_active_end));
-              --jobs_active_end;
-            }
+            active_mask &= ~(1ULL << idx);
+            refill(idx);
           }
         }
 
-        // **Phase 2b: Top-up**
-        // If a finishing job generated multiple children into the Sink, the active window
-        // might be < JOB_COUNT. Pull those newly generated children immediately into the pipeline.
-        while (jobs_active_end != std::ranges::end(jobs)) {
-          if (refill_one(*jobs_active_end)) {
-            ++jobs_active_end;
-          } else {
-            break;
+        // 2b. Top-up sweep for any slots that couldn't be filled during the step phase
+        // (e.g., if a job spawned multiple children, the sink now has items we can pull)
+        uint64_t empty_mask = ~active_mask & FULL_MASK;
+        while (empty_mask != 0) {
+          std::size_t idx = std::countr_zero(empty_mask);
+          if (!refill(idx)) {
+            break; // Source is entirely empty, stop checking
           }
+          empty_mask &= empty_mask - 1;
         }
-      }
-
-      // **Phase 3: Cleanup** (Safety backstop, though technically empty here)
-      for (auto it = std::ranges::begin(jobs); it != jobs_active_end; ++it) {
-        std::destroy_at(it->get());
       }
     }
   };
@@ -214,4 +179,4 @@ namespace vault::amac {
 
 } // namespace vault::amac
 
-#endif
+#endif // VAULT_AMAC_DYNAMIC_HPP
