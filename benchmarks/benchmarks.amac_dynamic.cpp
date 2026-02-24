@@ -421,8 +421,134 @@ namespace vault::amac::benchmarks {
     BM_LeveledDag_Amac<64>(state);
   }
 
-  
-  
+  // --------------------------------------------------------------------------
+  // Simulated Work Benchmarks: Mapping the Memory/Compute Crossover
+  // --------------------------------------------------------------------------
+
+  // A pure ALU work simulator. The dependent chain defeats ILP and vectorization.
+  inline void simulate_alu_work(uint64_t& payload, uint32_t cycles) noexcept {
+    uint64_t hash = payload;
+    for (uint32_t i = 0; i < cycles; ++i) {
+      hash ^= (hash >> 12);
+      hash *= 0x2545F4914F6CDD1DULL;
+    }
+    benchmark::DoNotOptimize(hash);
+  }
+
+  template <uint32_t WorkCycles>
+  struct raw_ptr_work_context {
+    [[nodiscard]] static constexpr std::size_t fanout() noexcept {
+      return 1;
+    }
+
+    template <typename Sink>
+    auto init(LeveledDagFixture::DagNode* job, Sink&) noexcept -> std::expected<vault::amac::step_result<1>, int> {
+      return vault::amac::step_result<1>{job};
+    }
+
+    template <typename Sink>
+    auto step(LeveledDagFixture::DagNode*, Sink&) noexcept -> std::expected<vault::amac::step_result<1>, int> {
+      return vault::amac::step_result<1>{nullptr};
+    }
+
+    template <typename Sink>
+    auto finalize(LeveledDagFixture::DagNode* job, Sink& sink) noexcept -> std::expected<std::optional<int>, int> {
+      benchmark::DoNotOptimize(job->payload);
+
+      if constexpr (WorkCycles > 0) {
+        simulate_alu_work(job->payload, WorkCycles);
+      }
+
+      for (auto const& child : job->children) {
+        sink(child.get());
+      }
+      return 1;
+    }
+  };
+
+  template <uint32_t B, uint32_t WorkCycles>
+  void BM_LeveledDag_Amac_Work(benchmark::State& state) {
+    raw_ptr_work_context<WorkCycles> ctx{};
+    dummy_reporter                   reporter{};
+
+    for (auto _ : state) {
+      std::vector<LeveledDagFixture::DagNode*> queue;
+      queue.reserve(500'000);
+
+      for (auto* root : LeveledDagFixture::initial_roots) {
+        queue.push_back(root);
+      }
+
+      auto source = [&]() -> std::optional<LeveledDagFixture::DagNode*> {
+        if (queue.empty()) {
+          return std::nullopt;
+        }
+        auto* j = queue.back();
+        queue.pop_back();
+        return j;
+      };
+
+      auto sink = [&](LeveledDagFixture::DagNode* j) { queue.push_back(j); };
+
+      vault::amac::dynamic_executor<B>(ctx, reporter, source, sink);
+    }
+    state.SetItemsProcessed(state.iterations() * LeveledDagFixture::total_traversal_nodes);
+  }
+
+  template <uint32_t WorkCycles>
+  void BM_LeveledDag_Serial_Work(benchmark::State& state) {
+    for (auto _ : state) {
+      std::vector<LeveledDagFixture::DagNode*> queue;
+      queue.reserve(500'000);
+
+      for (auto* root : LeveledDagFixture::initial_roots) {
+        queue.push_back(root);
+      }
+
+      while (!queue.empty()) {
+        auto* job = queue.back();
+        queue.pop_back();
+
+        benchmark::DoNotOptimize(job->payload);
+
+        if constexpr (WorkCycles > 0) {
+          simulate_alu_work(job->payload, WorkCycles);
+        }
+
+        for (auto const& child : job->children) {
+          queue.push_back(child.get());
+        }
+      }
+    }
+    state.SetItemsProcessed(state.iterations() * LeveledDagFixture::total_traversal_nodes);
+  }
+
+  // Baseline: 20 Cycles of Work (Should still be heavily memory bound)
+  BENCHMARK_F(LeveledDagFixture, Serial_Work20)(benchmark::State& state) {
+    BM_LeveledDag_Serial_Work<20>(state);
+  }
+
+  BENCHMARK_F(LeveledDagFixture, Amac_B32_Work20)(benchmark::State& state) {
+    BM_LeveledDag_Amac_Work<32, 20>(state);
+  }
+
+  // Midpoint: 100 Cycles of Work (Approaching the compute/memory latency crossover)
+  BENCHMARK_F(LeveledDagFixture, Serial_Work100)(benchmark::State& state) {
+    BM_LeveledDag_Serial_Work<100>(state);
+  }
+
+  BENCHMARK_F(LeveledDagFixture, Amac_B32_Work100)(benchmark::State& state) {
+    BM_LeveledDag_Amac_Work<32, 100>(state);
+  }
+
+  // Extreme: 500 Cycles of Work (Should be entirely compute bound)
+  BENCHMARK_F(LeveledDagFixture, Serial_Work500)(benchmark::State& state) {
+    BM_LeveledDag_Serial_Work<500>(state);
+  }
+
+  BENCHMARK_F(LeveledDagFixture, Amac_B32_Work500)(benchmark::State& state) {
+    BM_LeveledDag_Amac_Work<32, 500>(state);
+  }
 } // namespace vault::amac::benchmarks
 
 #endif // VAULT_AMAC_DYNAMIC_BENCHMARKS_CPP
