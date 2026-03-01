@@ -1,6 +1,5 @@
 #include <cassert>
 #include <string>
-
 #include <clang/AST/ASTContext.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 
@@ -24,8 +23,6 @@ namespace custom_tidy_checks {
 
     using namespace clang::ast_matchers;
 
-    // We use 'references' to match both lvalue and rvalue references to non-const types.
-    // We will strictly filter for lvalue references inside the check() callback.
     auto const mutating_param_matcher =
       parmVarDecl(hasType(references(qualType(unless(isConstQualified()))))).bind("mutating_param");
 
@@ -38,11 +35,11 @@ namespace custom_tidy_checks {
 
     auto const* param =
       static_cast<clang::ParmVarDecl const*>(result.Nodes.getNodeAs<clang::ParmVarDecl>("mutating_param"));
+
     if (param == nullptr) {
       return;
     }
 
-    // 1. Strictly verify it is an lvalue reference (T&) and not an rvalue reference (T&&)
     if (!param->getType()->isLValueReferenceType()) {
       return;
     }
@@ -52,7 +49,6 @@ namespace custom_tidy_checks {
       return;
     }
 
-    // 2. Evaluate the parent function context to ignore standard language boilerplate
     auto const* func = llvm::dyn_cast_or_null<clang::FunctionDecl>(param->getDeclContext());
     if (func != nullptr) {
       if (func->isImplicit() || func->isOverloadedOperator() || func->isMain()) {
@@ -72,7 +68,6 @@ namespace custom_tidy_checks {
       }
     }
 
-    // 3. Ignore standard stream objects which conventionally use non-const references
     auto const  pointee_type = clang::QualType{param->getType().getNonReferenceType()};
     auto const* record_decl  = static_cast<clang::CXXRecordDecl const*>(pointee_type->getAsCXXRecordDecl());
 
@@ -83,12 +78,40 @@ namespace custom_tidy_checks {
       }
     }
 
-    // 4. Retrieve the type exactly as written in the source code to verify decorators
-    auto const original_type_str =
-      std::string{param->getOriginalType().getAsString(result.Context->getPrintingPolicy())};
+    // --- ROBUST TYPE INSPECTION ---
+    // Functionally peel away type sugar layers to evaluate the semantic,
+    // fully-qualified name known to the compiler.
+    auto has_decorator = bool{false};
+    auto current_type  = clang::QualType{param->getType()};
 
-    if (original_type_str.find("vault::out") != std::string::npos ||
-        original_type_str.find("vault::inout") != std::string::npos) {
+    while (!current_type.isNull()) {
+      if (auto const* typedef_type = current_type->getAs<clang::TypedefType>()) {
+        auto const name = std::string{typedef_type->getDecl()->getQualifiedNameAsString()};
+        if (name == "vault::out" || name == "vault::inout" || name == "abyss::out" || name == "abyss::inout") {
+          has_decorator = true;
+          break;
+        }
+      } else if (auto const* tst = current_type->getAs<clang::TemplateSpecializationType>()) {
+        if (tst->isTypeAlias()) {
+          auto const* template_decl = tst->getTemplateName().getAsTemplateDecl();
+          if (template_decl != nullptr) {
+            auto const name = std::string{template_decl->getQualifiedNameAsString()};
+            if (name == "vault::out" || name == "vault::inout" || name == "abyss::out" || name == "abyss::inout") {
+              has_decorator = true;
+              break;
+            }
+          }
+        }
+      }
+
+      auto const desugared_type = clang::QualType{current_type.getSingleStepDesugaredType(*result.Context)};
+      if (desugared_type == current_type) {
+        break; // No more sugar to peel
+      }
+      current_type = desugared_type;
+    }
+
+    if (has_decorator) {
       return;
     }
 

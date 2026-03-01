@@ -32,6 +32,30 @@ set(require-in-out-decorators-test-template [=[
 void fn(std::string &out);
 ]=])
 
+set(require-mut-tag-pass-regex ".*bound to a mutating parameter.*")
+
+set(require-mut-tag-test-template [=[
+#include <string>
+
+namespace vault {
+  template<typename T>
+  using inout = T&;
+
+  template<typename T>
+  [[nodiscard]] constexpr T &mut(inout<T> arg) noexcept {
+    return arg;
+  }
+}
+
+void fn(vault::inout<std::string> io);
+
+int main() {
+  using vault::mut;
+  auto s = std::string { };
+  fn(s);
+}
+]=])
+
 set(require-borrowed-ptr-decorator-pass-regex ".*explicitly decorated.*")
 
 set(require-borrowed-ptr-decorator-test-template [=[
@@ -54,6 +78,7 @@ set(clang-tidy-test-cases
   "multiple-boolean-parameters" "bools" "" ""
 
   "require-in-out-decorators"      "string" "" ""
+  "require-mut-tag"                "string" "" ""
   "require-borrowed-ptr-decorator" "string" "" ""
 )
 

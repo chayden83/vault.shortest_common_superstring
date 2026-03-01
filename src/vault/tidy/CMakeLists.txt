@@ -11,6 +11,7 @@ add_library(vault-tidy-plugin SHARED
   multiple-bool-parameters-check.cpp
   require-in-out-decorators-check.cpp
   require-borrowed-ptr-decorator-check.cpp
+  require-mut-tag-check.cpp
   vault-tidy-module.cpp
 )
 
