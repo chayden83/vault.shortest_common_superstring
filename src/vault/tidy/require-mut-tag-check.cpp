@@ -91,7 +91,7 @@ namespace custom_tidy_checks {
       if (auto const* arg_call = llvm::dyn_cast<clang::CallExpr>(arg)) {
         if (auto const* arg_callee = arg_call->getDirectCallee()) {
           auto const callee_name = arg_callee->getQualifiedNameAsString();
-          if (callee_name == "vault::mut" || callee_name == "abyss::mut") {
+          if (callee_name == "vault::mut") {
             has_mut_tag = true;
           }
         }
