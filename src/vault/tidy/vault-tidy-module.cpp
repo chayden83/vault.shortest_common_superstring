@@ -9,6 +9,7 @@
 #include "require-in-out-decorators-check.hpp"
 #include "smart-ptr-observation-check.hpp"
 #include "use-view-types-check.hpp"
+#include "require-borrowed-ptr-decorator-check.hpp"
 
 namespace custom_tidy_checks {
 
@@ -33,6 +34,7 @@ namespace custom_tidy_checks {
       check_factories.registerCheck<multiple_bool_parameters_check>("vault-multiple-bool-parameters");
       check_factories.registerCheck<smart_ptr_observation_check>("vault-smart-pointer-observation");
       check_factories.registerCheck<require_out_inout_decorators_check>("vault-require-in-out-decorators");
+      check_factories.registerCheck<require_borrowed_ptr_decorator_check>("vault-require-borrowed-ptr-decorator-check");
     }
   };
 } // namespace custom_tidy_checks

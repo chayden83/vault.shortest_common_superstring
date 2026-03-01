@@ -27,9 +27,17 @@ void fn(bool foo, bool bar);
 set(require-in-out-decorators-pass-regex ".*explicitly decorated.*")
 
 set(require-in-out-decorators-test-template [=[
-#include <sting>
+#include <string>
 
 void fn(std::string &out);
+]=])
+
+set(require-borrowed-ptr-decorator-pass-regex ".*explicitly decorated.*")
+
+set(require-borrowed-ptr-decorator-test-template [=[
+#include <string>
+
+void fn(std::string *out);
 ]=])
 
 set(clang-tidy-test-cases
@@ -45,7 +53,8 @@ set(clang-tidy-test-cases
 
   "multiple-boolean-parameters" "bools" "" ""
 
-  "require-in-out-decorators" "string" "" ""
+  "require-in-out-decorators"      "string" "" ""
+  "require-borrowed-ptr-decorator" "string" "" ""
 )
 
 while(clang-tidy-test-cases)

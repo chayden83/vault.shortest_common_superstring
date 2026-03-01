@@ -10,6 +10,7 @@ add_library(vault-tidy-plugin SHARED
   pass-by-small-value-check.cpp
   multiple-bool-parameters-check.cpp
   require-in-out-decorators-check.cpp
+  require-borrowed-ptr-decorator-check.cpp
   vault-tidy-module.cpp
 )
 
