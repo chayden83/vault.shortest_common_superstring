@@ -100,18 +100,30 @@ namespace custom_tidy_checks {
             return false;
           }
 
-          auto const name = record->getQualifiedNameAsString();
-          if (std::ranges::find(exempted_types_, name) != exempted_types_.end()) {
+          // 1. Check the exact instantiated name (e.g., "my_namespace::my_special_class")
+          auto const exact_name = record->getQualifiedNameAsString();
+          if (std::ranges::find(exempted_types_, exact_name) != exempted_types_.end()) {
             return true;
           }
 
+          // 2. Check the base template name (e.g., "std::basic_ostream" or "std::vector")
+          if (auto const* spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record)) {
+            if (auto const* template_decl =
+                  static_cast<clang::ClassTemplateDecl const*>(spec->getSpecializedTemplate())) {
+              auto const template_name = template_decl->getQualifiedNameAsString();
+              if (std::ranges::find(exempted_types_, template_name) != exempted_types_.end()) {
+                return true;
+              }
+            }
+          }
+
+          // If the type is just a forward declaration, we cannot query its base classes.
           if (!record->hasDefinition()) {
             return false;
           }
 
           auto const* definition = static_cast<clang::CXXRecordDecl const*>(record->getDefinition());
           for (auto const& base : definition->bases()) {
-            // --- BASE CLASS DESUGARING ---
             // Ensure inherited types are also strictly canonicalized.
             auto const  canonical_base = base.getType().getCanonicalType();
             auto const* base_record    = static_cast<clang::CXXRecordDecl const*>(canonical_base->getAsCXXRecordDecl());
