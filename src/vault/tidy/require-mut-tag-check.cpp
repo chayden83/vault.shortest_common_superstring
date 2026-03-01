@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 
 #include <clang/AST/ASTContext.h>
@@ -8,7 +9,22 @@
 namespace custom_tidy_checks {
 
   require_mut_tag_check::require_mut_tag_check(llvm::StringRef name, clang::tidy::ClangTidyContext* context)
-    : clang::tidy::ClangTidyCheck(name, context) {}
+    : clang::tidy::ClangTidyCheck(name, context)
+    , exempted_types_raw_{Options.get("ExemptedTypes", "std::basic_ostream;std::basic_istream")} {
+    auto split_start = size_t{0};
+    auto split_end   = exempted_types_raw_.find(';');
+
+    while (split_end != std::string::npos) {
+      exempted_types_.push_back(exempted_types_raw_.substr(split_start, split_end - split_start));
+      split_start = split_end + 1;
+      split_end   = exempted_types_raw_.find(';', split_start);
+    }
+    exempted_types_.push_back(exempted_types_raw_.substr(split_start));
+  }
+
+  void require_mut_tag_check::storeOptions(clang::tidy::ClangTidyOptions::OptionMap& opts) {
+    Options.store(opts, "ExemptedTypes", exempted_types_raw_);
+  }
 
   [[nodiscard]] bool require_mut_tag_check::isLanguageVersionSupported(clang::LangOptions const& lang_opts) const {
     return lang_opts.CPlusPlus11;
@@ -28,24 +44,21 @@ namespace custom_tidy_checks {
     assert(result.Context != nullptr && "ASTContext must not be null");
     assert(result.SourceManager != nullptr && "SourceManager must not be null");
 
-    // Rely on implicit type deduction for the pointer return type.
-    auto const* call = result.Nodes.getNodeAs<clang::CallExpr>("func_call");
+    auto const* call = static_cast<clang::CallExpr const*>(result.Nodes.getNodeAs<clang::CallExpr>("func_call"));
     if (call == nullptr) {
       return;
     }
 
-    auto const* callee = call->getDirectCallee();
+    auto const* callee = static_cast<clang::FunctionDecl const*>(call->getDirectCallee());
     if (callee == nullptr) {
       return;
     }
 
-    // Short-circuit to prevent infinite recursion on mut() itself.
     auto const target_name = callee->getQualifiedNameAsString();
     if (target_name == "vault::mut" || target_name == "abyss::mut") {
       return;
     }
 
-    // Exclude overloaded operators (e.g., operator<<, operator=).
     if (callee->isOverloadedOperator()) {
       return;
     }
@@ -58,40 +71,71 @@ namespace custom_tidy_checks {
         break;
       }
 
-      auto const* param = callee->getParamDecl(i);
+      auto const* param = static_cast<clang::ParmVarDecl const*>(callee->getParamDecl(i));
       if (param == nullptr) {
         continue;
       }
 
       auto const param_type = param->getType();
 
-      // 1. Check if the parameter is an lvalue reference.
       if (!param_type->isLValueReferenceType()) {
         continue;
       }
 
-      // 2. Check if the underlying type is non-const.
-      auto const pointee_type = param_type.getNonReferenceType();
-      if (pointee_type.isConstQualified()) {
+      // --- EXPLICIT ALIAS DESUGARING ---
+      // Strip the reference, then forcefully resolve all typedefs/using
+      // declarations to get the raw foundational type.
+      auto const pointee_type      = param_type.getNonReferenceType();
+      auto const canonical_pointee = pointee_type.getCanonicalType();
+
+      if (canonical_pointee.isConstQualified()) {
         continue;
       }
 
-      // 3. Exclude standard stream parameters.
-      auto const* record_decl = pointee_type->getAsCXXRecordDecl();
+      auto const* record_decl = static_cast<clang::CXXRecordDecl const*>(canonical_pointee->getAsCXXRecordDecl());
       if (record_decl != nullptr) {
-        auto const name = record_decl->getQualifiedNameAsString();
-        if (name == "std::basic_ostream" || name == "std::basic_istream") {
+
+        auto const is_exempt = [&](this auto const& self, clang::CXXRecordDecl const* record) -> bool {
+          if (record == nullptr) {
+            return false;
+          }
+
+          auto const name = record->getQualifiedNameAsString();
+          if (std::ranges::find(exempted_types_, name) != exempted_types_.end()) {
+            return true;
+          }
+
+          if (!record->hasDefinition()) {
+            return false;
+          }
+
+          auto const* definition = static_cast<clang::CXXRecordDecl const*>(record->getDefinition());
+          for (auto const& base : definition->bases()) {
+            // --- BASE CLASS DESUGARING ---
+            // Ensure inherited types are also strictly canonicalized.
+            auto const  canonical_base = base.getType().getCanonicalType();
+            auto const* base_record    = static_cast<clang::CXXRecordDecl const*>(canonical_base->getAsCXXRecordDecl());
+
+            if (self(base_record)) {
+              return true;
+            }
+          }
+
+          return false;
+        };
+
+        if (is_exempt(record_decl)) {
           continue;
         }
       }
 
-      auto const* arg         = call->getArg(i)->IgnoreParenImpCasts();
+      auto const* arg         = static_cast<clang::Expr const*>(call->getArg(i)->IgnoreParenImpCasts());
       auto        has_mut_tag = false;
 
       if (auto const* arg_call = llvm::dyn_cast<clang::CallExpr>(arg)) {
-        if (auto const* arg_callee = arg_call->getDirectCallee()) {
+        if (auto const* arg_callee = static_cast<clang::FunctionDecl const*>(arg_call->getDirectCallee())) {
           auto const callee_name = arg_callee->getQualifiedNameAsString();
-          if (callee_name == "vault::mut") {
+          if (callee_name == "vault::mut" || callee_name == "abyss::mut") {
             has_mut_tag = true;
           }
         }
@@ -109,5 +153,4 @@ namespace custom_tidy_checks {
       }
     }
   }
-
 } // namespace custom_tidy_checks
