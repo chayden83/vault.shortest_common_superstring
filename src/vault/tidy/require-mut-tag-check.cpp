@@ -42,7 +42,7 @@ namespace custom_tidy_checks {
     // If the function being called is mut itself, short-circuit immediately.
     // getQualifiedNameAsString() reliably resolves ADL and omitted namespaces.
     auto const target_name = std::string{callee->getQualifiedNameAsString()};
-    if (target_name == "vault::mut" || target_name == "abyss::mut") {
+    if (target_name == "vault::mut") {
       return;
     }
 
