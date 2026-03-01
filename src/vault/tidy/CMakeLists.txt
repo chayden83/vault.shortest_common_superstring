@@ -1,7 +1,7 @@
 find_package(zstd  REQUIRED)
 find_package(Clang REQUIRED)
 
-add_library(vault-tidy-plugin MODULE
+add_library(vault-tidy-plugin SHARED
   pointer-chasing-type-check.cpp
   vault-tidy-module.cpp
 )

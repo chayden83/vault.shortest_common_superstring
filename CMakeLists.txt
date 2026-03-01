@@ -37,6 +37,7 @@ if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
   add_subdirectory(tests/vault/map_view)
   add_subdirectory(tests/vault/allocators)
   add_subdirectory(tests/vault/unroll)
+  add_subdirectory(tests/vault/tidy)
 endif()
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_EXAMPLES)

@@ -21,16 +21,17 @@ namespace custom_tidy_checks {
 
     // Match any TypeLoc that references one of the prohibited container types.
     // We bind it to the ID "pointer_chasing_type" for retrieval in the check callback.
-    auto const prohibited_type_matcher = typeLoc(
-        loc(qualType(hasDeclaration(cxxRecordDecl(hasAnyName(
-            "::std::map",
-            "::std::set",
-            "::std::list",
-            "::std::forward_list",
-            "::std::unordered_map",
-            "::std::unordered_set"
-        )))))
-    ).bind("pointer_chasing_type");
+    auto const prohibited_type_matcher = typeLoc(loc(qualType(hasDeclaration(cxxRecordDecl(hasAnyName(
+                                                   "::std::map",
+                                                   "::std::set",
+                                                   "::std::list",
+                                                   "::std::forward_list",
+                                                   "::std::unordered_map",
+                                                   "::std::unordered_set",
+                                                   "::boost::unordered_map",
+                                                   "::boost::unordered_set"
+                                                 ))))))
+                                           .bind("pointer_chasing_type");
 
     finder->addMatcher(prohibited_type_matcher, this);
   }
