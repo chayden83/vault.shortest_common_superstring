@@ -3,6 +3,8 @@ find_package(Clang REQUIRED)
 
 add_library(vault-tidy-plugin SHARED
   pointer-chasing-type-check.cpp
+  smart-ptr-observation-check.cpp
+  use-view-types-check.cpp
   vault-tidy-module.cpp
 )
 
