@@ -59,7 +59,9 @@ namespace custom_tidy_checks {
       return;
     }
 
-    if (callee->isOverloadedOperator()) {
+    // Exclude overloaded operators (e.g., operator<<, operator=)
+    // BUT explicitly evaluate operator() so lambdas and functors are checked.
+    if (callee->isOverloadedOperator() && callee->getOverloadedOperator() != clang::OO_Call) {
       return;
     }
 
@@ -82,9 +84,23 @@ namespace custom_tidy_checks {
         continue;
       }
 
-      // --- EXPLICIT ALIAS DESUGARING ---
-      // Strip the reference, then forcefully resolve all typedefs/using
-      // declarations to get the raw foundational type.
+      // --- 1. DEFAULT ARGUMENT GUARD ---
+      auto const* raw_arg = call->getArg(i);
+      if (llvm::isa<clang::CXXDefaultArgExpr>(raw_arg)) {
+        continue;
+      }
+
+      // --- 2. PERFECT FORWARDING GUARD ---
+      if (auto const* pattern = callee->getTemplateInstantiationPattern()) {
+        if (i < pattern->getNumParams()) {
+          auto const* pattern_param = static_cast<clang::ParmVarDecl const*>(pattern->getParamDecl(i));
+          if (pattern_param->getType()->isRValueReferenceType()) {
+            continue;
+          }
+        }
+      }
+
+      // --- 3. EXPLICIT ALIAS DESUGARING ---
       auto const pointee_type      = param_type.getNonReferenceType();
       auto const canonical_pointee = pointee_type.getCanonicalType();
 
@@ -95,18 +111,17 @@ namespace custom_tidy_checks {
       auto const* record_decl = static_cast<clang::CXXRecordDecl const*>(canonical_pointee->getAsCXXRecordDecl());
       if (record_decl != nullptr) {
 
+        // --- C++23 RECURSIVE BASE CLASS SEARCH ---
         auto const is_exempt = [&](this auto const& self, clang::CXXRecordDecl const* record) -> bool {
           if (record == nullptr) {
             return false;
           }
 
-          // 1. Check the exact instantiated name (e.g., "my_namespace::my_special_class")
           auto const exact_name = record->getQualifiedNameAsString();
           if (std::ranges::find(exempted_types_, exact_name) != exempted_types_.end()) {
             return true;
           }
 
-          // 2. Check the base template name (e.g., "std::basic_ostream" or "std::vector")
           if (auto const* spec = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record)) {
             if (auto const* template_decl =
                   static_cast<clang::ClassTemplateDecl const*>(spec->getSpecializedTemplate())) {
@@ -117,14 +132,12 @@ namespace custom_tidy_checks {
             }
           }
 
-          // If the type is just a forward declaration, we cannot query its base classes.
           if (!record->hasDefinition()) {
             return false;
           }
 
           auto const* definition = static_cast<clang::CXXRecordDecl const*>(record->getDefinition());
           for (auto const& base : definition->bases()) {
-            // Ensure inherited types are also strictly canonicalized.
             auto const  canonical_base = base.getType().getCanonicalType();
             auto const* base_record    = static_cast<clang::CXXRecordDecl const*>(canonical_base->getAsCXXRecordDecl());
 
@@ -141,7 +154,7 @@ namespace custom_tidy_checks {
         }
       }
 
-      auto const* arg         = static_cast<clang::Expr const*>(call->getArg(i)->IgnoreParenImpCasts());
+      auto const* arg         = static_cast<clang::Expr const*>(raw_arg->IgnoreParenImpCasts());
       auto        has_mut_tag = false;
 
       if (auto const* arg_call = llvm::dyn_cast<clang::CallExpr>(arg)) {
@@ -165,4 +178,5 @@ namespace custom_tidy_checks {
       }
     }
   }
+
 } // namespace custom_tidy_checks
