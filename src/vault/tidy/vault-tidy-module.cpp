@@ -3,6 +3,9 @@
 
 #include "pointer-chasing-type-check.hpp"
 #include "use-view-types-check.hpp"
+#include "pass-by-small-value-check.hpp"
+#include "callable-observation-check.hpp"
+#include "prefer-array-over-vector-check.hpp"
 
 namespace custom_tidy_checks {
 
@@ -21,6 +24,9 @@ namespace custom_tidy_checks {
       // Future checks can be added here by duplicating this call with new types.
       check_factories.registerCheck<pointer_chasing_type_check>("vault-pointer-chasing-type");
       check_factories.registerCheck<use_view_types_check>("vault-use-view-types");
+      check_factories.registerCheck<pass_small_by_value_check>("vault-pass-by-small-value");
+      check_factories.registerCheck<callable_observation_check>("vault-callable-observation");
+      check_factories.registerCheck<prefer_array_over_vector_check>("vault-prefer-array-over-vector");
     }
   };
 } // namespace custom_tidy_checks

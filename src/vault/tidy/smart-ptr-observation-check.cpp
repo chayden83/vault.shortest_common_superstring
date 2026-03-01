@@ -20,12 +20,17 @@ namespace custom_tidy_checks {
 
     using namespace clang::ast_matchers;
 
-    auto const smart_ptr_matcher =
-      parmVarDecl(hasType(references(qualType(
-                    isConstQualified(),
-                    hasDeclaration(cxxRecordDecl(hasAnyName("::std::unique_ptr", "::std::shared_ptr")))
-                  ))))
-        .bind("smart_ptr_param");
+    auto const smart_ptr_matcher = parmVarDecl(hasType(references(qualType(
+                                                 isConstQualified(),
+                                                 hasDeclaration(cxxRecordDecl(hasAnyName(
+                                                   "::std::unique_ptr",
+                                                   "::std::shared_ptr",
+                                                   "::boost::scoped_ptr",
+                                                   "::boost::shared_ptr",
+                                                   "::boost::local_shared_ptr"
+                                                 )))
+                                               ))))
+                                     .bind("smart_ptr_param");
 
     finder->addMatcher(smart_ptr_matcher, this);
   }

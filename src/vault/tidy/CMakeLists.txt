@@ -5,6 +5,9 @@ add_library(vault-tidy-plugin SHARED
   pointer-chasing-type-check.cpp
   smart-ptr-observation-check.cpp
   use-view-types-check.cpp
+  prefer-array-over-vector-check.cpp
+  callable-observation-check.cpp
+  pass-by-small-value-check.cpp
   vault-tidy-module.cpp
 )
 
