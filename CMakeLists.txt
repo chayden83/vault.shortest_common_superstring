@@ -25,6 +25,7 @@ add_subdirectory(src/vault/flatbuffers)
 add_subdirectory(src/vault/map_view)
 add_subdirectory(src/vault/allocators)
 add_subdirectory(src/vault/unroll)
+add_subdirectory(src/vault/tidy)
 
 if(VAULT_SHORTEST_COMMON_SUPERSTRING_BUILD_TESTS)
   add_subdirectory(tests/vault/flat_map)
