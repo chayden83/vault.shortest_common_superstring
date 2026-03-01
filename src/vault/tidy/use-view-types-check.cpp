@@ -19,11 +19,15 @@ namespace custom_tidy_checks {
 
     using namespace clang::ast_matchers;
 
+    // We use hasCanonicalType to strip away typedef sugar (like std::string)
+    // and match directly against the underlying basic_string CXXRecordDecl.
     auto const view_target_matcher =
-      parmVarDecl(hasType(references(qualType(
-                    isConstQualified(),
-                    hasDeclaration(cxxRecordDecl(hasAnyName("::std::basic_string", "::std::vector")))
-                  ))))
+      parmVarDecl(
+        hasType(references(qualType(
+          isConstQualified(),
+          hasCanonicalType(qualType(hasDeclaration(cxxRecordDecl(hasAnyName("::std::basic_string", "::std::vector")))))
+        )))
+      )
         .bind("view_param");
 
     finder->addMatcher(view_target_matcher, this);

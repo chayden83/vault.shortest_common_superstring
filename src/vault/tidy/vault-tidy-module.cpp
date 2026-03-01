@@ -2,6 +2,7 @@
 #include <clang-tidy/ClangTidyModuleRegistry.h>
 
 #include "pointer-chasing-type-check.hpp"
+#include "use-view-types-check.hpp"
 
 namespace custom_tidy_checks {
 
@@ -19,6 +20,7 @@ namespace custom_tidy_checks {
       // Register the pointer chasing check under the "vault-" prefix.
       // Future checks can be added here by duplicating this call with new types.
       check_factories.registerCheck<pointer_chasing_type_check>("vault-pointer-chasing-type");
+      check_factories.registerCheck<use_view_types_check>("vault-use-view-types");
     }
   };
 } // namespace custom_tidy_checks
