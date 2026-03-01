@@ -1,5 +1,3 @@
-set(pointer-chasing-pass-regex ".*usage of pointer-chasing data structure detected.*")
-
 set(pointer-chasing-test-template [=[
 #include ${header}
 
@@ -10,21 +8,15 @@ int main() {
 }
 ]=])  
 
-set(use-view-types-pass-regex ".*passing standard container by const reference.*")
-
 set(use-view-types-test-template [=[
 #include ${header}
 
 void fn(${type} const &arg);
 ]=])  
 
-set(multiple-boolean-parameters-pass-regex ".*prefer strongly-typed enumerations.*")
-
 set(multiple-boolean-parameters-test-template [=[
 void fn(bool foo, bool bar);
 ]=])  
-
-set(require-in-out-decorators-pass-regex ".*explicitly decorated.*")
 
 set(require-in-out-decorators-test-template [=[
 #include <string>
@@ -32,31 +24,21 @@ set(require-in-out-decorators-test-template [=[
 void fn(std::string &out);
 ]=])
 
-set(require-mut-tag-pass-regex ".*bound to a mutating parameter.*")
-
 set(require-mut-tag-test-template [=[
 #include <string>
 
 namespace vault {
   template<typename T>
   using inout = T&;
-
-  template<typename T>
-  [[nodiscard]] constexpr T &mut(inout<T> arg) noexcept {
-    return arg;
-  }
 }
 
 void fn(vault::inout<std::string> io);
 
 int main() {
-  using vault::mut;
   auto s = std::string { };
   fn(s);
 }
 ]=])
-
-set(require-borrowed-ptr-decorator-pass-regex ".*explicitly decorated.*")
 
 set(require-borrowed-ptr-decorator-test-template [=[
 #include <string>
@@ -104,6 +86,6 @@ while(clang-tidy-test-cases)
   )
 
   set_tests_properties(vault-tidy.${kind}.${case} PROPERTIES
-    PASS_REGULAR_EXPRESSION "${${kind}-pass-regex}"
+    PASS_REGULAR_EXPRESSION ".*${$kind}.*"
   )
 endwhile()

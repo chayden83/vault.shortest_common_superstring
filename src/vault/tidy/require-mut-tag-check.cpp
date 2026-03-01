@@ -1,5 +1,5 @@
 #include <cassert>
-#include <string>
+
 #include <clang/AST/ASTContext.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 
@@ -28,79 +28,69 @@ namespace custom_tidy_checks {
     assert(result.Context != nullptr && "ASTContext must not be null");
     assert(result.SourceManager != nullptr && "SourceManager must not be null");
 
-    auto const* call = static_cast<clang::CallExpr const*>(result.Nodes.getNodeAs<clang::CallExpr>("func_call"));
+    // Rely on implicit type deduction for the pointer return type.
+    auto const* call = result.Nodes.getNodeAs<clang::CallExpr>("func_call");
     if (call == nullptr) {
       return;
     }
 
-    auto const* callee = static_cast<clang::FunctionDecl const*>(call->getDirectCallee());
+    auto const* callee = call->getDirectCallee();
     if (callee == nullptr) {
       return;
     }
 
-    // --- BREAK THE INFINITE LOOP ---
-    // If the function being called is mut itself, short-circuit immediately.
-    // getQualifiedNameAsString() reliably resolves ADL and omitted namespaces.
-    auto const target_name = std::string{callee->getQualifiedNameAsString()};
-    if (target_name == "vault::mut") {
+    // Short-circuit to prevent infinite recursion on mut() itself.
+    auto const target_name = callee->getQualifiedNameAsString();
+    if (target_name == "vault::mut" || target_name == "abyss::mut") {
       return;
     }
 
-    auto const num_args   = unsigned{call->getNumArgs()};
-    auto const num_params = unsigned{callee->getNumParams()};
+    // Exclude overloaded operators (e.g., operator<<, operator=).
+    if (callee->isOverloadedOperator()) {
+      return;
+    }
 
-    for (auto i = unsigned{0}; i < num_args; ++i) {
+    auto const num_args   = static_cast<unsigned>(call->getNumArgs());
+    auto const num_params = static_cast<unsigned>(callee->getNumParams());
+
+    for (auto i = 0U; i < num_args; ++i) {
       if (i >= num_params) {
         break;
       }
 
-      auto const* param = static_cast<clang::ParmVarDecl const *>(callee->getParamDecl(i));
+      auto const* param = callee->getParamDecl(i);
       if (param == nullptr) {
         continue;
       }
 
-      // --- ROBUST TYPE INSPECTION ---
-      auto has_decorator = bool{false};
-      auto current_type  = clang::QualType{param->getType()};
+      auto const param_type = param->getType();
 
-      while (!current_type.isNull()) {
-        if (auto const* typedef_type = current_type->getAs<clang::TypedefType>()) {
-          auto const name = std::string{typedef_type->getDecl()->getQualifiedNameAsString()};
-          if (name == "vault::out" || name == "vault::inout" || name == "abyss::out" || name == "abyss::inout") {
-            has_decorator = true;
-            break;
-          }
-        } else if (auto const* tst = current_type->getAs<clang::TemplateSpecializationType>()) {
-          if (tst->isTypeAlias()) {
-            auto const* template_decl = tst->getTemplateName().getAsTemplateDecl();
-            if (template_decl != nullptr) {
-              auto const name = std::string{template_decl->getQualifiedNameAsString()};
-              if (name == "vault::out" || name == "vault::inout" || name == "abyss::out" || name == "abyss::inout") {
-                has_decorator = true;
-                break;
-              }
-            }
-          }
-        }
-
-        auto const desugared_type = clang::QualType{current_type.getSingleStepDesugaredType(*result.Context)};
-        if (desugared_type == current_type) {
-          break;
-        }
-        current_type = desugared_type;
-      }
-
-      if (!has_decorator) {
+      // 1. Check if the parameter is an lvalue reference.
+      if (!param_type->isLValueReferenceType()) {
         continue;
       }
 
-      // --- ARGUMENT VALIDATION ---
-      auto const* arg         = static_cast<clang::Expr const *>(call->getArg(i)->IgnoreParenImpCasts());
-      auto        has_mut_tag = bool{false};
+      // 2. Check if the underlying type is non-const.
+      auto const pointee_type = param_type.getNonReferenceType();
+      if (pointee_type.isConstQualified()) {
+        continue;
+      }
+
+      // 3. Exclude standard stream parameters.
+      auto const* record_decl = pointee_type->getAsCXXRecordDecl();
+      if (record_decl != nullptr) {
+        auto const name = record_decl->getQualifiedNameAsString();
+        if (name == "std::basic_ostream" || name == "std::basic_istream") {
+          continue;
+        }
+      }
+
+      auto const* arg         = call->getArg(i)->IgnoreParenImpCasts();
+      auto        has_mut_tag = false;
 
       if (auto const* arg_call = llvm::dyn_cast<clang::CallExpr>(arg)) {
         if (auto const* arg_callee = arg_call->getDirectCallee()) {
-          auto const callee_name = std::string{arg_callee->getQualifiedNameAsString()};
+          auto const callee_name = arg_callee->getQualifiedNameAsString();
           if (callee_name == "vault::mut" || callee_name == "abyss::mut") {
             has_mut_tag = true;
           }
@@ -108,12 +98,12 @@ namespace custom_tidy_checks {
       }
 
       if (!has_mut_tag) {
-        auto const source_location = clang::SourceLocation{arg->getBeginLoc()};
+        auto const source_location = arg->getBeginLoc();
         if (!result.SourceManager->isInSystemHeader(source_location)) {
           diag(
             source_location,
-            "argument bound to a mutating parameter must be explicitly wrapped in mut() at the call site to clarify "
-            "mutation semantics"
+            "argument bound to a non-const lvalue reference parameter must be explicitly wrapped in mut() at the call "
+            "site to clarify mutation semantics"
           );
         }
       }
