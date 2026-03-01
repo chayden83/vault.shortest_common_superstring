@@ -26,8 +26,8 @@ set(clang-tidy-test-cases
   "pointer-chasing"  "std-unordered-map"  "<unordered_map>"  "std::unordered_map<int, int>"
   "pointer-chasing"  "std-unordered-set"  "<unordered_set>"  "std::unordered_set<int>"
 
-  "use-view-types" "std-string" "<string>" "std::string"
-  "use-view-types" "std-vector" "<vector>" "std::vector<int>"
+  "use-view-types"  "std-string"  "<string>"  "std::string"
+  "use-view-types"  "std-vector"  "<vector>"  "std::vector<int>"
 )
 
 while(clang-tidy-test-cases)
