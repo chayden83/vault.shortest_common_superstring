@@ -55,7 +55,7 @@ namespace custom_tidy_checks {
     }
 
     auto const target_name = callee->getQualifiedNameAsString();
-    if (target_name == "vault::mut" || target_name == "abyss::mut") {
+    if (target_name == "vault::mut") {
       return;
     }
 
