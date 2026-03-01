@@ -9,6 +9,7 @@ add_library(vault-tidy-plugin SHARED
   callable-observation-check.cpp
   pass-by-small-value-check.cpp
   multiple-bool-parameters-check.cpp
+  require-in-out-decorators-check.cpp
   vault-tidy-module.cpp
 )
 

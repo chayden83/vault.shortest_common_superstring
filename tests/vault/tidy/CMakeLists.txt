@@ -24,6 +24,14 @@ set(multiple-boolean-parameters-test-template [=[
 void fn(bool foo, bool bar);
 ]=])  
 
+set(require-in-out-decorators-pass-regex ".*explicitly decorated.*")
+
+set(require-in-out-decorators-test-template [=[
+#include <sting>
+
+void fn(std::string &out);
+]=])
+
 set(clang-tidy-test-cases
   "pointer-chasing"  "std-set"            "<set>"            "std::set<int>"
   "pointer-chasing"  "std-map"            "<map>"            "std::map<int, int>"
@@ -36,6 +44,8 @@ set(clang-tidy-test-cases
   "use-view-types"  "std-vector"  "<vector>"  "std::vector<int>"
 
   "multiple-boolean-parameters" "bools" "" ""
+
+  "require-in-out-decorators" "string" "" ""
 )
 
 while(clang-tidy-test-cases)

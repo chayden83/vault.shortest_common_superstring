@@ -1,13 +1,14 @@
 #include <clang-tidy/ClangTidyModule.h>
 #include <clang-tidy/ClangTidyModuleRegistry.h>
 
-#include "pointer-chasing-type-check.hpp"
-#include "use-view-types-check.hpp"
-#include "smart-ptr-observation-check.hpp"
-#include "pass-by-small-value-check.hpp"
 #include "callable-observation-check.hpp"
-#include "prefer-array-over-vector-check.hpp"
 #include "multiple-bool-parameters-check.hpp"
+#include "pass-by-small-value-check.hpp"
+#include "pointer-chasing-type-check.hpp"
+#include "prefer-array-over-vector-check.hpp"
+#include "require-in-out-decorators-check.hpp"
+#include "smart-ptr-observation-check.hpp"
+#include "use-view-types-check.hpp"
 
 namespace custom_tidy_checks {
 
@@ -31,6 +32,7 @@ namespace custom_tidy_checks {
       check_factories.registerCheck<prefer_array_over_vector_check>("vault-prefer-array-over-vector");
       check_factories.registerCheck<multiple_bool_parameters_check>("vault-multiple-bool-parameters");
       check_factories.registerCheck<smart_ptr_observation_check>("vault-smart-pointer-observation");
+      check_factories.registerCheck<require_out_inout_decorators_check>("vault-require-in-out-decorators");
     }
   };
 } // namespace custom_tidy_checks
