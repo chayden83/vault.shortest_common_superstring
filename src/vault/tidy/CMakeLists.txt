@@ -8,6 +8,7 @@ add_library(vault-tidy-plugin SHARED
   prefer-array-over-vector-check.cpp
   callable-observation-check.cpp
   pass-by-small-value-check.cpp
+  multiple-bool-parameters-check.cpp
   vault-tidy-module.cpp
 )
 

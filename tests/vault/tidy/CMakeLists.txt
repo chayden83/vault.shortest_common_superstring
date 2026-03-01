@@ -18,6 +18,12 @@ set(use-view-types-test-template [=[
 void fn(${type} const &arg);
 ]=])  
 
+set(multiple-boolean-parameters-pass-regex ".*prefer strongly-typed enumerations.*")
+
+set(multiple-boolean-parameters-test-template [=[
+void fn(bool foo, bool bar);
+]=])  
+
 set(clang-tidy-test-cases
   "pointer-chasing"  "std-set"            "<set>"            "std::set<int>"
   "pointer-chasing"  "std-map"            "<map>"            "std::map<int, int>"
@@ -28,6 +34,8 @@ set(clang-tidy-test-cases
 
   "use-view-types"  "std-string"  "<string>"  "std::string"
   "use-view-types"  "std-vector"  "<vector>"  "std::vector<int>"
+
+  "multiple-boolean-parameters" "bools" "" ""
 )
 
 while(clang-tidy-test-cases)
