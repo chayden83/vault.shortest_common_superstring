@@ -20,6 +20,7 @@ set(ALL_BENCHMARKS
   segmented_vector
   shortest_common_superstring
   unroll
+  proxy_sort
 )
 
 message(STATUS "${PROJECT_NAME}: Benchmarks to be built: ${ALL_BENCHMARKS}")
