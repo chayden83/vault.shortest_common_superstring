@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cassert>
-#include <iterator>
 
 #include <vault/frozen_vector/frozen_vector_builder.hpp>
 #include <vault/string_arena/string_arena.hpp>
@@ -12,23 +11,30 @@ namespace vault::arena {
     assert(chars_source && "The character source function must not be empty.");
 
     // Internal metadata to track string extents prior to final allocation.
+    // Utilizes a union to save 8 bytes per element, as strings are exclusively
+    // either inline or indirect.
     struct pending_string_info {
       std::size_t size;
-      std::size_t offset;
-      char        inline_data[max_inline_size];
+
+      union {
+        std::size_t offset;
+        char        inline_data[max_inline_size];
+      };
     };
 
     auto temp_buffer     = frozen::frozen_vector_builder<char>{};
     auto pending_strings = std::vector<pending_string_info>{};
 
     auto sink_impl = [&temp_buffer, &pending_strings](std::span<char const> chars) {
-      auto pending = pending_string_info{chars.size(), 0, {}};
+      // Use designated initializers for structural clarity.
+      auto pending = pending_string_info{.size = chars.size()};
 
       if (chars.size() <= max_inline_size) {
         std::copy(chars.begin(), chars.end(), pending.inline_data);
       } else {
         pending.offset = temp_buffer.size();
 
+        // Reverted to element-wise push_back.
         for (auto c : chars) {
           temp_buffer.push_back(c);
         }
